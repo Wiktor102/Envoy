@@ -1,0 +1,26 @@
+<div class="tabs" role="tablist" aria-label="Chats sidebar">
+	<button type="button" role="tab" id="chats-tab" aria-selected="true">Chats</button>
+	<button type="button" role="tab" id="envoy-tab" aria-selected="false" aria-controls="envoy-panel">Envoy</button>
+</div>
+<div id="envoy-panel" role="tabpanel" aria-labelledby="envoy-tab" hidden>
+	<section aria-labelledby="envoy-goal-title">
+		<h2 id="envoy-goal-title">Envoy goal setup</h2>
+		<p>Placeholder only. Chat automation is not implemented.</p>
+		<label for="envoy-goal">Goal</label>
+		<textarea id="envoy-goal" placeholder="Your goal will go here" disabled></textarea>
+		<button type="button" disabled>Start task</button>
+	</section>
+	<section aria-labelledby="envoy-controls-title">
+		<h2 id="envoy-controls-title">Agent controls</h2>
+		<p>Inactive. Reply delay: <span id="envoy-reply-delay"></span>s. No countdown is running.</p>
+		<div class="controls">
+			<button type="button" disabled>Send now</button>
+			<button type="button" disabled>Edit</button>
+			<button type="button" disabled>Cancel</button>
+			<button type="button" disabled>Pause</button>
+			<button type="button" disabled>Take over</button>
+		</div>
+		<button type="button" id="envoy-health">Check backend health</button>
+		<p id="envoy-status" role="status">Backend not checked.</p>
+	</section>
+</div>

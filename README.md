@@ -10,7 +10,7 @@ The hackathon version handles one text conversation and one goal at a time, with
 
 ## Scaffold status
 
-The code is a compileable foundation only. The backend exposes one tRPC `health` query over WebSocket. The extension mounts a small goal setup window and agent controls inside Messenger using Shadow DOM. There is no toolbar popup or separate browser window.
+The code is a compileable foundation only. The backend exposes one tRPC `health` query over WebSocket. The extension adds an Envoy tab to the chats sidebar with goal setup and agent controls using Shadow DOM. There is no toolbar popup or separate browser window.
 
 Only the backend health button works. Goal setup and task controls are disabled. Messenger access, sending, countdowns, task lifecycle, persistence, agent reasoning, Meta API calls, and authentication are TODOs. No messages are read or sent, and no API keys are needed.
 
@@ -59,7 +59,7 @@ If a local certificate proxy causes dependency downloads to fail, configure Node
 
 ## Load the extension
 
-After `pnpm build`, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `apps/extension/.output/chrome-mv3`. Open or reload `https://www.messenger.com/` or a `https://www.facebook.com/messages/` page to see the injected placeholders. If the extension is already loaded, reload it in `chrome://extensions` first. Reload the chat page after navigating to it from elsewhere on Facebook. With the backend running, **Check backend health** checks the content script to background worker to tRPC path.
+After `pnpm build`, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `apps/extension/.output/chrome-mv3`. Open or reload `https://www.messenger.com/` or a `https://www.facebook.com/messages/` page to see the Envoy tab in the chats sidebar. Select it to open the placeholders. If the extension is already loaded, reload it in `chrome://extensions` first. Reload the chat page after navigating to it from elsewhere on Facebook. With the backend running, **Check backend health** checks the content script to background worker to tRPC path.
 
 The production manifest contains only the Messenger and Facebook messages content-script matches and background worker. It requests no additional extension permissions. WXT adds development permissions for its reload tooling during `pnpm dev`.
 
