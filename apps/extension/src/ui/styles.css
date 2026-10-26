@@ -1,18 +1,8 @@
 :host {
 	all: initial;
-	position: fixed;
-	right: 16px;
-	bottom: 16px;
-	z-index: 2147483647;
 	display: block;
-	width: min(340px, calc(100vw - 32px));
-	max-height: calc(100vh - 32px);
-	overflow: auto;
-	color: #202124;
-	background: white;
-	border: 1px solid #aaa;
-	border-radius: 8px;
-	box-shadow: 0 2px 8px #0003;
+	position: relative;
+	z-index: 1000;
 	font:
 		14px/1.4 system-ui,
 		sans-serif;
@@ -21,36 +11,102 @@
 * {
 	box-sizing: border-box;
 }
+
+.tabs {
+	display: flex;
+	gap: 4px;
+	padding: 8px 12px;
+}
+
+:host([data-facebook]) .tabs {
+	padding-inline: 16px;
+}
+
+.tabs button {
+	border: 0;
+	border-radius: 18px;
+	padding: 8px 12px;
+	background: transparent;
+	color: #b0b3b8;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.tabs button[aria-selected="true"] {
+	background: #263951;
+	color: #75b8ff;
+}
+
+#envoy-panel {
+	position: fixed;
+	z-index: 100;
+	overflow: auto;
+	background: #1f1f1f;
+	color: #e4e6eb;
+	border-bottom-right-radius: 8px;
+}
+
+:host([data-facebook]) #envoy-panel {
+	background: hsl(200, 4%, 15%);
+	border-bottom-right-radius: 0;
+}
+
+#envoy-panel[hidden] {
+	display: none;
+}
+
 section {
-	padding: 12px;
+	padding: 16px;
 }
 section + section {
-	border-top: 1px solid #ddd;
+	border-top: 1px solid #3e4042;
 }
+
 h2 {
 	margin: 0 0 8px;
 	font-size: 16px;
 }
+
 p {
 	margin: 8px 0;
 }
+
 label,
 textarea {
 	display: block;
 	width: 100%;
 }
+
 textarea {
 	margin: 4px 0 8px;
-	min-height: 64px;
+	min-height: 80px;
 	resize: vertical;
+	border: 1px solid #4e4f50;
+	border-radius: 6px;
+	padding: 8px;
+	background: #3a3b3c;
+	color: #e4e6eb;
 }
+
 button,
 textarea {
 	font: inherit;
 }
-button {
-	padding: 4px 8px;
+
+section button {
+	border: 0;
+	border-radius: 6px;
+	padding: 7px 10px;
+	background: #3a3b3c;
+	color: #e4e6eb;
+	cursor: pointer;
 }
+
+section button:disabled {
+	color: #a0a3a8;
+	cursor: default;
+}
+
 .controls {
 	display: flex;
 	flex-wrap: wrap;

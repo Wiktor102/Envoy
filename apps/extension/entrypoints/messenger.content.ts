@@ -10,8 +10,8 @@ export default defineContentScript({
 	],
 	runAt: "document_idle",
 	main(ctx) {
-		const host = mountEnvoyUi();
-		ctx.onInvalidated(() => host.remove());
+		const unmount = mountEnvoyUi();
+		ctx.onInvalidated(unmount);
 		// TODO: Connect the Messenger adapter once safe chat access is implemented.
 	},
 });
