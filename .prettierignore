@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.wxt/
+.output/
+coverage/
+pnpm-lock.yaml
+work/
+.env
+.env.*

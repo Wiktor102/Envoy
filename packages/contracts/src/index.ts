@@ -2,34 +2,34 @@
 export const DEFAULT_REPLY_DELAY_SECONDS = 10;
 
 export interface HealthResponse {
-  status: 'ok';
-  service: 'envoy-backend';
+	status: "ok";
+	service: "envoy-backend";
 }
 
 export interface ConversationSnapshot {
-  chatId: string;
-  revision: string;
-  messages: readonly { id: string; text: string }[];
+	chatId: string;
+	revision: string;
+	messages: readonly { id: string; text: string }[];
 }
 
 export interface SendReplyCommand {
-  commandId: string;
-  chatId: string;
-  expectedRevision: string;
-  text: string;
+	commandId: string;
+	chatId: string;
+	expectedRevision: string;
+	text: string;
 }
 
 export interface TaskState {
-  id: string;
-  chatId: string;
-  goal: string;
-  pendingReply: SendReplyCommand | null;
+	id: string;
+	chatId: string;
+	goal: string;
+	pendingReply: SendReplyCommand | null;
 }
 
 export interface HealthRequest {
-  type: 'envoy:health';
+	type: "envoy:health";
 }
 
 export type HealthReply =
-  | { ok: true; health: HealthResponse }
-  | { ok: false; error: 'backend-unavailable' };
+	| { ok: true; health: HealthResponse }
+	| { ok: false; error: "backend-unavailable" };

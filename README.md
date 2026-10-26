@@ -26,6 +26,8 @@ Run these from the repository root:
 
 ```sh
 pnpm install
+cp apps/backend/.env.example apps/backend/.env.development
+cp apps/backend/.env.example apps/backend/.env.production
 pnpm dev
 pnpm typecheck
 pnpm build
@@ -35,6 +37,8 @@ pnpm build
 
 `pnpm typecheck` builds contracts and backend declarations before checking all three workspaces. `pnpm build` builds each workspace in dependency order. Installation and extension typechecking generate the ignored `.wxt` types automatically.
 
+Run `pnpm format` to format the workspace or `pnpm format:check` to check formatting. Prettier uses tabs with a width of 4. `pnpm install` sets up the Husky pre-commit hook, which runs Prettier on staged files through lint-staged and stages the formatting changes.
+
 After a production build, start the backend and check its real WebSocket procedure in another terminal:
 
 ```sh
@@ -42,10 +46,14 @@ pnpm start:backend
 ```
 
 ```sh
-pnpm health
+pnpm health:prod
 ```
 
-The health command should print `{"status":"ok","service":"envoy-backend"}`. The scaffold binds to `ws://127.0.0.1:3001` only. Both clients use that same fixed local address. Deployment, authentication, and service-worker connection recovery remain future work.
+The health command should print `{"status":"ok","service":"envoy-backend"}`. Use `pnpm health` for the development backend.
+
+The backend loads `apps/backend/.env.development` for `dev` and `health`, and `.env.production` for `start` and `health:prod`. These local files are ignored by Git. Copy the committed `.env.example` to both files when setting up a new checkout, using `Copy-Item` in PowerShell or `cp` in a POSIX shell. Set `NODE_ENV=production` in `.env.production`. Restart the backend after changing its env file. Existing process environment variables take precedence over file values.
+
+The example sets `HOST=127.0.0.1` and `PORT=3001`. The server and health command use the configured host and port. The extension still connects to `ws://127.0.0.1:3001`, so keep those defaults when using it. API credentials, when added, belong only in the backend env files. Deployment, authentication, and service-worker connection recovery remain future work.
 
 If a local certificate proxy causes dependency downloads to fail, configure Node to trust your organization's certificate store. This workspace does not disable TLS verification.
 
@@ -57,11 +65,11 @@ The production manifest contains only the Messenger content-script matches and b
 
 ## Workspace layout
 
-| Workspace | Contents | Build output |
-| --- | --- | --- |
-| `packages/contracts` | Browser-neutral types and the default reply delay constant | `dist` ESM and declarations |
-| `apps/backend` | tRPC router/server, task service/repository interfaces, connector and agent placeholders | `dist` ESM and declarations |
-| `apps/extension` | WXT manifest config, MV3 worker, Messenger content script, DOM adapter placeholder, injected UI | `.output/chrome-mv3` |
+| Workspace            | Contents                                                                                        | Build output                |
+| -------------------- | ----------------------------------------------------------------------------------------------- | --------------------------- |
+| `packages/contracts` | Browser-neutral types and the default reply delay constant                                      | `dist` ESM and declarations |
+| `apps/backend`       | tRPC router/server, task service/repository interfaces, connector and agent placeholders        | `dist` ESM and declarations |
+| `apps/extension`     | WXT manifest config, MV3 worker, Messenger content script, DOM adapter placeholder, injected UI | `.output/chrome-mv3`        |
 
 Contracts and backend use TypeScript `NodeNext` resolution and `.js` imports for emitted Node ESM. The extension uses WXT's generated configuration and bundler resolution. Node ambient types belong to the backend; Chrome and DOM ambient types belong to the extension; contracts include neither.
 

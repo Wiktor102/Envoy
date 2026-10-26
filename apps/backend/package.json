@@ -1,29 +1,31 @@
 {
-  "name": "@envoy/backend",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "exports": {
-    "./router": {
-      "types": "./dist/router.d.ts"
-    }
-  },
-  "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "typecheck": "tsc --noEmit",
-    "build": "tsc",
-    "start": "node dist/server.js",
-    "health": "node dist/healthcheck.js"
-  },
-  "dependencies": {
-    "@envoy/contracts": "workspace:*",
-    "@trpc/server": "11.19.0",
-    "ws": "8.22.0"
-  },
-  "devDependencies": {
-    "@trpc/client": "11.19.0",
-    "@types/node": "22.20.5",
-    "@types/ws": "8.18.2",
-    "tsx": "4.23.15"
-  }
+	"name": "@envoy/backend",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		"./router": {
+			"types": "./dist/router.d.ts"
+		}
+	},
+	"scripts": {
+		"dev": "tsx watch --env-file=.env.development src/server.ts",
+		"typecheck": "tsc --noEmit",
+		"build": "tsc",
+		"start": "node --env-file=.env.production dist/server.js",
+		"health": "node --env-file=.env.development dist/healthcheck.js",
+		"health:prod": "node --env-file=.env.production dist/healthcheck.js"
+	},
+	"dependencies": {
+		"@envoy/contracts": "workspace:*",
+		"@trpc/server": "11.19.0",
+		"openai": "^7.44.0",
+		"ws": "8.22.0"
+	},
+	"devDependencies": {
+		"@trpc/client": "11.19.0",
+		"@types/node": "22.20.5",
+		"@types/ws": "8.18.2",
+		"tsx": "4.23.15"
+	}
 }

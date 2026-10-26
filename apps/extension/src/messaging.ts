@@ -1,5 +1,7 @@
-import type { HealthReply, HealthRequest } from '@envoy/contracts';
+import type { HealthReply, HealthRequest } from "@envoy/contracts";
 
 export function checkBackendHealth(): Promise<HealthReply> {
-  return chrome.runtime.sendMessage<HealthRequest, HealthReply>({ type: 'envoy:health' });
+	return chrome.runtime.sendMessage<HealthRequest, HealthReply>({
+		type: "envoy:health",
+	});
 }

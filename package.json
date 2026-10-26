@@ -1,22 +1,32 @@
 {
-  "name": "envoy",
-  "private": true,
-  "packageManager": "pnpm@10.20.0",
-  "engines": {
-    "node": ">=22.19.0",
-    "pnpm": ">=10 <11"
-  },
-  "scripts": {
-    "dev": "pnpm run build:packages && pnpm --parallel -r dev",
-    "dev:backend": "pnpm run build:packages && pnpm --filter @envoy/backend dev",
-    "dev:extension": "pnpm run build:packages && pnpm --filter @envoy/extension dev",
-    "build:packages": "pnpm --filter @envoy/contracts build && pnpm --filter @envoy/backend build",
-    "typecheck": "pnpm run build:packages && pnpm -r typecheck",
-    "build": "pnpm -r build",
-    "start:backend": "pnpm --filter @envoy/backend start",
-    "health": "pnpm --filter @envoy/backend health"
-  },
-  "devDependencies": {
-    "typescript": "7.0.2"
-  }
+	"name": "envoy",
+	"private": true,
+	"packageManager": "pnpm@10.20.0",
+	"engines": {
+		"node": ">=22.19.0",
+		"pnpm": ">=10 <11"
+	},
+	"scripts": {
+		"dev": "pnpm run build:packages && pnpm --parallel -r dev",
+		"dev:backend": "pnpm run build:packages && pnpm --filter @envoy/backend dev",
+		"dev:extension": "pnpm run build:packages && pnpm --filter @envoy/extension dev",
+		"build:packages": "pnpm --filter @envoy/contracts build && pnpm --filter @envoy/backend build",
+		"typecheck": "pnpm run build:packages && pnpm -r typecheck",
+		"build": "pnpm -r build",
+		"start:backend": "pnpm --filter @envoy/backend start",
+		"health": "pnpm --filter @envoy/backend health",
+		"health:prod": "pnpm --filter @envoy/backend health:prod",
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"prepare": "husky"
+	},
+	"lint-staged": {
+		"*": "prettier --write --ignore-unknown"
+	},
+	"devDependencies": {
+		"husky": "9.1.7",
+		"lint-staged": "16.4.0",
+		"prettier": "3.9.10",
+		"typescript": "7.0.2"
+	}
 }
