@@ -1,0 +1,14 @@
+{
+  "extends": ["../../tsconfig.base.json", "./.wxt/tsconfig.json"],
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["chrome"],
+    "noEmit": true
+  },
+  "include": [".wxt/**/*.d.ts", "entrypoints/**/*.ts", "src/**/*.ts", "wxt.config.ts"]
+}

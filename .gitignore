@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.wxt/
+.output/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example

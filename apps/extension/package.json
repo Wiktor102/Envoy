@@ -1,0 +1,21 @@
+{
+  "name": "@envoy/extension",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "wxt prepare",
+    "dev": "wxt --browser chrome",
+    "typecheck": "wxt prepare && tsc --noEmit",
+    "build": "wxt build --browser chrome"
+  },
+  "dependencies": {
+    "@envoy/contracts": "workspace:*",
+    "@trpc/client": "11.19.0"
+  },
+  "devDependencies": {
+    "@envoy/backend": "workspace:*",
+    "@types/chrome": "0.3.6",
+    "wxt": "0.21.5"
+  }
+}

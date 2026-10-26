@@ -1,0 +1,28 @@
+:host {
+  all: initial;
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483647;
+  display: block;
+  width: min(340px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  color: #202124;
+  background: white;
+  border: 1px solid #aaa;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px #0003;
+  font: 14px/1.4 system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+section { padding: 12px; }
+section + section { border-top: 1px solid #ddd; }
+h2 { margin: 0 0 8px; font-size: 16px; }
+p { margin: 8px 0; }
+label, textarea { display: block; width: 100%; }
+textarea { margin: 4px 0 8px; min-height: 64px; resize: vertical; }
+button, textarea { font: inherit; }
+button { padding: 4px 8px; }
+.controls { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
