@@ -49,6 +49,52 @@ test("reads loaded text in order, without nested duplicates or controls", async 
 	dom.window.close();
 });
 
+test("keeps the revision when identical content is rendered with new DOM nodes", async () => {
+	const firstDom = setup();
+	setMessages(fixture);
+	const original = await messengerChatAdapter.readConversation();
+	setMessages(fixture);
+	const remounted = await messengerChatAdapter.readConversation();
+	assert.notDeepEqual(
+		remounted.messages.map(({ id }) => id),
+		original.messages.map(({ id }) => id),
+	);
+	assert.equal(remounted.revision, original.revision);
+	firstDom.window.close();
+
+	const reloadedDom = setup();
+	setMessages(fixture);
+	const reloaded = await messengerChatAdapter.readConversation();
+	assert.notDeepEqual(
+		reloaded.messages.map(({ id }) => id),
+		original.messages.map(({ id }) => id),
+	);
+	assert.equal(reloaded.revision, original.revision);
+	reloadedDom.window.close();
+});
+
+test("revision reflects chat, message order, and repeated messages", async () => {
+	const dom = setup();
+	setMessages(
+		'<div data-scope="messages_table"><div role="row"><span dir="auto">A</span></div><div role="row"><span dir="auto">B</span></div></div>',
+	);
+	const original = await messengerChatAdapter.readConversation();
+	setMessages(
+		'<div data-scope="messages_table"><div role="row"><span dir="auto">B</span></div><div role="row"><span dir="auto">A</span></div></div>',
+	);
+	assert.notEqual((await messengerChatAdapter.readConversation()).revision, original.revision);
+	setMessages(
+		'<div data-scope="messages_table"><div role="row"><span dir="auto">A</span></div><div role="row"><span dir="auto">B</span></div><div role="row"><span dir="auto">B</span></div></div>',
+	);
+	assert.notEqual((await messengerChatAdapter.readConversation()).revision, original.revision);
+	setMessages(
+		'<div data-scope="messages_table"><div role="row"><span dir="auto">A</span></div><div role="row"><span dir="auto">B</span></div></div>',
+	);
+	dom.window.history.pushState({}, "", "/t/456");
+	assert.notEqual((await messengerChatAdapter.readConversation()).revision, original.revision);
+	dom.window.close();
+});
+
 // Structure based on the rendered Facebook Messenger message scopes; all content is synthetic.
 const replyAndReactionFixture = `
 	<div role="article"><div data-scope="messages_table">
@@ -88,6 +134,16 @@ test("associates quoted replies and reaction summaries with their messages", asy
 	const changed = await messengerChatAdapter.readConversation();
 	assert.equal(changed.messages[1]!.reactions[0]!.count, 2);
 	assert.notEqual(changed.revision, snapshot.revision);
+	dom.window.close();
+});
+
+test("changes the revision when a quoted reply changes", async () => {
+	const dom = setup();
+	setMessages(replyAndReactionFixture);
+	const original = await messengerChatAdapter.readConversation();
+	document.querySelector('[role="button"][aria-label*="odpowiadasz"] [dir="auto"]')!.textContent = "Different quote";
+	const changed = await messengerChatAdapter.readConversation();
+	assert.notEqual(changed.revision, original.revision);
 	dom.window.close();
 });
 
@@ -150,6 +206,20 @@ const photoFixture = `
 		<span dir="auto">Just text</span><img alt="avatar" src="https://example.test/avatar">
 		<a href="https://example.test/messenger_media/?attachment_id=4">external</a>
 	</div></div>`;
+
+test("keeps image revisions stable when the same messages are remounted", async () => {
+	const dom = setup();
+	setMessages(photoFixture);
+	const original = await messengerChatAdapter.readConversation();
+	setMessages(photoFixture);
+	const remounted = await messengerChatAdapter.readConversation();
+	assert.notDeepEqual(
+		remounted.messages.map(({ id }) => id),
+		original.messages.map(({ id }) => id),
+	);
+	assert.equal(remounted.revision, original.revision);
+	dom.window.close();
+});
 
 test("reads image URLs for image-only, mixed, and quoted messages", async () => {
 	const dom = setup();

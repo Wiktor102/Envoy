@@ -207,7 +207,14 @@ async function revisionOf(
 	messages: ConversationSnapshot["messages"],
 	imageState: string[][],
 ): Promise<string> {
-	const bytes = new TextEncoder().encode(JSON.stringify([chatId, messages, imageState]));
+	// DOM-node IDs are temporary. Only the ordered message content contributes to the revision.
+	const content = messages.map(({ text, replyTo, attachments, reactions }) => ({
+		text,
+		replyTo,
+		attachments,
+		reactions,
+	}));
+	const bytes = new TextEncoder().encode(JSON.stringify([chatId, content, imageState]));
 	const digest = await crypto.subtle.digest("SHA-256", bytes);
 	return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

@@ -13,6 +13,7 @@ export interface ImageAttachment {
 }
 
 export interface ConversationMessage {
+	// Temporary identifier for a rendered node; it can change on reload or remount.
 	id: string;
 	text: string;
 	// The quoted text is a preview, not a stable reference to another message.
@@ -23,6 +24,7 @@ export interface ConversationMessage {
 
 export interface ConversationSnapshot {
 	chatId: string;
+	// Digest of the currently rendered conversation, not proof of complete history.
 	revision: string;
 	messages: readonly ConversationMessage[];
 }
