@@ -1,8 +1,9 @@
 import type { ConversationSnapshot, SendReplyCommand } from "@envoy/contracts";
 
-// Keep browser access replaceable by a hosted connector later.
+// The task service does not depend on Chrome or on how a connector executes a
+// claimed command. Another connector can implement the same contract.
 export interface BrowserConnector {
-	readConversation(): Promise<ConversationSnapshot>;
-	// TODO: Validate chat/revision, reject stale commands, and deduplicate sends.
-	sendReply(command: SendReplyCommand): Promise<void>;
+	updateConversation(snapshot: ConversationSnapshot | null): void;
+	readConversation(): ConversationSnapshot | null;
+	claimSend(command: SendReplyCommand): SendReplyCommand | null;
 }

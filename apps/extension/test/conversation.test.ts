@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import { test } from "node:test";
 import { JSDOM } from "jsdom";
-import { ConversationUnavailableError, messengerChatAdapter } from "../src/messenger/chat-adapter";
+import { bindMessengerDocument, ConversationUnavailableError, messengerChatAdapter } from "../src/messenger/chat-adapter";
 import { watchConversation } from "../src/ui/conversation";
 
-function setup() {
-	const dom = new JSDOM('<main role="main"></main>', { url: "https://www.messenger.com/t/123" });
+function setup(path = "/t/123") {
+	const dom = new JSDOM('<main role="main"></main>', { url: `https://www.messenger.com${path}` });
 	Object.assign(globalThis, {
 		window: dom.window,
 		document: dom.window.document,
@@ -16,6 +16,11 @@ function setup() {
 	Object.defineProperty(globalThis, "crypto", { configurable: true, value: webcrypto });
 	// jsdom has no layout engine; elements in these fixtures are rendered.
 	dom.window.HTMLElement.prototype.getClientRects = () => [1] as unknown as DOMRectList;
+	const main = dom.window.document.querySelector<HTMLElement>("main")!;
+	main.style.overflowY = "auto";
+	Object.defineProperty(main, "clientHeight", { configurable: true, value: 400 });
+	Object.defineProperty(main, "scrollHeight", { configurable: true, value: 400 });
+	bindMessengerDocument();
 	return dom;
 }
 
@@ -87,11 +92,65 @@ test("revision reflects chat, message order, and repeated messages", async () =>
 		'<div data-scope="messages_table"><div role="row"><span dir="auto">A</span></div><div role="row"><span dir="auto">B</span></div><div role="row"><span dir="auto">B</span></div></div>',
 	);
 	assert.notEqual((await messengerChatAdapter.readConversation()).revision, original.revision);
-	setMessages(
-		'<div data-scope="messages_table"><div role="row"><span dir="auto">A</span></div><div role="row"><span dir="auto">B</span></div></div>',
-	);
 	dom.window.history.pushState({}, "", "/t/456");
-	assert.notEqual((await messengerChatAdapter.readConversation()).revision, original.revision);
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "navigated",
+	);
+	dom.window.close();
+});
+
+test("uses only explicit sender metadata and includes direction in the revision", async () => {
+	const dom = setup();
+	setMessages(`
+		<div data-scope="messages_table">
+			<div role="row" aria-label="Received from Alex"><span dir="auto">Hello</span></div>
+			<div role="row" aria-label="You sent"><span dir="auto">Hi</span></div>
+			<div role="row"><span dir="auto">You sent</span></div>
+			<div role="row" data-message-direction="outgoing" aria-label="Received from Alex"><span dir="auto">Conflicting</span></div>
+		</div>`);
+	const first = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		first.messages.map(({ direction }) => direction),
+		["incoming", "outgoing", "unknown", "unknown"],
+	);
+	document.querySelector('[aria-label="Received from Alex"]')!.setAttribute("aria-label", "You sent");
+	const changed = await messengerChatAdapter.readConversation();
+	assert.equal(changed.messages[0]!.direction, "outgoing");
+	assert.notEqual(changed.revision, first.revision);
+	dom.window.close();
+});
+
+test("requires a reload after navigation, even when the message DOM changes", async () => {
+	const dom = setup();
+	setMessages(fixture);
+	await messengerChatAdapter.readConversation();
+	dom.window.history.pushState({}, "", "/t/456");
+	await assert.rejects(messengerChatAdapter.readConversation(), ConversationUnavailableError);
+	setMessages(fixture);
+	await assert.rejects(messengerChatAdapter.readConversation(), ConversationUnavailableError);
+	setMessages('<div data-scope="messages_table"><div dir="auto">New thread</div></div>');
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "navigated",
+	);
+	dom.window.close();
+	const reloaded = setup("/t/456");
+	setMessages('<div data-scope="messages_table"><div dir="auto">New thread</div></div>');
+	assert.equal((await messengerChatAdapter.readConversation()).chatId, "456");
+	reloaded.window.close();
+});
+
+test("binds before the first read and remains blocked after navigating back", async () => {
+	const dom = setup();
+	setMessages(fixture);
+	dom.window.history.pushState({}, "", "/t/456");
+	dom.window.dispatchEvent(new dom.window.PopStateEvent("popstate"));
+	dom.window.history.pushState({}, "", "/t/123");
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "navigated",
+	);
 	dom.window.close();
 });
 
@@ -329,11 +388,68 @@ test("fails closed without a thread or an identifiable message table", async () 
 		messengerChatAdapter.readConversation(),
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "not-ready",
 	);
-	dom.window.history.pushState({}, "", "/");
+	dom.window.close();
+	const noThread = setup("/");
 	await assert.rejects(
 		messengerChatAdapter.readConversation(),
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "no-chat",
 	);
+	noThread.window.close();
+});
+
+test("requires a measurable message scroll area at its bottom", async () => {
+	const dom = setup();
+	setMessages(fixture);
+	const main = document.querySelector<HTMLElement>("main")!;
+	main.style.overflowY = "visible";
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "not-latest",
+	);
+	main.style.overflowY = "auto";
+	Object.defineProperty(main, "scrollHeight", { configurable: true, value: 1000 });
+	main.scrollTop = 0;
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "not-latest",
+	);
+	main.scrollTop = 600;
+	assert.equal((await messengerChatAdapter.readConversation()).messages.length, 2);
+	dom.window.close();
+});
+
+test("rejects an unrecognized row after readable incoming text", async () => {
+	const dom = setup();
+	setMessages(`
+		<div data-scope="messages_table">
+			<div role="row" data-message-direction="incoming"><span dir="auto">Hello</span></div>
+			<div role="row"><div role="button" aria-label="Play"></div></div>
+		</div>`);
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+	);
+	setMessages(`
+		<div role="grid">
+			<div role="row"><div data-scope="messages_table"><span dir="auto">Hello</span></div></div>
+			<div role="row"><div role="button" aria-label="Play"></div></div>
+		</div>`);
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+	);
+	dom.window.close();
+});
+
+test("rejects text messages containing unsupported media", async () => {
+	const dom = setup();
+	for (const media of ["<video></video>", '<span role="img" aria-label="Sticker"></span>']) {
+		setMessages(`<div data-scope="messages_table"><div role="row"><span dir="auto">Caption</span>${media}</div></div>`);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
 	dom.window.close();
 });
 
@@ -409,7 +525,7 @@ test("updates the watched revision when an image link changes", async () => {
 	}
 });
 
-test("clears the old chat and waits for its rendered messages to change", async () => {
+test("clears the old chat and asks for a reload after navigation", async () => {
 	const dom = setup();
 	setMessages(fixture);
 	const updates: Array<{ chatId: string | null; status: string }> = [];
@@ -423,13 +539,20 @@ test("clears the old chat and waits for its rendered messages to change", async 
 		dom.window.history.pushState({}, "", "/t/456");
 		dom.window.dispatchEvent(new dom.window.PopStateEvent("popstate"));
 		await waitFor(() => updates.at(-1)?.status === "Loading the selected conversation...");
-		await new Promise((resolve) => setTimeout(resolve, 450));
+		// Messenger can remount the old chat while the URL already names the next one.
+		setMessages(fixture);
+		await waitFor(() => updates.at(-1)?.status === "The selected chat changed. Reload this tab to use Envoy in it.");
 		assert.equal(
 			updates.some((update) => update.chatId === "456"),
 			false,
 		);
 		setMessages('<div data-scope="messages_table"><div dir="auto">Other chat</div></div>');
-		await waitFor(() => updates.some((update) => update.chatId === "456"));
+		await new Promise((resolve) => setTimeout(resolve, 450));
+		assert.equal(
+			updates.some((update) => update.chatId === "456"),
+			false,
+		);
+		assert.equal(updates.at(-1)?.status, "The selected chat changed. Reload this tab to use Envoy in it.");
 	} finally {
 		stop();
 		dom.window.close();

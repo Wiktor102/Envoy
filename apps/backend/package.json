@@ -14,7 +14,8 @@
 		"build": "tsc",
 		"start": "node --env-file=.env.production dist/server.js",
 		"health": "node --env-file=.env.development dist/healthcheck.js",
-		"health:prod": "node --env-file=.env.production dist/healthcheck.js"
+		"health:prod": "node --env-file=.env.production dist/healthcheck.js",
+		"test": "tsx --test test/*.test.ts"
 	},
 	"dependencies": {
 		"@envoy/contracts": "workspace:*",

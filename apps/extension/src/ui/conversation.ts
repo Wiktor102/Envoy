@@ -31,7 +31,9 @@ export function watchConversation(onUpdate: (snapshot: ConversationSnapshot | nu
 		try {
 			const snapshot = await messengerChatAdapter.readConversation();
 			if (!stopped && current === sequence && location.pathname === path) {
-				const messages = JSON.stringify(snapshot.messages);
+				// Node IDs change when Messenger remounts old content. Comparing them
+				// would make the old chat appear new during a route transition.
+				const messages = JSON.stringify(snapshot.messages.map(({ id: _id, ...message }) => message));
 				if (previousMessages && previousMessages !== "[]" && previousMessages === messages) {
 					onUpdate(null, "Loading the selected conversation...");
 					return;
@@ -43,9 +45,15 @@ export function watchConversation(onUpdate: (snapshot: ConversationSnapshot | nu
 		} catch (error) {
 			if (stopped || current !== sequence) return;
 			const status =
-				error instanceof ConversationUnavailableError && error.reason === "no-chat"
-					? "Open a conversation to read its messages."
-					: "Conversation messages are unavailable or still loading.";
+				error instanceof ConversationUnavailableError && error.reason === "navigated"
+					? "The selected chat changed. Reload this tab to use Envoy in it."
+					: error instanceof ConversationUnavailableError && error.reason === "unsupported"
+						? "Some messages can't be read. Envoy is paused for this conversation."
+						: error instanceof ConversationUnavailableError && error.reason === "not-latest"
+							? "Can't confirm the latest messages. Scroll to the bottom or reload this tab."
+							: error instanceof ConversationUnavailableError && error.reason === "no-chat"
+								? "Open a conversation and reload this tab to use Envoy in it."
+								: "Conversation messages are unavailable or still loading.";
 			onUpdate(null, status);
 		}
 	}

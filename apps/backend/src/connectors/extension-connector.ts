@@ -1,13 +1,29 @@
 import type { ConversationSnapshot, SendReplyCommand } from "@envoy/contracts";
 import type { BrowserConnector } from "./browser-connector.js";
 
-// Not connected to the API router. No browser commands are issued.
+// The extension provides snapshots and retrieves claimed commands through the
+// router. A command ID is handed out at most once, even if a poll is retried.
 export class ExtensionConnector implements BrowserConnector {
-	async readConversation(): Promise<ConversationSnapshot> {
-		throw new Error("TODO: extension connector");
+	private conversation: ConversationSnapshot | null = null;
+	private readonly claimed = new Set<string>();
+
+	updateConversation(snapshot: ConversationSnapshot | null): void {
+		this.conversation = snapshot;
 	}
 
-	async sendReply(_command: SendReplyCommand): Promise<void> {
-		throw new Error("TODO: validated extension send");
+	readConversation(): ConversationSnapshot | null {
+		return this.conversation;
+	}
+
+	claimSend(command: SendReplyCommand): SendReplyCommand | null {
+		if (
+			this.claimed.has(command.commandId) ||
+			this.conversation?.chatId !== command.chatId ||
+			this.conversation.revision !== command.expectedRevision
+		) {
+			return null;
+		}
+		this.claimed.add(command.commandId);
+		return { ...command };
 	}
 }

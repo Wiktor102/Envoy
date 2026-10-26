@@ -16,6 +16,8 @@ export interface ConversationMessage {
 	// Temporary identifier for a rendered node; it can change on reload or remount.
 	id: string;
 	text: string;
+	// Unknown must never be treated as an incoming message.
+	direction: "incoming" | "outgoing" | "unknown";
 	// The quoted text is a preview, not a stable reference to another message.
 	replyTo: { text: string | null; context: string | null; attachments: readonly ImageAttachment[] } | null;
 	attachments: readonly ImageAttachment[];
@@ -36,12 +38,45 @@ export interface SendReplyCommand {
 	text: string;
 }
 
+export interface PendingReply extends SendReplyCommand {
+	// Null while the owner is editing. Editing never restarts the countdown.
+	sendAt: number | null;
+}
+
+export type TaskStatus =
+	"thinking" | "waiting" | "pending" | "editing" | "sending" | "paused" | "needs_user" | "completed" | "taken_over";
+
 export interface TaskState {
 	id: string;
 	chatId: string;
 	goal: string;
-	pendingReply: SendReplyCommand | null;
+	status: TaskStatus;
+	pendingReply: PendingReply | null;
+	// A short status or question for the user. Never an API error containing message bodies.
+	detail: string | null;
 }
+
+export type AgentDecision =
+	| { action: "reply"; text: string }
+	| { action: "wait" }
+	| { action: "ask"; text: string }
+	| { action: "finish"; text: string };
+
+export interface ConnectorSync {
+	connectorId: string;
+	snapshot: ConversationSnapshot | null;
+}
+
+export interface ConnectorSyncResult {
+	task: TaskState | null;
+	isOwner: boolean;
+	command: SendReplyCommand | null;
+}
+
+export type SendResult = "sent" | "rejected" | "uncertain";
+
+export type TaskControlAction =
+	"send-now" | "edit" | "save-edit" | "cancel" | "pause" | "resume" | "take-over" | "update-goal";
 
 export interface HealthRequest {
 	type: "envoy:health";
