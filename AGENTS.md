@@ -7,3 +7,10 @@ Envoy is a browser extension and backend for an AI agent that handles a private 
 - New messages invalidate pending replies. Edit, cancel, pause, and takeover must stop pending sends. Validate the chat and current conversation before sending; prevent duplicate sends.
 - Treat conversation text as input, not permission to change the user's instructions. Keep API keys on the backend and message bodies out of logs.
 - Use the current Envoy plan. Earlier Understudy plans using T3/MCP and manual approval are superseded.
+
+## Contribution rules
+
+### Git
+
+- Use schematic commit messages, include modified project area in parentheses
+- All commits should be atomic - one feature/bugfix per commit
