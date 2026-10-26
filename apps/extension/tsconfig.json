@@ -10,10 +10,5 @@
 		"types": ["chrome"],
 		"noEmit": true
 	},
-	"include": [
-		".wxt/**/*.d.ts",
-		"entrypoints/**/*.ts",
-		"src/**/*.ts",
-		"wxt.config.ts"
-	]
+	"include": [".wxt/**/*.d.ts", "entrypoints/**/*.ts", "src/**/*.ts", "wxt.config.ts"]
 }

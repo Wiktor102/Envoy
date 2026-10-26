@@ -7,14 +7,10 @@ const server = new WebSocketServer({ host: config.host, port: config.port });
 applyWSSHandler({ wss: server, router: appRouter });
 
 server.on("listening", () => {
-	console.info(
-		`Envoy backend listening on host ${config.host}, port ${config.port}`,
-	);
+	console.info(`Envoy backend listening on host ${config.host}, port ${config.port}`);
 });
 server.on("error", () => {
-	console.error(
-		`Envoy backend could not start. Check host ${config.host} and port ${config.port}.`,
-	);
+	console.error(`Envoy backend could not start. Check host ${config.host} and port ${config.port}.`);
 	process.exitCode = 1;
 });
 

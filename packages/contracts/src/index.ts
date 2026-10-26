@@ -30,6 +30,4 @@ export interface HealthRequest {
 	type: "envoy:health";
 }
 
-export type HealthReply =
-	| { ok: true; health: HealthResponse }
-	| { ok: false; error: "backend-unavailable" };
+export type HealthReply = { ok: true; health: HealthResponse } | { ok: false; error: "backend-unavailable" };

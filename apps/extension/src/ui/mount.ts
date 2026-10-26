@@ -34,20 +34,16 @@ export function mountEnvoyUi(): HTMLElement {
     </section>
   `;
 
-	const healthButton =
-		container.querySelector<HTMLButtonElement>("#envoy-health")!;
+	const healthButton = container.querySelector<HTMLButtonElement>("#envoy-health")!;
 	const status = container.querySelector<HTMLElement>("#envoy-status")!;
 	healthButton.addEventListener("click", async () => {
 		healthButton.disabled = true;
 		status.textContent = "Checking backend...";
 		try {
 			const reply = await checkBackendHealth();
-			status.textContent = reply.ok
-				? "Backend healthy."
-				: "Backend unavailable.";
+			status.textContent = reply.ok ? "Backend healthy." : "Backend unavailable.";
 		} catch {
-			status.textContent =
-				"Extension connection unavailable. Reload Messenger.";
+			status.textContent = "Extension connection unavailable. Reload Messenger.";
 		} finally {
 			healthButton.disabled = false;
 		}
