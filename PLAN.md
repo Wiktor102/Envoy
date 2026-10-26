@@ -2,30 +2,30 @@
 
 ## Goal and scope
 
-Build an agent that gathers information from people and moves a Messenger conversation toward a goal. The first demo arranges a meeting across several messages, within the user's stated availability and permissions.
+Build an agent that gathers information from a person and moves a Messenger conversation toward a user-defined goal. The first demo arranges a meeting across several messages, within the user's stated availability and permissions.
 
-For the hackathon: one delegated text conversation, one goal, a dedicated Messenger tab, and replies that auto-send after a default 10-second intervention window. Include send now, edit, cancel, pause, takeover, and clear agent status. The agent can wait, reply, ask the user, or finish.
+The hackathon scope is one delegated text conversation, one goal, a dedicated Messenger tab, and replies that auto-send after a default 10-second intervention window. Include send now, edit, cancel, pause, takeover, and clear agent status. The agent can wait, reply, ask the user, or finish.
 
 ## Architecture
 
 `Messenger tab <-> extension connector <-> backend <-> Meta Model API`
 
 - The extension reads available messages and chat identity, shows the Envoy controls, and executes validated sends in the dedicated tab.
-- The backend stores the goal, permissions, conversation context, open questions, agreements, and pending actions. It calls Meta Model API directly and decides when another reasoning step is needed.
-- Each pending reply belongs to a specific chat and conversation state. New messages invalidate it. Editing, cancellation, pause, or takeover stop the countdown. Recheck state immediately before sending and record the result to prevent duplicates. Verify uncertain sends before retrying.
-- A closed, navigated, or disconnected agent tab pauses sending. Keep task state outside the extension worker and browser access behind a connector interface. A future hosted browser should use the same contract, with only one connector controlling the chat.
+- The backend owns the goal, conversation context, pending replies, countdown, and task lifecycle. It calls Meta Model API directly. The connector boundary keeps browser access replaceable by a hosted browser later.
+- A pending reply belongs to a chat and conversation revision. New messages invalidate it. Edit, cancel, pause, and takeover stop pending work. Recheck state immediately before sending, claim each command once, and require user review of an uncertain result.
+- A closed, navigated, disconnected, or unavailable agent tab pauses sending. One connector owns the task. A replacement tab must reconnect explicitly after the old connection expires.
+- The local prototype keeps task data in backend memory and supports deleting a finished task. API keys stay on the backend, message bodies stay out of logs, and conversation text is input rather than permission to change instructions.
 
-Use HTTPS, standard encryption at rest, backend-held API credentials, minimal stored context, deletion, and a short retention policy. The backend and Meta process readable messages.
+## Progress and remaining work
 
-## TODO
-
-- [ ] Prove Messenger access: identify one test chat, read incoming messages, and send in a background tab while the user chats elsewhere.
-- [ ] Choose the implementation stack, storage, and extension/backend connection; scaffold both components.
-- [ ] Build the goal and permission setup, conversation state, and Meta reasoning loop. Support waiting, replying, escalation, and completion.
-- [ ] Add the reply countdown and controls, stale-reply rejection, duplicate prevention, and send confirmation.
-- [ ] Test new messages during generation/countdown, late model results after takeover, reconnects, restarts, tab closure, and chat changes.
-- [ ] Finish a repeatable demo with willing participants: agree on a meeting, revise or cancel one reply, and escalate a decision outside the brief.
+- [x] Scaffold the extension, backend, shared contracts, and local connection.
+- [x] Implement goal setup, Meta Model API reasoning, and wait/reply/ask/finish decisions.
+- [x] Implement reply controls, countdowns, stale-reply invalidation, one-time claims, and uncertain-send handling.
+- [x] Add synthetic checks for the Messenger adapter and task lifecycle.
+- [ ] Verify Messenger DOM selectors, sender attribution, scroll position, and sending in a real signed-in session. The current adapter fails closed when it cannot establish the needed state.
+- [ ] Verify the Meta Model API with a real key and run the full demo with willing participants: agree on a meeting, revise or cancel a reply, and escalate a decision outside the brief.
+- [ ] Design authenticated hosting, HTTPS, encryption at rest, and a short retention policy before exposing the backend beyond the local machine.
 
 ## Later and undecided
 
-Defer hosted browsing, multiple delegated chats, attachments, calendar/general tools, message-length-based delays, and custom encryption. T3/MCP and provider selection are outside this version. Confirm the stack, model, hosting, retention period, and delay settings during implementation.
+Defer hosted browsing, durable task storage, memory and messaging-style detection, multiple delegated chats, attachments, calendar/general tools, message-length-based delays, and custom encryption. T3/MCP and provider selection are outside this version.
