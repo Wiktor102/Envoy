@@ -3,6 +3,12 @@
 	<button type="button" role="tab" id="envoy-tab" aria-selected="false" aria-controls="envoy-panel">Envoy</button>
 </div>
 <div id="envoy-panel" role="tabpanel" aria-labelledby="envoy-tab" hidden>
+	<section aria-labelledby="envoy-conversation-title">
+		<h2 id="envoy-conversation-title">Conversation</h2>
+		<p>Messages currently loaded in Messenger. Scroll up in the conversation to load older messages.</p>
+		<p id="envoy-conversation-status" role="status">Open a conversation to read its messages.</p>
+		<pre id="envoy-conversation-json" aria-label="Conversation JSON"></pre>
+	</section>
 	<section aria-labelledby="envoy-goal-title">
 		<h2 id="envoy-goal-title">Envoy goal setup</h2>
 		<p>Placeholder only. Chat automation is not implemented.</p>
