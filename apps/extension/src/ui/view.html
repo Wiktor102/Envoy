@@ -5,28 +5,50 @@
 <div id="envoy-panel" role="tabpanel" aria-labelledby="envoy-tab" hidden>
 	<section aria-labelledby="envoy-conversation-title">
 		<h2 id="envoy-conversation-title">Conversation</h2>
-		<p>Messages currently loaded in Messenger. Scroll up in the conversation to load older messages.</p>
+		<p id="envoy-chat-id">No conversation selected.</p>
 		<p id="envoy-conversation-status" role="status">Open a conversation to read its messages.</p>
-		<pre id="envoy-conversation-json" aria-label="Conversation JSON"></pre>
+		<p class="hint">Only messages currently loaded in Messenger are available to Envoy.</p>
+		<ol id="envoy-conversation" aria-label="Latest loaded messages"></ol>
 	</section>
 	<section aria-labelledby="envoy-goal-title">
-		<h2 id="envoy-goal-title">Envoy goal setup</h2>
-		<p>Placeholder only. Chat automation is not implemented.</p>
-		<label for="envoy-goal">Goal</label>
-		<textarea id="envoy-goal" placeholder="Your goal will go here" disabled></textarea>
-		<button type="button" disabled>Start task</button>
+		<h2 id="envoy-goal-title">Your instructions</h2>
+		<label for="envoy-goal">Goal and limits</label>
+		<textarea id="envoy-goal" placeholder="Describe what Envoy should arrange and any limits it must follow."></textarea>
+		<p id="envoy-goal-hint" class="hint"></p>
+		<div class="controls">
+			<button type="button" id="envoy-start">Start task</button>
+			<button type="button" id="envoy-update-goal" hidden>Update instructions</button>
+		</div>
 	</section>
 	<section aria-labelledby="envoy-controls-title">
-		<h2 id="envoy-controls-title">Agent controls</h2>
-		<p>Inactive. Reply delay: <span id="envoy-reply-delay"></span>s. No countdown is running.</p>
-		<div class="controls">
-			<button type="button" disabled>Send now</button>
-			<button type="button" disabled>Edit</button>
-			<button type="button" disabled>Cancel</button>
-			<button type="button" disabled>Pause</button>
-			<button type="button" disabled>Take over</button>
+		<h2 id="envoy-controls-title">Agent</h2>
+		<p id="envoy-task-status" role="status">No active task.</p>
+		<p id="envoy-task-chat" hidden></p>
+		<p id="envoy-task-detail" hidden></p>
+		<div id="envoy-pending" hidden>
+			<h3>Proposed reply</h3>
+			<p id="envoy-pending-text" class="message-text"></p>
+			<p id="envoy-countdown"></p>
+			<div id="envoy-editor" hidden>
+				<label for="envoy-reply-edit">Edit reply</label>
+				<textarea id="envoy-reply-edit"></textarea>
+				<button type="button" id="envoy-save-edit">Save reply</button>
+				<p class="hint">Saving keeps the reply paused. Use Send now when it is ready.</p>
+			</div>
 		</div>
+		<div class="controls">
+			<button type="button" id="envoy-send-now">Send now</button>
+			<button type="button" id="envoy-edit">Edit</button>
+			<button type="button" id="envoy-cancel">Cancel reply</button>
+			<button type="button" id="envoy-pause">Pause</button>
+			<button type="button" id="envoy-resume">Resume</button>
+			<button type="button" id="envoy-reconnect" hidden>Reconnect</button>
+			<button type="button" id="envoy-take-over">Take over</button>
+			<button type="button" id="envoy-delete" hidden>Delete task</button>
+		</div>
+		<p id="envoy-delete-hint" class="hint" hidden></p>
+		<p id="envoy-error" role="alert" hidden></p>
 		<button type="button" id="envoy-health">Check backend health</button>
-		<p id="envoy-status" role="status">Backend not checked.</p>
+		<p id="envoy-health-status" role="status"></p>
 	</section>
 </div>

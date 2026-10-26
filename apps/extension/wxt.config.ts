@@ -5,7 +5,7 @@ export default defineConfig({
 	imports: false,
 	manifest: {
 		name: "Envoy",
-		description: "Placeholder Messenger agent scaffold. Chat automation is not implemented.",
+		description: "Delegate a Messenger conversation to an agent with a goal and reply controls.",
 		// No toolbar popup. The content script mounts goal setup inside Messenger.
 		minimum_chrome_version: "116",
 	},

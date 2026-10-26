@@ -1,4 +1,6 @@
 import { defineContentScript } from "wxt/utils/define-content-script";
+import { createEnvoyController } from "../src/controller";
+import { bindMessengerDocument } from "../src/messenger/chat-adapter";
 import { mountEnvoyUi } from "../src/ui/mount";
 
 export default defineContentScript({
@@ -10,7 +12,12 @@ export default defineContentScript({
 	],
 	runAt: "document_idle",
 	main(ctx) {
-		const unmount = mountEnvoyUi();
-		ctx.onInvalidated(unmount);
+		bindMessengerDocument();
+		const controller = createEnvoyController();
+		const unmount = mountEnvoyUi(controller);
+		ctx.onInvalidated(() => {
+			unmount();
+			controller.destroy();
+		});
 	},
 });
