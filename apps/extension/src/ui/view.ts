@@ -1,5 +1,6 @@
 import { DEFAULT_REPLY_DELAY_SECONDS } from "@envoy/contracts";
 import { checkBackendHealth } from "../messaging";
+import { watchConversation } from "./conversation";
 import styles from "./styles.css?inline";
 import markup from "./view.html?raw";
 
@@ -23,6 +24,9 @@ export function createEnvoyView(onSelectionChange: () => void) {
 	const panel = container.querySelector<HTMLElement>("#envoy-panel")!;
 	const healthButton = container.querySelector<HTMLButtonElement>("#envoy-health")!;
 	const status = container.querySelector<HTMLElement>("#envoy-status")!;
+	const conversationStatus = container.querySelector<HTMLElement>("#envoy-conversation-status")!;
+	const conversationJson = container.querySelector<HTMLElement>("#envoy-conversation-json")!;
+	let stopWatching: (() => void) | undefined;
 
 	function selectTab(showEnvoy: boolean) {
 		chatsTab.setAttribute("aria-selected", String(!showEnvoy));
@@ -30,6 +34,17 @@ export function createEnvoyView(onSelectionChange: () => void) {
 		chatsTab.tabIndex = showEnvoy ? -1 : 0;
 		envoyTab.tabIndex = showEnvoy ? 0 : -1;
 		panel.hidden = !showEnvoy;
+		if (showEnvoy && !stopWatching) {
+			stopWatching = watchConversation((snapshot, message) => {
+				conversationStatus.textContent = message;
+				conversationJson.textContent = snapshot ? JSON.stringify(snapshot, null, 2) : "";
+			});
+		} else if (!showEnvoy && stopWatching) {
+			stopWatching();
+			stopWatching = undefined;
+			conversationJson.textContent = "";
+			conversationStatus.textContent = "Open a conversation to read its messages.";
+		}
 		onSelectionChange();
 	}
 

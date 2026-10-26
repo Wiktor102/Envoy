@@ -12,7 +12,7 @@ The hackathon version handles one text conversation and one goal at a time, with
 
 The code is a compileable foundation only. The backend exposes one tRPC `health` query over WebSocket. The extension adds an Envoy tab to the chats sidebar with goal setup and agent controls using Shadow DOM. There is no toolbar popup or separate browser window.
 
-Only the backend health button works. Goal setup and task controls are disabled. Messenger access, sending, countdowns, task lifecycle, persistence, agent reasoning, Meta API calls, and authentication are TODOs. No messages are read or sent, and no API keys are needed.
+The Envoy sidebar displays a JSON snapshot of messages currently loaded in the selected Messenger conversation. Goal setup and task controls are disabled. Sending, countdowns, task lifecycle, persistence, agent reasoning, Meta API calls, and authentication are TODOs. No messages are sent, and no API keys are needed.
 
 ## Prerequisites
 
@@ -30,6 +30,7 @@ cp apps/backend/.env.example apps/backend/.env.development
 cp apps/backend/.env.example apps/backend/.env.production
 pnpm dev
 pnpm typecheck
+pnpm --filter @envoy/extension test
 pnpm build
 ```
 
@@ -59,17 +60,17 @@ If a local certificate proxy causes dependency downloads to fail, configure Node
 
 ## Load the extension
 
-After `pnpm build`, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `apps/extension/.output/chrome-mv3`. Open or reload `https://www.messenger.com/` or a `https://www.facebook.com/messages/` page to see the Envoy tab in the chats sidebar. Select it to open the placeholders. If the extension is already loaded, reload it in `chrome://extensions` first. Reload the chat page after navigating to it from elsewhere on Facebook. With the backend running, **Check backend health** checks the content script to background worker to tRPC path.
+After `pnpm build`, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `apps/extension/.output/chrome-mv3`. Open or reload `https://www.messenger.com/` or a `https://www.facebook.com/messages/` page to see the Envoy tab in the chats sidebar. Select it to view the selected conversation as JSON and open the placeholders. If the extension is already loaded, reload it in `chrome://extensions` first. Reload the chat page after navigating to it from elsewhere on Facebook. The reader uses Messenger's rendered message table, so it only shows loaded messages; scroll up in the conversation to load older messages. The reader also includes quoted reply previews and reaction summaries when Messenger exposes recognizable controls. Recognizable photos include their rendered image URL when available, including in reply previews when labeled. URLs may change or expire; if Messenger exposes no HTTP(S) image URL, the field is null. Image downloads and other attachment types are not supported. Messenger may change its page structure, and a conversation that cannot be identified is shown as unavailable. Message IDs and the revision identify the currently rendered snapshot, not permanent Messenger records. The panel reads locally and does not send message text to the backend. With the backend running, **Check backend health** checks the content script to background worker to tRPC path.
 
 The production manifest contains only the Messenger and Facebook messages content-script matches and background worker. It requests no additional extension permissions. WXT adds development permissions for its reload tooling during `pnpm dev`.
 
 ## Workspace layout
 
-| Workspace            | Contents                                                                                        | Build output                |
-| -------------------- | ----------------------------------------------------------------------------------------------- | --------------------------- |
-| `packages/contracts` | Browser-neutral types and the default reply delay constant                                      | `dist` ESM and declarations |
-| `apps/backend`       | tRPC router/server, task service/repository interfaces, connector and agent placeholders        | `dist` ESM and declarations |
-| `apps/extension`     | WXT manifest config, MV3 worker, Messenger content script, DOM adapter placeholder, injected UI | `.output/chrome-mv3`        |
+| Workspace            | Contents                                                                                 | Build output                |
+| -------------------- | ---------------------------------------------------------------------------------------- | --------------------------- |
+| `packages/contracts` | Browser-neutral types and the default reply delay constant                               | `dist` ESM and declarations |
+| `apps/backend`       | tRPC router/server, task service/repository interfaces, connector and agent placeholders | `dist` ESM and declarations |
+| `apps/extension`     | WXT manifest config, MV3 worker, Messenger content script, DOM reader, injected UI       | `.output/chrome-mv3`        |
 
 Contracts and backend use TypeScript `NodeNext` resolution and `.js` imports for emitted Node ESM. The extension uses WXT's generated configuration and bundler resolution. Node ambient types belong to the backend; Chrome and DOM ambient types belong to the extension; contracts include neither.
 

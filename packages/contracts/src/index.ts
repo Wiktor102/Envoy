@@ -6,10 +6,25 @@ export interface HealthResponse {
 	service: "envoy-backend";
 }
 
+export interface ImageAttachment {
+	type: "image";
+	url: string | null;
+	description: string | null;
+}
+
+export interface ConversationMessage {
+	id: string;
+	text: string;
+	// The quoted text is a preview, not a stable reference to another message.
+	replyTo: { text: string | null; context: string | null; attachments: readonly ImageAttachment[] } | null;
+	attachments: readonly ImageAttachment[];
+	reactions: readonly { label: string; emojis: readonly string[]; count: number | null }[];
+}
+
 export interface ConversationSnapshot {
 	chatId: string;
 	revision: string;
-	messages: readonly { id: string; text: string }[];
+	messages: readonly ConversationMessage[];
 }
 
 export interface SendReplyCommand {

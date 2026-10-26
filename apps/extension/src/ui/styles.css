@@ -113,3 +113,13 @@ section button:disabled {
 	gap: 4px;
 	margin-bottom: 8px;
 }
+
+#envoy-conversation-json {
+	max-height: 320px;
+	overflow: auto;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font:
+		12px/1.4 ui-monospace,
+		monospace;
+}

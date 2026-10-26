@@ -12,6 +12,5 @@ export default defineContentScript({
 	main(ctx) {
 		const unmount = mountEnvoyUi();
 		ctx.onInvalidated(unmount);
-		// TODO: Connect the Messenger adapter once safe chat access is implemented.
 	},
 });
