@@ -432,3 +432,24 @@ test("does not send when Lexical never commits the draft", async () => {
 	assert.equal(clicks, 0);
 	dom.window.close();
 });
+
+test("waits for Messenger to render the send control after the draft", async () => {
+	const { dom, editor, button } = setup();
+	const region = button.parentElement!;
+	button.remove();
+	// Messenger swaps the Like button for the send control after a later render.
+	new dom.window.MutationObserver((_records, observer) => {
+		if (editor.textContent === "") return;
+		observer.disconnect();
+		setTimeout(() => region.append(button), 20);
+	}).observe(editor, { childList: true, characterData: true, subtree: true });
+	let clicks = 0;
+	button.addEventListener("click", () => {
+		clicks++;
+		editor.textContent = "";
+		appendMessage("Hi there", "outgoing", "sent");
+	});
+	assert.equal(await messengerChatAdapter.sendReply(await command(), async () => true), "sent");
+	assert.equal(clicks, 1);
+	dom.window.close();
+});

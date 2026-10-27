@@ -696,20 +696,6 @@ function confirmSend(before: ConversationSnapshot, text: string): Promise<SendRe
 	});
 }
 
-// Give Messenger a task turn to render the send control. Hidden tabs can throttle
-// timers for a minute, so do not use a zero-delay timeout for this handoff.
-function yieldToMessenger(): Promise<void> {
-	return new Promise((resolve) => {
-		const channel = new MessageChannel();
-		channel.port1.onmessage = () => {
-			channel.port1.close();
-			channel.port2.close();
-			resolve();
-		};
-		channel.port2.postMessage(null);
-	});
-}
-
 // Lexical ignores execCommand (it fires no beforeinput) and reverts the native
 // DOM edit. It accepts a beforeinput event instead, cancels it, and commits its
 // own DOM update after dispatch returns. Report whether Lexical took the edit.
@@ -824,8 +810,8 @@ async function performSend(
 			return stopBeforeDispatch();
 		}
 
-		// Messenger may render its send control in response to the input event.
-		await yieldToMessenger();
+		// Messenger renders its send control a few task turns after the draft.
+		await waitForComposer(() => getSendButton(capture.main) !== null);
 		if (!(await authorize())) return stopBeforeDispatch();
 
 		// No await is allowed between the final authorization, local check, and click.
