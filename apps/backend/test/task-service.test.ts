@@ -512,3 +512,42 @@ test("system events remain context, invalidate pending replies, and do not hide 
 	assert.equal(service.sync("owner", unknown).task?.status, "needs_user");
 	assert.equal(agent.calls.length, 2);
 });
+
+test("a transient unreadable view resumes the agent once the same chat reads again", async () => {
+	const { agent, service } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	const paused = service.sync("owner", null).task!;
+	assert.equal(paused.status, "paused");
+	assert.equal(paused.pendingReply, null);
+	assert.match(paused.detail!, /resumes when it can read/);
+	const resumed = service.sync("owner", snapshot()).task!;
+	assert.equal(resumed.status, "thinking");
+	assert.equal(agent.calls.length, 2);
+
+	// A pause by the user, or while waiting for the user, is never lifted.
+	agent.calls[1]!.resolve({ action: "ask", text: "Which day?" });
+	await Promise.resolve();
+	assert.equal(service.sync("owner", snapshot()).task?.status, "needs_user");
+	service.sync("owner", null);
+	assert.equal(service.sync("owner", snapshot()).task?.status, "paused");
+	service.control("owner", task.id, "resume");
+	service.sync("owner", null);
+	service.control("owner", task.id, "pause");
+	assert.equal(service.sync("owner", snapshot()).task?.status, "paused");
+	assert.equal(agent.calls.length, 2);
+});
+
+test("an unreadable view does not resume a send that may have completed", async () => {
+	const { agent, service, advance } = setup();
+	service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	advance(10_000);
+	const claim = service.sync("owner", snapshot()).command!;
+	assert.equal(service.authorize("owner", claim.commandId, claim.chatId, claim.expectedRevision), true);
+	assert.equal(service.sync("owner", null).task?.status, "paused");
+	const after = service.sync("owner", snapshot()).task!;
+	assert.equal(after.status, "paused");
+	assert.match(after.detail!, /may have completed/);
+	assert.equal(agent.calls.length, 1);
+});
