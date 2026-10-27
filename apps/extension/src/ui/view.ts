@@ -188,7 +188,9 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			const text = document.createElement("span");
 			text.className = "message-text";
 			text.dir = "auto";
-			text.textContent = message.text || (message.attachments.length ? "[Attachment]" : "[Empty message]");
+			text.textContent = message.unsent
+				? "[Unsent message]"
+				: message.text || (message.attachments.length ? "[Attachment]" : "[Empty message]");
 			item.append(sender, text);
 			conversation.append(item);
 		}

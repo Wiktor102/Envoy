@@ -13,7 +13,7 @@ function snapshot(
 	return {
 		chatId: "chat-1",
 		revision,
-		messages: [{ id: "node-1", text, direction, replyTo: null, attachments: [], reactions: [] }],
+		messages: [{ id: "node-1", text, direction, replyTo: null, attachments: [], reactions: [], unsent: false }],
 	};
 }
 
@@ -390,6 +390,26 @@ test("unknown direction, unsupported content and an outgoing last message do not
 	}
 });
 
+test("an unsent latest message, including an unsent group event, does not trigger the model", () => {
+	{
+		const { agent, service } = setup();
+		const content = snapshot("r1", "");
+		content.messages[0]!.unsent = true;
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "needs_user");
+		assert.match(result.detail!, /unsent/);
+		assert.equal(agent.calls.length, 0);
+	}
+	{
+		const { agent, service } = setup();
+		const content = snapshot("r1", "Can we meet?");
+		content.messages.push({ ...content.messages[0]!, id: "node-2", text: "", direction: "system", unsent: true });
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "needs_user");
+		assert.equal(agent.calls.length, 0);
+	}
+});
+
 test("known incoming text can be considered with incomplete older history", async () => {
 	const { agent, service } = setup();
 	const current = snapshot("r1", "Does Tuesday work?");
@@ -400,6 +420,7 @@ test("known incoming text can be considered with incomplete older history", asyn
 		attachments: [{ type: "image", url: null, description: null }],
 		replyTo: { text: null, context: null, attachments: [] },
 		reactions: [],
+		unsent: false,
 	};
 	const withHistory = { ...current, messages: [older, ...current.messages] };
 	const task = service.start("owner", "Arrange a meeting", withHistory);
@@ -500,6 +521,7 @@ test("system events remain context, invalidate pending replies, and do not hide 
 		replyTo: null,
 		attachments: [],
 		reactions: [],
+		unsent: false,
 	};
 	const changed = { ...initial, revision: "r2", messages: [...initial.messages, event] };
 	assert.equal(service.sync("owner", changed).task?.pendingReply, null);

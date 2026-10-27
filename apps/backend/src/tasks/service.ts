@@ -609,7 +609,13 @@ export class TaskService {
 			this.suppressedContexts.has(textContext(snapshot))
 		)
 			return;
-		const latest = [...snapshot.messages].reverse().find((message) => message.direction !== "system");
+		// An unsent group event still withdraws the message before it.
+		const latest = [...snapshot.messages].reverse().find((message) => message.direction !== "system" || message.unsent);
+		if (latest?.unsent) {
+			task.status = "needs_user";
+			task.detail = "The latest message was unsent. Check the conversation before resuming.";
+			return;
+		}
 		if (!latest || latest.direction === "outgoing") {
 			task.detail = "Waiting for a new incoming message.";
 			return;
@@ -722,6 +728,8 @@ function semanticMessages(snapshot: ConversationSnapshot): string {
 // Reactions and other cosmetic DOM changes must not trigger another reply to
 // the same text after a send or cancellation.
 function textContext(snapshot: ConversationSnapshot): string {
-	const contents = JSON.stringify(snapshot.messages.map(({ direction, text, replyTo }) => ({ direction, text, replyTo })));
+	const contents = JSON.stringify(
+		snapshot.messages.map(({ direction, text, replyTo, unsent }) => ({ direction, text, replyTo, unsent })),
+	);
 	return createHash("sha256").update(contents).digest("hex");
 }

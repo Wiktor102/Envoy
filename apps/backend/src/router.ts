@@ -49,6 +49,7 @@ function message(value: unknown): ConversationMessage {
 	const direction = item.direction;
 	if (direction !== "incoming" && direction !== "outgoing" && direction !== "unknown" && direction !== "system")
 		return invalid();
+	if (typeof item.unsent !== "boolean") return invalid();
 	const reply = item.replyTo === null ? null : object(item.replyTo);
 	return {
 		id: string(item.id),
@@ -70,6 +71,7 @@ function message(value: unknown): ConversationMessage {
 				count: reaction.count as number | null,
 			};
 		}),
+		unsent: item.unsent,
 	};
 }
 
