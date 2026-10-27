@@ -8,6 +8,7 @@ const safeErrors = new Set([
 	"A task is already active. Take over the existing task first.",
 	"The previous send may have completed. Check the conversation and delete the old task first.",
 	"The agent tab is still connected or the task is not paused.",
+	"A previous send is still being checked. Try again shortly.",
 	"Reconnect the agent tab to the original conversation first.",
 	"The agent tab is disconnected.",
 	"Take over the task before deleting it.",

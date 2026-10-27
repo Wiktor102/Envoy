@@ -80,6 +80,8 @@ test("a claim can be revoked for editing, and the new reply waits for Send now",
 	advance(20_000);
 	assert.equal(service.sync("owner", snapshot()).command, null);
 	service.control("owner", task.id, "send-now");
+	assert.equal(service.sync("owner", snapshot()).command, null);
+	service.report("owner", claim.commandId, "rejected");
 	const newClaim = service.sync("owner", snapshot()).command!;
 	assert.notEqual(newClaim.commandId, claim.commandId);
 	assert.equal(newClaim.text, "Thursday is better.");
@@ -88,6 +90,125 @@ test("a claim can be revoked for editing, and the new reply waits for Send now",
 	assert.equal(service.report("owner", newClaim.commandId, "sent")?.status, "waiting");
 	assert.equal(service.report("owner", newClaim.commandId, "sent")?.status, "waiting");
 	assert.equal(service.sync("owner", snapshot()).command, null);
+	assert.equal(agent.calls.length, 1);
+});
+
+test("a rejected retired claim does not suppress a paused edit on resume", async () => {
+	const { agent, service, advance } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	advance(10_000);
+	const claim = service.sync("owner", snapshot()).command!;
+	service.control("owner", task.id, "edit");
+	service.report("owner", claim.commandId, "rejected");
+	service.control("owner", task.id, "pause");
+	assert.equal(service.control("owner", task.id, "resume").status, "thinking");
+	assert.equal(agent.calls.length, 2);
+});
+
+test("resuming an unauthorized claim waits for rejection before regenerating", async () => {
+	const { agent, service, advance } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	advance(10_000);
+	const claim = service.sync("owner", snapshot()).command!;
+	service.control("owner", task.id, "pause");
+	assert.equal(service.control("owner", task.id, "resume").status, "waiting");
+	assert.equal(agent.calls.length, 1);
+	service.report("owner", claim.commandId, "rejected");
+	assert.equal(service.sync("owner", snapshot()).task?.status, "thinking");
+	assert.equal(agent.calls.length, 2);
+});
+
+test("a late uncertain retired claim cancels a replacement edit and requires review", async () => {
+	const { agent, service, advance } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	advance(10_000);
+	const claim = service.sync("owner", snapshot()).command!;
+	service.control("owner", task.id, "edit");
+	service.control("owner", task.id, "save-edit", "Thursday works.");
+	service.control("owner", task.id, "send-now");
+	assert.equal(service.sync("owner", snapshot()).command, null);
+	const state = service.report("owner", claim.commandId, "uncertain")!;
+	assert.equal(state.status, "needs_user");
+	assert.equal(state.pendingReply, null);
+	assert.match(state.detail!, /may have completed/);
+	assert.equal(service.sync("owner", snapshot()).command, null);
+	assert.equal(service.control("owner", task.id, "resume").status, "waiting");
+	assert.equal(agent.calls.length, 1);
+});
+
+test("a retired claim gates takeover, replacement tasks, and deletion until its result", async () => {
+	for (const result of ["rejected", "uncertain", "sent"] as const) {
+		const { agent, service, advance } = setup();
+		const task = service.start("owner", "Arrange a meeting", snapshot());
+		await resolveReply(agent);
+		advance(10_000);
+		const claim = service.sync("owner", snapshot()).command!;
+		const takenOver = service.control("owner", task.id, "take-over");
+		assert.equal(takenOver.status, "taken_over");
+		assert.match(takenOver.detail!, /Checking/);
+		assert.throws(() => service.start("owner", "Try again", snapshot()), /still being checked/);
+		assert.throws(() => service.clear("owner", task.id), /still being checked/);
+		const reported = service.report("owner", claim.commandId, result)!;
+		assert.equal(reported.status, "taken_over");
+		if (result === "rejected") {
+			assert.equal(service.start("owner", "Try again", snapshot()).status, "thinking");
+		} else {
+			assert.match(reported.detail!, /may have completed/);
+			assert.throws(() => service.start("owner", "Try again", snapshot()), /previous send may have completed/);
+		}
+	}
+});
+
+test("a lost retired report expires to uncertainty without allowing a replacement send", async () => {
+	const { agent, service, advance } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	advance(10_000);
+	const claim = service.sync("owner", snapshot()).command!;
+	service.control("owner", task.id, "edit");
+	service.control("owner", task.id, "save-edit", "Thursday works.");
+	service.control("owner", task.id, "send-now");
+	advance(30_001);
+	const expired = service.sync("owner", snapshot());
+	assert.equal(expired.command, null);
+	assert.equal(expired.task?.status, "needs_user");
+	assert.match(expired.task?.detail!, /may have completed/);
+	assert.equal(service.report("owner", claim.commandId, "rejected")?.status, "needs_user");
+});
+
+test("a lost retired report after takeover blocks a new task until the user reviews it", async () => {
+	const { agent, service, advance } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	advance(10_000);
+	service.sync("owner", snapshot());
+	service.control("owner", task.id, "take-over");
+	advance(30_001);
+	const state = service.sync("owner", snapshot()).task!;
+	assert.equal(state.status, "taken_over");
+	assert.match(state.detail!, /may have completed/);
+	assert.throws(() => service.start("owner", "Try again", snapshot()), /previous send may have completed/);
+	service.clear("owner", task.id);
+	assert.equal(service.start("owner", "Try again", snapshot()).status, "thinking");
+});
+
+test("the original connector can settle a retired claim after a replacement attaches", async () => {
+	const { agent, service, advance } = setup();
+	const task = service.start("old-owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	advance(10_000);
+	const claim = service.sync("old-owner", snapshot()).command!;
+	service.control("old-owner", task.id, "pause");
+	service.disconnect("old-owner");
+	assert.equal(service.attach("new-owner", task.id, snapshot()).status, "paused");
+	assert.equal(service.control("new-owner", task.id, "resume").status, "waiting");
+	assert.equal(service.report("old-owner", claim.commandId, "uncertain"), null);
+	const state = service.sync("new-owner", snapshot()).task!;
+	assert.equal(state.status, "needs_user");
+	assert.match(state.detail!, /may have completed/);
 	assert.equal(agent.calls.length, 1);
 });
 

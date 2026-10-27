@@ -22,9 +22,13 @@ const MAX_REPLY_LENGTH = 4000;
 type Attempt = {
 	command: SendReplyCommand;
 	taskId: string;
+	connectorId: string;
 	context: string;
 	authorized: boolean;
 	retired: boolean;
+	// Even an unauthorized command may have inserted a draft that the user sent.
+	// Wait for its result before allowing any replacement send or task.
+	awaitingRetiredResult: boolean;
 	deadline: number;
 };
 type Options = {
@@ -72,6 +76,9 @@ export class TaskService {
 		this.expireLease();
 		if (this.task && this.task.status !== "completed" && this.task.status !== "taken_over") {
 			throw new Error("A task is already active. Take over the existing task first.");
+		}
+		if (this.hasAwaitingRetiredResult()) {
+			throw new Error("A previous send is still being checked. Try again shortly.");
 		}
 		if (this.task && this.requiresVerification) {
 			throw new Error("The previous send may have completed. Check the conversation and delete the old task first.");
@@ -132,6 +139,9 @@ export class TaskService {
 		}
 		if (task.status !== "completed" && task.status !== "taken_over") {
 			throw new Error("Take over the task before deleting it.");
+		}
+		if (this.hasAwaitingRetiredResult()) {
+			throw new Error("A previous send is still being checked. Try again shortly.");
 		}
 		this.erase();
 	}
@@ -195,14 +205,18 @@ export class TaskService {
 			case "pause": {
 				if (task.status === "completed" || task.status === "taken_over") throw new Error("This task has ended.");
 				const discarded = task.pendingReply;
+				const unstarted = this.inFlight && !this.inFlight.authorized ? this.inFlight.command : null;
 				const uncertain = this.invalidate(true);
 				if (discarded && !uncertain) this.processedRevisions.delete(discarded.expectedRevision);
+				if (unstarted && !uncertain) this.processedRevisions.delete(unstarted.expectedRevision);
 				task.pendingReply = null;
 				task.status = "paused";
 				task.detail =
 					uncertain || this.requiresVerification
 						? "Paused. The send may have completed; check the conversation before resuming."
-						: "Paused by you.";
+						: this.hasAwaitingRetiredResult()
+							? "Paused. Checking whether the previous send completed."
+							: "Paused by you.";
 				break;
 			}
 			case "resume": {
@@ -226,7 +240,9 @@ export class TaskService {
 				task.detail =
 					uncertain || this.requiresVerification
 						? "You are in control. A send may have completed; check the conversation."
-						: "You are in control of this conversation.";
+						: this.hasAwaitingRetiredResult()
+							? "You are in control. Checking whether the previous send completed."
+							: "You are in control of this conversation.";
 				this.scheduleRetention(task.id);
 				break;
 			}
@@ -295,20 +311,26 @@ export class TaskService {
 		let command: SendReplyCommand | null = null;
 		if (task.status === "pending" && task.pendingReply?.sendAt !== null && task.pendingReply?.sendAt !== undefined) {
 			if (task.pendingReply.sendAt <= this.now()) {
+				if (this.hasAwaitingRetiredResult()) {
+					task.detail = "Checking whether the previous send completed before sending this reply.";
+					return { task: this.state(), isOwner: true, command: null };
+				}
 				const { commandId, chatId, expectedRevision, text } = task.pendingReply;
 				command = this.connector.claimSend({ commandId, chatId, expectedRevision, text });
 				if (command) {
 					const attempt = {
 						command,
 						taskId: task.id,
+						connectorId,
 						context: textContext(copy),
 						authorized: false,
 						retired: false,
+						awaitingRetiredResult: false,
 						deadline: this.now() + SEND_RESULT_TIMEOUT_MS,
 					};
 					this.inFlight = attempt;
 					this.attempts.set(commandId, attempt);
-					this.scheduleAttemptTimeout(SEND_RESULT_TIMEOUT_MS);
+					this.scheduleAttemptTimeout();
 					task.pendingReply = null;
 					task.status = "sending";
 					task.detail = "Checking the conversation before sending.";
@@ -347,21 +369,43 @@ export class TaskService {
 
 	report(connectorId: string, commandId: string, result: SendResult): TaskState | null {
 		this.expireLease();
-		if (!this.task || connectorId !== this.owner) return null;
+		if (!this.task) return null;
 		const attempt = this.attempts.get(commandId);
-		if (!attempt || attempt.taskId !== this.task.id) return this.state();
+		if (!attempt || attempt.taskId !== this.task.id || attempt.connectorId !== connectorId) {
+			return connectorId === this.owner ? this.state() : null;
+		}
+		const returnState = () => (connectorId === this.owner ? this.state() : null);
 		// Repeated reports are ignored. A rejected attempt can never be retried
 		// with the same command ID, and an uncertain result always needs review.
 		this.attempts.delete(commandId);
 		if (this.inFlight === attempt) {
 			this.inFlight = null;
-			if (this.attemptTimer) clearTimeout(this.attemptTimer);
-			this.attemptTimer = undefined;
 		}
+		if (attempt.awaitingRetiredResult) {
+			attempt.awaitingRetiredResult = false;
+			if (result === "rejected") {
+				// A pre-authorization rejection proves that this attempt did not
+				// dispatch. Cancel already records suppression; edit and pause must
+				// remain usable for the same conversation.
+				if (this.task.status === "waiting") this.maybeGenerate();
+				if (this.task.status === "completed" || this.task.status === "taken_over") {
+					this.task.detail = "You are in control of this conversation.";
+					this.scheduleRetention(this.task.id);
+				}
+			} else {
+				// An unauthorized connector cannot prove it sent the reply. The
+				// draft could still have been sent manually, so require review.
+				this.markRetiredAttemptUncertain(attempt);
+			}
+			this.scheduleAttemptTimeout();
+			return returnState();
+		}
+		this.scheduleAttemptTimeout();
+		if (attempt.retired) return returnState();
 		this.processedRevisions.add(attempt.command.expectedRevision);
 		this.suppressedRevisions.add(attempt.command.expectedRevision);
 		this.suppressedContexts.add(attempt.context);
-		if (attempt.retired || this.task.status !== "sending") return this.state();
+		if (this.task.status !== "sending") return returnState();
 		if (result === "sent" && attempt.authorized) {
 			this.task.status = "waiting";
 			this.task.detail = "Reply sent. Waiting for a new message.";
@@ -373,7 +417,7 @@ export class TaskService {
 					? "The reply was not sent. Check the conversation before resuming."
 					: "The send could not be confirmed. Check the conversation before resuming.";
 		}
-		return this.state();
+		return returnState();
 	}
 
 	disconnect(connectorId: string): void {
@@ -410,13 +454,14 @@ export class TaskService {
 
 	private scheduleRetention(taskId: string): void {
 		if (this.retentionTimer) clearTimeout(this.retentionTimer);
-		if (this.requiresVerification) {
+		if (this.requiresVerification || this.hasAwaitingRetiredResult()) {
 			this.retentionTimer = undefined;
 			return;
 		}
 		this.retentionTimer = setTimeout(() => {
 			if (
 				!this.requiresVerification &&
+				!this.hasAwaitingRetiredResult() &&
 				this.task?.id === taskId &&
 				(this.task.status === "completed" || this.task.status === "taken_over")
 			)
@@ -450,25 +495,62 @@ export class TaskService {
 		this.expireAttempt();
 	}
 
-	private scheduleAttemptTimeout(delay: number): void {
+	private hasAwaitingRetiredResult(): boolean {
+		for (const attempt of this.attempts.values()) {
+			if (attempt.awaitingRetiredResult) return true;
+		}
+		return false;
+	}
+
+	private scheduleAttemptTimeout(): void {
 		if (this.attemptTimer) clearTimeout(this.attemptTimer);
+		this.attemptTimer = undefined;
+		const deadlines = [...this.attempts.values()]
+			.filter((attempt) => this.inFlight === attempt || attempt.awaitingRetiredResult)
+			.map((attempt) => attempt.deadline);
+		if (!deadlines.length) return;
+		const delay = Math.max(0, Math.min(...deadlines) - this.now());
 		this.attemptTimer = setTimeout(() => {
-			if (!this.inFlight) return;
-			const remaining = this.inFlight.deadline - this.now();
-			if (remaining > 0) this.scheduleAttemptTimeout(remaining);
-			else this.expireAttempt();
+			this.attemptTimer = undefined;
+			this.expireAttempt();
 		}, delay);
 		this.attemptTimer.unref();
 	}
 
 	private expireAttempt(): void {
-		if (!this.inFlight) return;
-		const remaining = this.inFlight.deadline - this.now();
-		if (remaining > 0) return;
+		if (this.inFlight && this.inFlight.deadline <= this.now()) {
+			this.invalidate();
+			if (this.task?.status === "sending") {
+				this.task.status = "needs_user";
+				this.task.detail = "The send could not be confirmed. Check the conversation before resuming.";
+			}
+		}
+		for (const attempt of this.attempts.values()) {
+			if (!attempt.awaitingRetiredResult || attempt.deadline > this.now()) continue;
+			attempt.awaitingRetiredResult = false;
+			this.attempts.delete(attempt.command.commandId);
+			this.markRetiredAttemptUncertain(attempt);
+		}
+		this.scheduleAttemptTimeout();
+	}
+
+	private markRetiredAttemptUncertain(attempt: Attempt): void {
+		if (!this.task || this.task.id !== attempt.taskId) return;
 		this.invalidate();
-		if (!this.task || this.task.status !== "sending") return;
-		this.task.status = "needs_user";
-		this.task.detail = "The send could not be confirmed. Check the conversation before resuming.";
+		this.requiresVerification = true;
+		this.suppressedRevisions.add(attempt.command.expectedRevision);
+		this.suppressedContexts.add(attempt.context);
+		this.task.pendingReply = null;
+		if (this.task.status === "taken_over" || this.task.status === "completed") {
+			if (this.retentionTimer) clearTimeout(this.retentionTimer);
+			this.retentionTimer = undefined;
+			this.task.detail = "A previous send may have completed. Check the conversation before starting another task.";
+		} else if (this.task.status === "paused") {
+			this.task.detail = "Paused. A previous send may have completed; check the conversation before resuming.";
+		} else {
+			this.task.status = "needs_user";
+			this.task.detail = "A previous send may have completed. Check the conversation before resuming.";
+		}
 	}
 
 	private pauseForDisconnect(message: string): void {
@@ -490,8 +572,6 @@ export class TaskService {
 		this.epoch++;
 		this.generation?.abort();
 		this.generation = null;
-		if (this.attemptTimer) clearTimeout(this.attemptTimer);
-		this.attemptTimer = undefined;
 		const uncertain = this.inFlight !== null && (!explicitControl || this.inFlight.authorized);
 		if (this.inFlight) {
 			this.inFlight.retired = true;
@@ -500,9 +580,12 @@ export class TaskService {
 				this.requiresVerification = true;
 				this.suppressedRevisions.add(this.inFlight.command.expectedRevision);
 				this.suppressedContexts.add(this.inFlight.context);
+			} else if (explicitControl) {
+				this.inFlight.awaitingRetiredResult = true;
 			}
 			this.inFlight = null;
 		}
+		this.scheduleAttemptTimeout();
 		return uncertain;
 	}
 
@@ -514,6 +597,10 @@ export class TaskService {
 		if (this.requiresVerification) {
 			task.status = "needs_user";
 			task.detail = "The send could not be confirmed. Check the conversation before resuming.";
+			return;
+		}
+		if (this.hasAwaitingRetiredResult()) {
+			task.detail = "Checking whether the previous send completed.";
 			return;
 		}
 		if (
