@@ -1,5 +1,6 @@
 import { DEFAULT_REPLY_DELAY_SECONDS, type TaskControlAction, type TaskStatus } from "@envoy/contracts";
 import type { ControllerState, EnvoyController } from "../controller";
+import { isolateTextInput } from "./text-input";
 import styles from "./styles.css?inline";
 import markup from "./view.html?raw";
 
@@ -53,6 +54,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const countdown = element<HTMLElement>("#envoy-countdown");
 	const editor = element<HTMLElement>("#envoy-editor");
 	const editText = element<HTMLTextAreaElement>("#envoy-reply-edit");
+	isolateTextInput(goal);
+	isolateTextInput(editText);
 	const saveEditButton = element<HTMLButtonElement>("#envoy-save-edit");
 	const sendButton = element<HTMLButtonElement>("#envoy-send-now");
 	const editButton = element<HTMLButtonElement>("#envoy-edit");
