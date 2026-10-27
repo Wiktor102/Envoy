@@ -1,6 +1,6 @@
 export function isGroupIntro(scope: Element): boolean {
 	return (
-		scope.matches('[data-scope="messages_table"][data-release-focus-from="CLICK"][tabindex="0"]') &&
+		scope.matches('[data-scope="messages_table"][data-release-focus-from="CLICK"][tabindex]') &&
 		!scope.matches("[data-message-id], [aria-roledescription]") &&
 		!scope.querySelector("[data-message-id], [aria-roledescription], video, audio, object, embed, iframe") &&
 		Boolean(scope.querySelector(":scope > h3, :scope > div h3")) &&
@@ -11,7 +11,7 @@ export function isGroupIntro(scope: Element): boolean {
 
 export function isGroupSystemEvent(scope: Element): boolean {
 	if (
-		!scope.matches('[data-scope="messages_table"][data-release-focus-from="CLICK"][tabindex="0"]') ||
+		!scope.matches('[data-scope="messages_table"][data-release-focus-from="CLICK"][tabindex]') ||
 		scope.matches("[data-message-id], [aria-roledescription]") ||
 		scope.querySelector(
 			'[data-message-id], [aria-roledescription], h1, h2, h3, h4, h5, h6, [role="heading"], button, [role="button"], img, svg, video, audio, canvas, a, input, [contenteditable]',

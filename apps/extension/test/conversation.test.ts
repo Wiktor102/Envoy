@@ -788,6 +788,8 @@ test("reads group events as system context and omits the group introduction", as
 			["Unidentified", "unknown"],
 		],
 	);
+	for (const scope of document.querySelectorAll('[tabindex="0"]')) scope.setAttribute("tabindex", "-1");
+	assert.deepEqual((await messengerChatAdapter.readConversation()).messages, snapshot.messages);
 	document.querySelectorAll('[role="presentation"] span[dir="auto"] div')[0]!.textContent = "Another event";
 	assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
 	dom.window.close();
@@ -811,6 +813,8 @@ test("reads an animated preview as an unreadable attachment and tracks its blob 
 	);
 	document.querySelector("img")!.setAttribute("src", "blob:https://www.facebook.com/second");
 	assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
+	for (const button of document.querySelectorAll('[role="button"]')) button.setAttribute("tabindex", "-1");
+	assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.attachments.length, 1);
 	for (const unsafe of [
 		preview.replace(path, "M0 0"),
 		preview.replace("blob:https://www.facebook.com/first", "https://example.com/a"),

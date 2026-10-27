@@ -150,7 +150,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		if (findReplyButton(boundary)?.contains(button)) continue;
 		if (!images.some((viewer) => viewer.contains(image))) images.push(button);
 	}
-	for (const button of main.querySelectorAll<HTMLElement>('[data-scope="messages_table"] [role="button"][tabindex="0"]')) {
+	for (const button of main.querySelectorAll<HTMLElement>('[data-scope="messages_table"] [role="button"][tabindex]')) {
 		if (!isAnimatedPreview(button) || !isVisible(button)) continue;
 		const boundary = messageBoundary(button);
 		if (!boundary || findReplyButton(boundary)?.contains(button)) continue;

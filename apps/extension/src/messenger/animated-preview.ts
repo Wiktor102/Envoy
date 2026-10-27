@@ -4,7 +4,7 @@ const playPath =
 // The observed Messenger animated preview is a blob image with a nested play
 // control. Require the exact play glyph and message boundary, not a label.
 export function isAnimatedPreview(button: HTMLElement): boolean {
-	if (!button.matches('[role="button"][tabindex="0"]') || button.closest('[aria-hidden="true"], [role="toolbar"]'))
+	if (!button.matches('[role="button"][tabindex]') || button.closest('[aria-hidden="true"], [role="toolbar"]'))
 		return false;
 	const scope = button.closest('[data-scope="messages_table"]');
 	if (!scope?.matches("[data-message-id][aria-roledescription]")) return false;
@@ -15,7 +15,7 @@ export function isAnimatedPreview(button: HTMLElement): boolean {
 	const images = button.querySelectorAll<HTMLImageElement>("img");
 	if (images.length !== 1 || images[0]!.getAttribute("alt") !== "" || !images[0]!.getAttribute("src")?.startsWith("blob:"))
 		return false;
-	const controls = button.querySelectorAll<HTMLElement>('[role="button"][tabindex="0"]');
+	const controls = button.querySelectorAll<HTMLElement>('[role="button"][tabindex]');
 	if (controls.length !== 1) return false;
 	const control = controls[0]!;
 	const svg = control.querySelector('svg[viewBox="0 0 16 16"][aria-hidden="true"]');
