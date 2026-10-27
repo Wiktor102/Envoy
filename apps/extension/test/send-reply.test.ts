@@ -104,7 +104,7 @@ test("prepares a send without relying on a zero-delay background timer", async (
 });
 
 test("uses the composer send icon with arbitrary labels and never its Like button", async () => {
-	for (const label of ["Naciśnij klawisz Enter, aby wysłać", "Press Enter to send"]) {
+	for (const label of ["送信", "إرسال", "Enviar", ""]) {
 		const { dom, editor, button } = setup();
 		button.setAttribute("aria-label", label);
 		editor.setAttribute("aria-label", label);
@@ -123,6 +123,21 @@ test("uses the composer send icon with arbitrary labels and never its Like butto
 	}
 });
 
+test("rejects missing, ambiguous, disabled, or out-of-composer send icons", async () => {
+	for (const change of ["missing", "ambiguous", "disabled", "outside"]) {
+		const { dom, button } = setup();
+		let clicks = 0;
+		button.addEventListener("click", () => clicks++);
+		if (change === "missing") button.querySelector("path")!.setAttribute("d", "M0 0 L1 1");
+		if (change === "ambiguous") button.parentElement!.append(button.cloneNode(true));
+		if (change === "disabled") button.disabled = true;
+		if (change === "outside") document.querySelector("main")!.append(button);
+		assert.equal(await messengerChatAdapter.sendReply(await command(), async () => true), "rejected");
+		assert.equal(clicks, 0);
+		dom.window.close();
+	}
+});
+
 test("does not treat a CSS-hidden status as send confirmation", async () => {
 	for (const hiddenStyle of ["visibility: hidden", "opacity: 0"]) {
 		const { dom, editor, button } = setup();
@@ -134,7 +149,7 @@ test("does not treat a CSS-hidden status as send confirmation", async () => {
 			wrapper.setAttribute("style", hiddenStyle);
 			status = document.createElement("span");
 			status.setAttribute("role", "status");
-			status.setAttribute("aria-label", "Sent");
+			status.setAttribute("data-message-status", "sent");
 			wrapper.append(status);
 			document.querySelector('[data-scope="messages_table"] [role="row"]:last-child')!.append(wrapper);
 		});
@@ -150,6 +165,35 @@ test("does not treat a CSS-hidden status as send confirmation", async () => {
 		assert.equal(await pending, "sent");
 		dom.window.close();
 	}
+});
+
+test("waits for a server message ID instead of translated sent headings", async () => {
+	const { dom, editor, button } = setup();
+	let message: HTMLElement | undefined;
+	button.addEventListener("click", () => {
+		editor.textContent = "";
+		const scope = document.createElement("div");
+		scope.setAttribute("data-scope", "messages_table");
+		scope.setAttribute("data-message-id", "7520889721094971653");
+		scope.setAttribute("aria-roledescription", "arbitrary locale");
+		scope.setAttribute("data-message-direction", "outgoing");
+		scope.innerHTML = '<h4>Wysłano</h4><span dir="auto">Hi there</span>';
+		document.querySelector("main")!.append(scope);
+		message = scope;
+	});
+	let settled = false;
+	const pending = messengerChatAdapter.sendReply(await command(), async () => true);
+	void pending.then(() => (settled = true));
+	await new Promise((resolve) => setTimeout(resolve, 200));
+	assert.equal(settled, false);
+	assert.ok(message);
+	message.setAttribute("data-message-status", "pending");
+	message.setAttribute("data-message-id", "100056210523203@msgr.7520889721094971653");
+	await new Promise((resolve) => setTimeout(resolve, 200));
+	assert.equal(settled, false);
+	message.removeAttribute("data-message-status");
+	assert.equal(await pending, "sent");
+	dom.window.close();
 });
 
 test("does not overwrite an existing draft or use an ambiguous composer", async () => {

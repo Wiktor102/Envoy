@@ -630,28 +630,21 @@ function newlyAppendedOutgoing(before: ConversationSnapshot, after: Conversation
 function hasSentStatus(capture: ConversationCapture): boolean {
 	const boundary = capture.rendered.at(-1)?.boundary;
 	if (!boundary) return false;
-	const labels = [
-		boundary.getAttribute("data-message-status") ?? "",
-		boundary.getAttribute("aria-label") ?? "",
-		...[...boundary.querySelectorAll<HTMLElement>('[aria-label], [role="status"]')]
-			.filter(isVisible)
-			.map(
-				(element) =>
-					element.getAttribute("aria-label") ??
-					(element.getAttribute("role") === "status" ? element.textContent : "") ??
-					"",
-			),
-	];
-	if (
-		labels.some((label) =>
-			/^(?:sending(?:\.\.\.|…)?|pending|not sent|failed|could(?: not|n't) send|wysyłanie|nie wysłano|nieudane)$/i.test(
-				label.trim(),
-			),
-		)
-	)
-		return false;
-	return labels.some((label) =>
-		/^(?:sent|delivered|seen|read|wysłano|dostarczono|wyświetlono|przeczytano)$/i.test(label.trim()),
+	// Machine status values are useful where a connector exposes them, but
+	// translated headings and labels are not delivery acknowledgements.
+	const statuses = [boundary, ...boundary.querySelectorAll<HTMLElement>("[data-message-status]")]
+		.filter((element) => isVisible(element as HTMLElement))
+		.map((element) => element.getAttribute("data-message-status"));
+	if (statuses.some((status) => status && /^(?:sending|pending|failed|not-sent)$/.test(status))) return false;
+	if (statuses.some((status) => status && /^(?:sent|delivered|seen|read)$/.test(status))) return true;
+	// The live encrypted UI replaces its optimistic numeric ID with a qualified
+	// @msgr ID when acknowledged. Regular threads use the server's mid.$ IDs.
+	// Never confirm a numeric optimistic bubble, even if its heading says Sent.
+	const id = boundary.getAttribute("data-message-id") ?? "";
+	return (
+		boundary.matches('[data-scope="messages_table"][aria-roledescription]') &&
+		/^(?:\d+@msgr\.\d+|mid\.\$[\w-]+)$/.test(id) &&
+		!boundary.querySelector('[aria-busy="true"], [role="progressbar"]')
 	);
 }
 
