@@ -210,7 +210,7 @@ function isAtLatestMessages(main: HTMLElement, rendered: RenderedMessage[]): boo
 	// An explicit jump-to-latest control is stronger evidence than scroll geometry.
 	const jumpToLatest = [...main.querySelectorAll<HTMLElement>('button[aria-label], [role="button"][aria-label]')].some(
 		(button) =>
-			button.getClientRects().length > 0 &&
+			isVisible(button) &&
 			/^(?:scroll to bottom|jump to (?:the )?(?:latest|newest|most recent)(?: messages?)?|przewiń do (?:najnowszych wiadomości|dołu))(?:[.!…]|$)/i.test(
 				button.getAttribute("aria-label")?.trim() ?? "",
 			),
@@ -496,7 +496,22 @@ async function readCapturedConversation(): Promise<{ capture: ConversationCaptur
 }
 
 function isVisible(element: HTMLElement): boolean {
-	return element.isConnected && !element.closest('[aria-hidden="true"]') && element.getClientRects().length > 0;
+	if (!element.isConnected || element.closest('[aria-hidden="true"]') || element.getClientRects().length === 0)
+		return false;
+	// visibility:hidden retains layout rectangles, and opacity can hide an entire
+	// subtree without changing a descendant's own computed opacity.
+	for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+		const style = window.getComputedStyle(node);
+		if (
+			style.display === "none" ||
+			style.visibility === "hidden" ||
+			style.visibility === "collapse" ||
+			style.opacity === "0"
+		) {
+			return false;
+		}
+	}
+	return true;
 }
 
 function getComposer(main: HTMLElement): HTMLElement | null {
@@ -616,6 +631,20 @@ function confirmSend(before: ConversationSnapshot, text: string): Promise<SendRe
 	});
 }
 
+// Give Messenger a task turn to render the send control. Hidden tabs can throttle
+// timers for a minute, so do not use a zero-delay timeout for this handoff.
+function yieldToMessenger(): Promise<void> {
+	return new Promise((resolve) => {
+		const channel = new MessageChannel();
+		channel.port1.onmessage = () => {
+			channel.port1.close();
+			channel.port2.close();
+			resolve();
+		};
+		channel.port2.postMessage(null);
+	});
+}
+
 async function performSend(
 	command: SendReplyCommand,
 	authorize: () => Promise<boolean>,
@@ -644,26 +673,29 @@ async function performSend(
 	};
 	editor.addEventListener("input", input);
 	const removeListener = () => editor.removeEventListener("input", input);
-	const clearOurDraft = () => {
+	const clearOurDraft = (): boolean => {
 		// If the user changed or left the editor, keep the draft intact.
 		if (changedByUser || !editor.isConnected || editor.textContent !== command.text || document.activeElement !== editor)
-			return;
-		if (!selectContents(editor, false)) return;
+			return false;
+		if (!selectContents(editor, false)) return false;
 		ownEdit = true;
 		try {
 			document.execCommand("delete");
+			return editor.isConnected && editor.textContent === "";
 		} catch {
 			// Leave a draft alone if Messenger will not accept an editing command.
+			return false;
 		} finally {
 			ownEdit = false;
 		}
 	};
 	const stopBeforeDispatch = (): SendResult => {
 		const safeToClear = !changedByUser && editor.isConnected && editor.textContent === command.text;
-		if (safeToClear) clearOurDraft();
+		const cleared = safeToClear && clearOurDraft();
 		removeListener();
-		// If the injected draft disappeared or was edited, it may have been sent manually.
-		return safeToClear ? "rejected" : "uncertain";
+		// A changed or retained draft may have been sent manually. Do not assume a
+		// failed Lexical deletion cleared our text without checking the composer.
+		return cleared ? "rejected" : "uncertain";
 	};
 
 	try {
@@ -697,7 +729,7 @@ async function performSend(
 		}
 
 		// Messenger may render its send control in response to the input event.
-		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		await yieldToMessenger();
 		if (!(await authorize())) return stopBeforeDispatch();
 
 		// No await is allowed between the final authorization, local check, and click.

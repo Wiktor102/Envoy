@@ -83,6 +83,55 @@ test("sends once only after authorization and confirms an appended outgoing mess
 	dom.window.close();
 });
 
+test("prepares a send without relying on a zero-delay background timer", async () => {
+	const { dom, editor, button } = setup();
+	button.addEventListener("click", () => {
+		editor.textContent = "";
+		appendMessage("Hi there", "outgoing", "sent");
+	});
+	const send = await command();
+	const original = globalThis.setTimeout;
+	globalThis.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+		if (timeout === 0) throw new Error("A background timer was used to prepare a send");
+		return original(handler as (...args: unknown[]) => void, timeout, ...args);
+	}) as typeof setTimeout;
+	try {
+		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+	} finally {
+		globalThis.setTimeout = original;
+		dom.window.close();
+	}
+});
+
+test("does not treat a CSS-hidden status as send confirmation", async () => {
+	for (const hiddenStyle of ["visibility: hidden", "opacity: 0"]) {
+		const { dom, editor, button } = setup();
+		let status: HTMLElement | null = null;
+		button.addEventListener("click", () => {
+			editor.textContent = "";
+			appendMessage("Hi there", "outgoing");
+			const wrapper = document.createElement("span");
+			wrapper.setAttribute("style", hiddenStyle);
+			status = document.createElement("span");
+			status.setAttribute("role", "status");
+			status.setAttribute("aria-label", "Sent");
+			wrapper.append(status);
+			document.querySelector('[data-scope="messages_table"] [role="row"]:last-child')!.append(wrapper);
+		});
+		let settled = false;
+		const pending = messengerChatAdapter.sendReply(await command(), async () => true);
+		void pending.then(() => {
+			settled = true;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		assert.equal(settled, false);
+		assert.ok(status);
+		(status as HTMLElement).parentElement!.removeAttribute("style");
+		assert.equal(await pending, "sent");
+		dom.window.close();
+	}
+});
+
 test("does not overwrite an existing draft or use an ambiguous composer", async () => {
 	const { dom, editor, button } = setup();
 	let clicks = 0;
@@ -231,6 +280,36 @@ test("preserves a user edit during authorization and reports it as uncertain", a
 	);
 	assert.equal(editor.textContent, "User changed this");
 	assert.equal(clicks, 0);
+	dom.window.close();
+});
+
+test("reports an uncleared draft as uncertain when the editor loses focus", async () => {
+	const { dom, editor, button } = setup();
+	const send = await command();
+	assert.equal(
+		await messengerChatAdapter.sendReply(send, async () => {
+			button.focus();
+			return false;
+		}),
+		"uncertain",
+	);
+	assert.equal(editor.textContent, "Hi there");
+	dom.window.close();
+});
+
+test("reports an uncleared draft as uncertain when Lexical ignores delete", async () => {
+	const { dom, editor } = setup();
+	const send = await command();
+	Object.defineProperty(document, "execCommand", {
+		configurable: true,
+		value: (action: string, _showUi: boolean, text?: string) => {
+			if (action === "insertText") editor.textContent = text ?? "";
+			// Simulate a successful-looking delete that does not modify Lexical.
+			return true;
+		},
+	});
+	assert.equal(await messengerChatAdapter.sendReply(send, async () => false), "uncertain");
+	assert.equal(editor.textContent, "Hi there");
 	dom.window.close();
 });
 
