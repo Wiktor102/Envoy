@@ -36,6 +36,22 @@ const fixture = `
 		<div aria-hidden="true"><span dir="auto">Hidden</span></div>
 	</div>`;
 
+test("ignores date separator scopes but rejects unrecognized content beside them", async () => {
+	const dom = setup();
+	setMessages(
+		`<div data-scope="messages_table"><div aria-hidden="true" data-scope="date_break"><span dir="auto">Monday</span></div></div>${fixture}`,
+	);
+	assert.equal((await messengerChatAdapter.readConversation()).messages.length, 2);
+	document
+		.querySelector('[data-scope="date_break"]')!
+		.parentElement!.append(document.createTextNode("unreadable content"));
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+	);
+	dom.window.close();
+});
+
 test("reads loaded text in order, without nested duplicates or controls", async () => {
 	const dom = setup();
 	setMessages(fixture);

@@ -170,6 +170,19 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 	const leafRows = allRows.filter((row) => !allRows.some((other) => other !== row && row.contains(other)));
 	if (leafRows.some((row) => !rendered.some(({ element }) => row.contains(element)))) return true;
 	for (const scope of scopes) {
+		// Messenger also wraps date separators in messages_table scopes. Ignore a
+		// separator only when there is no other content in that scope.
+		if (scope.querySelector('[data-scope="date_break"]')) {
+			const remainder = scope.cloneNode(true) as HTMLElement;
+			remainder.querySelectorAll('[data-scope="date_break"]').forEach((date) => date.remove());
+			if (
+				!remainder.textContent?.trim() &&
+				!remainder.querySelector(
+					'img, svg, canvas, video, audio, object, embed, iframe, a, [role="row"], [role="article"]',
+				)
+			)
+				continue;
+		}
 		// A text caption does not make an adjacent voice, video, sticker, or file
 		// readable by this text-only connector.
 		const media = [
