@@ -400,6 +400,83 @@ const photoFixture = `
 		<a href="https://example.test/messenger_media/?attachment_id=4">external</a>
 	</div></div>`;
 
+test("reads encrypted photo buttons in direct and group conversations", async () => {
+	for (const path of ["/messages/e2ee/t/123", "/e2ee/t/123", "/t/123"]) {
+		const dom = setup(path);
+		setMessages(`
+			<div data-scope="messages_table" data-message-id="photo" aria-roledescription="wiadomość" aria-label="O piątek 18:53, Alex">
+				<h4 dir="auto">Alex</h4>
+				<div role="button" tabindex="-1"><div><img alt="Otwórz zdjęcie" src="https://example.test/photo"></div><svg aria-hidden="true"></svg></div>
+				<div role="button" aria-label="1 reakcja z ❤️"><img alt="❤️"></div>
+			</div>
+			<div data-scope="messages_table" data-message-id="caption" aria-roledescription="message" aria-label="At 19:03, You: A caption">
+				<span dir="auto">A caption</span>
+				<button><img alt="Open photo" src="https://example.test/two"></button>
+				<div role="button"><img alt="Open image" src="https://example.test/three"></div>
+			</div>
+			<div data-scope="messages_table" data-message-id="text" aria-roledescription="wiadomość" aria-label="O 19:04, Alex: Thanks"><span dir="auto">Thanks</span><img alt="avatar"></div>`);
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(
+			snapshot.messages.map(({ text, direction, attachments }) => ({
+				text,
+				direction,
+				urls: attachments.map(({ url }) => url),
+			})),
+			[
+				{ text: "", direction: "incoming", urls: ["https://example.test/photo"] },
+				{
+					text: "A caption",
+					direction: "outgoing",
+					urls: ["https://example.test/two", "https://example.test/three"],
+				},
+				{ text: "Thanks", direction: "incoming", urls: [] },
+			],
+		);
+		assert.equal(snapshot.messages[0]!.reactions[0]!.count, 1);
+		document.querySelector('img[alt="Otwórz zdjęcie"]')!.setAttribute("src", "https://example.test/changed");
+		assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
+		dom.window.close();
+	}
+});
+
+test("does not mistake photo previews, toolbar images, or arbitrary buttons for attachments", async () => {
+	const dom = setup();
+	setMessages(`<div data-scope="messages_table" data-message-id="reply">
+		<h4>You replied to Alex</h4>
+		<div role="button" aria-label="View original message"><img alt="Open photo" src="https://example.test/quote"></div>
+		<span dir="auto">Thanks</span>
+		<div role="toolbar"><button><img alt="Open photo"></button></div>
+	</div>`);
+	assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.attachments.length, 0);
+	for (const photo of [
+		'<div role="button"><img alt="avatar"></div>',
+		'<div role="button"><img alt="Sticker"></div>',
+		'<img alt="Open photo">',
+	]) {
+		setMessages(`<div data-scope="messages_table" data-message-id="photo">${photo}</div>`);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	dom.window.close();
+});
+
+test("invalidates encrypted photos when a data source changes without a public URL", async () => {
+	const dom = setup();
+	setMessages(
+		'<div data-scope="messages_table" data-message-id="photo"><div role="button"><img alt="Otwórz zdjęcie" src="data:image/png;base64,AAAA"></div></div>',
+	);
+	const original = await messengerChatAdapter.readConversation();
+	assert.equal(original.messages[0]!.attachments[0]!.url, null);
+	document.querySelector("img")!.setAttribute("src", "data:image/png;base64,BBBB");
+	const changed = await messengerChatAdapter.readConversation();
+	assert.equal(changed.messages[0]!.attachments[0]!.url, null);
+	assert.notEqual(changed.revision, original.revision);
+	assert.ok(!JSON.stringify(changed).includes("base64"));
+	dom.window.close();
+});
+
 test("keeps image revisions stable when the same messages are remounted", async () => {
 	const dom = setup();
 	setMessages(photoFixture);

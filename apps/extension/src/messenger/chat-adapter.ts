@@ -87,7 +87,7 @@ function getChatId(): string | null {
 interface RenderedMessage {
 	element: HTMLElement;
 	boundary: Element | null;
-	images: HTMLAnchorElement[];
+	images: HTMLElement[];
 }
 
 function getMessageMain(): HTMLElement {
@@ -127,14 +127,25 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		images: [],
 	}));
 
-	// Messenger's photo viewer links identify image attachments without reading
-	// unrelated images such as avatars, emoji, stickers, or reactions.
-	const images = [...main.querySelectorAll<HTMLAnchorElement>('[data-scope="messages_table"] a[href]')].filter(
+	// Ordinary chats use viewer links; encrypted chats use photo buttons with
+	// an explicitly labelled image. Neither requires opening the photo viewer.
+	const images: HTMLElement[] = [
+		...main.querySelectorAll<HTMLAnchorElement>('[data-scope="messages_table"] a[href]'),
+	].filter(
 		(anchor) =>
 			!anchor.closest('[role="button"], button, [role="toolbar"], [aria-hidden="true"]') &&
 			anchor.getClientRects().length > 0 &&
 			isMessengerPhotoLink(anchor),
 	);
+	for (const image of main.querySelectorAll<HTMLImageElement>('[data-scope="messages_table"] img[alt]')) {
+		if (!/^(?:open photo|open image|otwórz zdjęcie)$/i.test(image.alt.trim()) || !isVisible(image)) continue;
+		const button = image.closest<HTMLElement>('button, [role="button"]');
+		if (!button || button.closest('[role="toolbar"], [aria-hidden="true"]')) continue;
+		const boundary = messageBoundary(button);
+		if (!boundary?.matches('[data-scope="messages_table"][data-message-id]')) continue;
+		if (findReplyButton(boundary)?.contains(button)) continue;
+		if (!images.some((viewer) => viewer.contains(image))) images.push(button);
+	}
 	for (const image of images) {
 		const boundary = messageBoundary(image);
 		const textMatches = messages.filter(
@@ -445,12 +456,16 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 	});
 }
 
-// The digest also changes if a reused viewer link points to a new photo.
+// Encrypted photo buttons have no viewer URL, and data/blob sources are not
+// uploaded as attachments. They must still invalidate a reply when replaced.
 function imageFingerprint(rendered: RenderedMessage[]): string[][] {
 	return rendered.map(({ images, boundary }) => {
 		const reply = boundary && findReplyButton(boundary);
 		return [
-			...images.map((image) => image.getAttribute("href") ?? ""),
+			...images.flatMap((viewer) => {
+				const image = viewer.querySelector<HTMLImageElement>("img");
+				return [viewer.getAttribute("href") ?? "", image?.currentSrc || image?.getAttribute("src") || ""];
+			}),
 			...(reply ? getQuotedImages(reply).map((image) => image.getAttribute("src") ?? "") : []),
 		];
 	});
