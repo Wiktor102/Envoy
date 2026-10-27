@@ -487,3 +487,28 @@ test("browser origins other than Chrome extensions cannot reach the WebSocket", 
 	assert.equal(allowedOrigin("null"), false);
 	assert.equal(allowedOrigin("chrome-extension://abcdefghijklmnopabcdefghijklmnop.evil.example"), false);
 });
+
+test("system events remain context, invalidate pending replies, and do not hide unknown senders", async () => {
+	const { agent, service } = setup();
+	const initial = snapshot();
+	service.start("owner", "Arrange a meeting", initial);
+	await resolveReply(agent);
+	const event: ConversationMessage = {
+		id: "event",
+		text: "Group renamed",
+		direction: "system",
+		replyTo: null,
+		attachments: [],
+		reactions: [],
+	};
+	const changed = { ...initial, revision: "r2", messages: [...initial.messages, event] };
+	assert.equal(service.sync("owner", changed).task?.pendingReply, null);
+	assert.equal(agent.calls.length, 2);
+	assert.equal(agent.calls[1]!.snapshot.messages.at(-1)?.direction, "system");
+	const unknown = {
+		...snapshot("r3", "Who sent this?", "unknown"),
+		messages: [...snapshot("r3", "Who sent this?", "unknown").messages, event],
+	};
+	assert.equal(service.sync("owner", unknown).task?.status, "needs_user");
+	assert.equal(agent.calls.length, 2);
+});

@@ -125,7 +125,9 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 					? "You"
 					: message.direction === "incoming"
 						? "Other person"
-						: "Unknown sender";
+						: message.direction === "system"
+							? "System"
+							: "Unknown sender";
 			const text = document.createElement("span");
 			text.className = "message-text";
 			text.textContent = message.text || (message.attachments.length ? "[Attachment]" : "[Empty message]");

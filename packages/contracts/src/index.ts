@@ -17,7 +17,7 @@ export interface ConversationMessage {
 	id: string;
 	text: string;
 	// Unknown must never be treated as an incoming message.
-	direction: "incoming" | "outgoing" | "unknown";
+	direction: "incoming" | "outgoing" | "unknown" | "system";
 	// The quoted text is a preview, not a stable reference to another message.
 	replyTo: { text: string | null; context: string | null; attachments: readonly ImageAttachment[] } | null;
 	attachments: readonly ImageAttachment[];

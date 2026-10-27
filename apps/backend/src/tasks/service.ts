@@ -609,7 +609,7 @@ export class TaskService {
 			this.suppressedContexts.has(textContext(snapshot))
 		)
 			return;
-		const latest = snapshot.messages.at(-1);
+		const latest = [...snapshot.messages].reverse().find((message) => message.direction !== "system");
 		if (!latest || latest.direction === "outgoing") {
 			task.detail = "Waiting for a new incoming message.";
 			return;

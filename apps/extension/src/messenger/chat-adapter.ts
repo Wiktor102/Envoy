@@ -1,3 +1,4 @@
+import { isGroupIntro, isGroupSystemEvent } from "./group-events";
 import type { ConversationMessage, ConversationSnapshot, SendReplyCommand, SendResult } from "@envoy/contracts";
 
 export interface MessengerChatAdapter {
@@ -103,6 +104,8 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		'[data-scope="messages_table"][dir="auto"], [data-scope="messages_table"] [dir="auto"]',
 	);
 	const textElements = [...candidates].filter((element) => {
+		const scope = element.closest('[data-scope="messages_table"]');
+		if (scope && isGroupIntro(scope)) return false;
 		if (
 			element.closest(
 				'button, [role="button"], [contenteditable="true"], [aria-hidden="true"], h1, h2, h3, h4, h5, h6, [role="heading"]',
@@ -190,7 +193,7 @@ function isDateSeparator(element: HTMLElement): boolean {
 
 function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]): boolean {
 	const scopes = [...main.querySelectorAll<HTMLElement>('[data-scope="messages_table"]')].filter(
-		(scope) => isVisible(scope) && !isDateSeparator(scope),
+		(scope) => isVisible(scope) && !isDateSeparator(scope) && !isGroupIntro(scope),
 	);
 	if (scopes.length === 0) return true;
 	// A message row may be adjacent to, rather than inside, a recognized scope.
@@ -412,6 +415,7 @@ function readLabeledSender(boundary: Element): string | null {
 }
 
 function readDirection(boundary: Element): ConversationMessage["direction"] {
+	if (isGroupSystemEvent(boundary)) return "system";
 	const directions = new Set<ConversationMessage["direction"]>();
 	const explicit = boundary.getAttribute("data-message-direction");
 	if (explicit === "incoming" || explicit === "outgoing") directions.add(explicit);

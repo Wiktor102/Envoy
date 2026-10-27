@@ -769,3 +769,26 @@ test("clears the old chat and asks for a reload after navigation", async () => {
 		dom.window.close();
 	}
 });
+
+test("reads group events as system context and omits the group introduction", async () => {
+	const dom = setup();
+	const intro = `<div data-scope="messages_table" data-release-focus-from="CLICK" tabindex="0">
+		<div role="img" aria-label="Group"><img alt="Person"></div><h3 dir="auto"><span dir="auto">Group</span></h3>
+		<div><span dir="auto">Person created group</span></div><ul><li><div role="button" tabindex="-1" aria-label="Add"><svg></svg></div><span dir="auto">Add</span></li><li><div role="button" tabindex="-1" aria-label="Name"></div><span dir="auto">Name</span></li></ul></div>`;
+	const event = `<div data-scope="messages_table" data-release-focus-from="CLICK" tabindex="0"><div role="presentation"><div><div role="presentation"><div role="presentation"><span dir="auto"><div role="presentation">Person renamed group</div></span></div></div></div></div></div>`;
+	setMessages(
+		`${intro}<div data-scope="messages_table" data-message-id="1" aria-roledescription="message" aria-label="At 17:50, Alex: Hello"><span dir="auto">Hello</span></div>${event}<div data-scope="messages_table"><span dir="auto">Unidentified</span></div>`,
+	);
+	const snapshot = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		snapshot.messages.map(({ text, direction }) => [text, direction]),
+		[
+			["Hello", "incoming"],
+			["Person renamed group", "system"],
+			["Unidentified", "unknown"],
+		],
+	);
+	document.querySelectorAll('[role="presentation"] span[dir="auto"] div')[0]!.textContent = "Another event";
+	assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
+	dom.window.close();
+});

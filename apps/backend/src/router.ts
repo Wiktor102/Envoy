@@ -47,7 +47,8 @@ function attachment(value: unknown): ImageAttachment {
 function message(value: unknown): ConversationMessage {
 	const item = object(value);
 	const direction = item.direction;
-	if (direction !== "incoming" && direction !== "outgoing" && direction !== "unknown") return invalid();
+	if (direction !== "incoming" && direction !== "outgoing" && direction !== "unknown" && direction !== "system")
+		return invalid();
 	const reply = item.replyTo === null ? null : object(item.replyTo);
 	return {
 		id: string(item.id),
