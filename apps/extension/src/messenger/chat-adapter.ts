@@ -1,3 +1,4 @@
+import { isAnimatedPreview } from "./animated-preview";
 import { isGroupIntro, isGroupSystemEvent } from "./group-events";
 import type { ConversationMessage, ConversationSnapshot, SendReplyCommand, SendResult } from "@envoy/contracts";
 
@@ -149,6 +150,12 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		if (findReplyButton(boundary)?.contains(button)) continue;
 		if (!images.some((viewer) => viewer.contains(image))) images.push(button);
 	}
+	for (const button of main.querySelectorAll<HTMLElement>('[data-scope="messages_table"] [role="button"][tabindex="0"]')) {
+		if (!isAnimatedPreview(button) || !isVisible(button)) continue;
+		const boundary = messageBoundary(button);
+		if (!boundary || findReplyButton(boundary)?.contains(button)) continue;
+		images.push(button);
+	}
 	for (const image of images) {
 		const boundary = messageBoundary(image);
 		const textMatches = messages.filter(
@@ -215,6 +222,9 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 		if (
 			media.some((element) => {
 				if (element.matches("video, audio, object, embed, iframe, a[download]")) return true;
+				const preview = rendered
+					.flatMap(({ images }) => images)
+					.find((image) => isAnimatedPreview(image) && (image === element || image.contains(element)));
 				const metadata = [
 					element.getAttribute("aria-label"),
 					element.getAttribute("alt"),
@@ -223,8 +233,9 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 				]
 					.filter(Boolean)
 					.join(" ");
+				const checkedMetadata = preview ? metadata.replace(/(?:^|\s)gif(?=$|[\s:.,])/gi, " ") : metadata;
 				return /(?:^|\s)(?:sticker|voice(?: message)?|audio(?: message)?|video|gif|file attachment|naklejka|wiadomość głosowa|plik)(?:$|[\s:.,])/i.test(
-					metadata,
+					checkedMetadata,
 				);
 			})
 		)

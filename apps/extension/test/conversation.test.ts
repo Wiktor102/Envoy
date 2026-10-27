@@ -792,3 +792,36 @@ test("reads group events as system context and omits the group introduction", as
 	assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
 	dom.window.close();
 });
+
+test("reads an animated preview as an unreadable attachment and tracks its blob source", async () => {
+	const dom = setup();
+	const path =
+		"M13.126 9.949c1.5-.866 1.5-3.031 0-3.897l-6.75-3.898C4.875 1.288 3 2.371 3 4.103v7.794c0 1.732 1.875 2.815 3.375 1.949l6.75-3.897z";
+	const preview = `<div role="button" tabindex="0" aria-label="Otwórz GIF "><div><img alt="" src="blob:https://www.facebook.com/first"><div role="button" tabindex="0" aria-label="Dotknij, aby odtworzyć GIF "><svg viewBox="0 0 16 16" aria-hidden="true"><path d="${path}"></path></svg></div></div></div>`;
+	const wrap = (content: string) =>
+		`<div data-scope="messages_table" data-message-id="1" aria-roledescription="message" aria-label="At 17:50, Alex">${content}</div><div data-scope="messages_table" data-message-id="2" aria-roledescription="message" aria-label="At 17:51, Alex: Hello"><span dir="auto">Hello</span></div>`;
+	setMessages(wrap(preview));
+	const snapshot = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		snapshot.messages.map(({ text, attachments }) => [text, attachments]),
+		[
+			["", [{ type: "image", url: null, description: null }]],
+			["Hello", []],
+		],
+	);
+	document.querySelector("img")!.setAttribute("src", "blob:https://www.facebook.com/second");
+	assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
+	for (const unsafe of [
+		preview.replace(path, "M0 0"),
+		preview.replace("blob:https://www.facebook.com/first", "https://example.com/a"),
+		preview.replace("</div></div></div>", "<video></video></div></div></div>"),
+		'<img alt="" src="blob:https://www.facebook.com/x">',
+	]) {
+		setMessages(wrap(unsafe));
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	dom.window.close();
+});
