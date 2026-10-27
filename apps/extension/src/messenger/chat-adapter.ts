@@ -390,10 +390,22 @@ function readReactions(boundary: Element): ConversationSnapshot["messages"][numb
 
 // Only metadata that explicitly describes the sender is used here. Message
 // alignment, color, and an arbitrary person's name do not establish who sent it.
+function readLabeledSender(boundary: Element): string | null {
+	// This is Messenger's per-message accessibility label, not message text or
+	// a group heading. Consecutive bubbles often have no sender heading at all.
+	if (!boundary.matches('[data-scope="messages_table"][data-message-id]')) return null;
+	if (!/^(?:message|wiadomość)$/i.test(boundary.getAttribute("aria-roledescription") ?? "")) return null;
+	const label = boundary.getAttribute("aria-label") ?? "";
+	const match = label.match(/^(?:O|At) [^\n]*?\d{1,2}:\d{2}(?:\s?[AP]M)?, ([^:\n]{1,100})(?::(?:\s|$)|$)/i);
+	return match?.[1]?.trim() || null;
+}
+
 function readDirection(boundary: Element): ConversationMessage["direction"] {
 	const directions = new Set<ConversationMessage["direction"]>();
 	const explicit = boundary.getAttribute("data-message-direction");
 	if (explicit === "incoming" || explicit === "outgoing") directions.add(explicit);
+	const sender = readLabeledSender(boundary);
+	if (sender) directions.add(/^(?:you|ty)$/i.test(sender) ? "outgoing" : "incoming");
 
 	const labels = [
 		boundary.getAttribute("aria-label") ?? "",

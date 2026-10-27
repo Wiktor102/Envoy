@@ -205,6 +205,40 @@ test("uses only explicit sender metadata and includes direction in the revision"
 	dom.window.close();
 });
 
+test("reads per-message Polish and English sender labels in direct and group chats", async () => {
+	for (const path of ["/e2ee/t/123", "/messages/e2ee/t/123", "/t/123"]) {
+		const dom = setup(path);
+		const labels = [
+			"O poniedziałek 15:28, Alex: Hello",
+			"O 09:46, Sam: Hi",
+			"O 09:46, Sam: Again",
+			"O 13:04, Ty: Hello",
+			"At Monday 9:46 AM, You: Hi",
+			"At 9:46 PM, Alex",
+			"Not a sender label",
+		];
+		setMessages(
+			labels
+				.map(
+					(label, i) =>
+						`<div data-scope="messages_table" data-message-id="message-${i}" aria-roledescription="wiadomość" aria-label="${label}"><span dir="auto">Text</span></div>`,
+				)
+				.join(""),
+		);
+		assert.deepEqual(
+			(await messengerChatAdapter.readConversation()).messages.map(({ direction }) => direction),
+			["incoming", "incoming", "incoming", "outgoing", "outgoing", "incoming", "unknown"],
+		);
+		const first = document.querySelector("[data-message-id]")!;
+		first.setAttribute("data-message-direction", "outgoing");
+		assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.direction, "unknown");
+		first.removeAttribute("data-message-direction");
+		first.removeAttribute("aria-roledescription");
+		assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.direction, "unknown");
+		dom.window.close();
+	}
+});
+
 test("requires a reload after navigation, even when the message DOM changes", async () => {
 	const dom = setup();
 	setMessages(fixture);
