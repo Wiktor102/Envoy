@@ -586,11 +586,21 @@ function hasUnsupportedDraft(main: HTMLElement, editor: HTMLElement): boolean {
 	);
 }
 
+// The paper-plane path is the observed Messenger send icon. Unlike its title,
+// the vector is shared across locales. Match its shape only inside the active
+// composer's region; a Like, attachment, or message-toolbar button cannot send.
+const sendIconPath =
+	"M16.6915026,12.4744748 L3.50612381,13.2599618 C3.19218622,13.2599618 3.03521743,13.4170592 3.03521743,13.5741566";
 function getSendButton(main: HTMLElement): HTMLElement | null {
-	const buttons = [...main.querySelectorAll<HTMLElement>('button[aria-label], [role="button"][aria-label]')].filter(
+	const editor = getComposer(main);
+	const region = editor?.closest<HTMLElement>('[role="region"]');
+	if (!region || !main.contains(region) || region.querySelector('[data-scope="messages_table"]')) return null;
+	const buttons = [...region.querySelectorAll<HTMLElement>('button, [role="button"]')].filter(
 		(button) =>
 			isVisible(button) &&
-			/^(?:send|send message|wyślij|wyślij wiadomość)$/i.test(button.getAttribute("aria-label")?.trim() ?? ""),
+			[...button.querySelectorAll('svg[viewBox="0 0 24 24"] path')].some((path) =>
+				(path.getAttribute("d") ?? "").replace(/\s+/g, "").startsWith(sendIconPath.replace(/\s+/g, "")),
+			),
 	);
 	if (buttons.length !== 1) return null;
 	const button = buttons[0]!;

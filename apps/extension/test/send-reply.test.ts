@@ -8,8 +8,8 @@ function setup() {
 	const dom = new JSDOM(
 		`<main role="main">
 			<div data-scope="messages_table"><div role="row" data-message-direction="incoming"><span dir="auto">Hello</span></div></div>
-			<div contenteditable="true" role="textbox" aria-label="Message" tabindex="0"></div>
-			<button aria-label="Send"></button>
+			<div role="region"><div contenteditable="true" data-lexical-editor="true" role="textbox" aria-label="Message" tabindex="0"></div>
+			<button aria-label="Send"><svg viewBox="0 0 24 24"><path d="M16.6915026,12.4744748 L3.50612381,13.2599618 C3.19218622,13.2599618 3.03521743,13.4170592 3.03521743,13.5741566"></path></svg></button></div>
 		</main>`,
 		{ url: "https://www.messenger.com/t/123" },
 	);
@@ -99,6 +99,26 @@ test("prepares a send without relying on a zero-delay background timer", async (
 		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
 	} finally {
 		globalThis.setTimeout = original;
+		dom.window.close();
+	}
+});
+
+test("uses the composer send icon with arbitrary labels and never its Like button", async () => {
+	for (const label of ["Naciśnij klawisz Enter, aby wysłać", "Press Enter to send"]) {
+		const { dom, editor, button } = setup();
+		button.setAttribute("aria-label", label);
+		editor.setAttribute("aria-label", label);
+		const like = document.createElement("button");
+		like.setAttribute("aria-label", "Wyślij polubienie");
+		let likes = 0;
+		like.addEventListener("click", () => likes++);
+		document.querySelector('[role="region"]')!.append(like);
+		button.addEventListener("click", () => {
+			editor.textContent = "";
+			appendMessage("Hi there", "outgoing", "sent");
+		});
+		assert.equal(await messengerChatAdapter.sendReply(await command(), async () => true), "sent");
+		assert.equal(likes, 0);
 		dom.window.close();
 	}
 });
