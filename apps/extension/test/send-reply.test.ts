@@ -18,6 +18,7 @@ function setup() {
 		document: dom.window.document,
 		location: dom.window.location,
 		MutationObserver: dom.window.MutationObserver,
+		InputEvent: dom.window.InputEvent,
 	});
 	Object.defineProperty(globalThis, "crypto", { configurable: true, value: webcrypto });
 	dom.window.HTMLElement.prototype.getClientRects = () => [1] as unknown as DOMRectList;
@@ -27,18 +28,23 @@ function setup() {
 	Object.defineProperty(main, "scrollHeight", { configurable: true, value: 400 });
 	const editor = document.querySelector<HTMLElement>('[contenteditable="true"]')!;
 	const button = document.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!;
-	Object.defineProperty(document, "execCommand", {
-		configurable: true,
-		value: (action: string, _showUi: boolean, text?: string) => {
-			if (action === "insertText") editor.textContent = text ?? "";
-			else if (action === "delete") editor.textContent = "";
-			else return false;
-			editor.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-			return true;
-		},
+	// Like Lexical, cancel beforeinput edits and update the DOM after dispatch,
+	// without an input event. Native execCommand edits would be reverted.
+	const lexical = {
+		accepts: (_inputType: string) => true,
+		commit: queueMicrotask as (apply: () => void) => void,
+	};
+	editor.addEventListener("beforeinput", (event) => {
+		const { inputType, data } = event as InputEvent;
+		if (!lexical.accepts(inputType)) return;
+		event.preventDefault();
+		lexical.commit(() => {
+			if (inputType === "insertText") editor.textContent += data ?? "";
+			else if (inputType === "deleteContentBackward") editor.textContent = "";
+		});
 	});
 	bindMessengerDocument();
-	return { dom, editor, button };
+	return { dom, editor, button, lexical };
 }
 
 async function command(text = "Hi there") {
@@ -362,16 +368,9 @@ test("reports an uncleared draft as uncertain when the editor loses focus", asyn
 });
 
 test("reports an uncleared draft as uncertain when Lexical ignores delete", async () => {
-	const { dom, editor } = setup();
+	const { dom, editor, lexical } = setup();
 	const send = await command();
-	Object.defineProperty(document, "execCommand", {
-		configurable: true,
-		value: (action: string, _showUi: boolean, text?: string) => {
-			if (action === "insertText") editor.textContent = text ?? "";
-			// Simulate a successful-looking delete that does not modify Lexical.
-			return true;
-		},
-	});
+	lexical.accepts = (inputType) => inputType === "insertText";
 	assert.equal(await messengerChatAdapter.sendReply(send, async () => false), "uncertain");
 	assert.equal(editor.textContent, "Hi there");
 	dom.window.close();
@@ -389,5 +388,47 @@ test("does not treat an optimistic bubble as confirmation or retry it", async ()
 	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "uncertain");
 	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "uncertain");
 	assert.equal(clicks, 1);
+	dom.window.close();
+});
+
+test("waits for Lexical to commit a draft in a later task before sending", async () => {
+	const { dom, editor, button, lexical } = setup();
+	lexical.commit = (apply) => {
+		const channel = new MessageChannel();
+		channel.port1.onmessage = () => {
+			channel.port1.close();
+			apply();
+		};
+		channel.port2.postMessage(null);
+	};
+	let clicks = 0;
+	button.addEventListener("click", () => {
+		clicks++;
+		assert.equal(editor.textContent, "Hi there");
+		editor.textContent = "";
+		appendMessage("Hi there", "outgoing", "sent");
+	});
+	assert.equal(await messengerChatAdapter.sendReply(await command(), async () => true), "sent");
+	assert.equal(clicks, 1);
+	dom.window.close();
+});
+
+test("confirms a deferred Lexical delete before reporting a cleared draft", async () => {
+	const { dom, editor, button } = setup();
+	let clicks = 0;
+	button.addEventListener("click", () => clicks++);
+	assert.equal(await messengerChatAdapter.sendReply(await command(), async () => false), "rejected");
+	assert.equal(editor.textContent, "");
+	assert.equal(clicks, 0);
+	dom.window.close();
+});
+
+test("does not send when Lexical never commits the draft", async () => {
+	const { dom, button, lexical } = setup();
+	lexical.commit = () => {};
+	let clicks = 0;
+	button.addEventListener("click", () => clicks++);
+	assert.equal(await messengerChatAdapter.sendReply(await command(), async () => true), "uncertain");
+	assert.equal(clicks, 0);
 	dom.window.close();
 });

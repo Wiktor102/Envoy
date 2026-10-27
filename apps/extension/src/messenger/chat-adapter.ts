@@ -710,6 +710,35 @@ function yieldToMessenger(): Promise<void> {
 	});
 }
 
+// Lexical ignores execCommand (it fires no beforeinput) and reverts the native
+// DOM edit. It accepts a beforeinput event instead, cancels it, and commits its
+// own DOM update after dispatch returns. Report whether Lexical took the edit.
+function editComposer(editor: HTMLElement, inputType: string, data: string | null = null): boolean {
+	const event = new InputEvent("beforeinput", { inputType, data, bubbles: true, cancelable: true, composed: true });
+	return !editor.dispatchEvent(event);
+}
+
+// Wait on DOM mutations rather than timers, which hidden tabs throttle. The
+// timeout only bounds a composer that never reaches the expected state.
+function waitForComposer(ready: () => boolean): Promise<boolean> {
+	return new Promise((resolve) => {
+		if (ready()) return resolve(true);
+		let done = false;
+		const finish = (result: boolean) => {
+			if (done) return;
+			done = true;
+			observer.disconnect();
+			clearTimeout(timeout);
+			resolve(result);
+		};
+		const observer = new MutationObserver(() => {
+			if (ready()) finish(true);
+		});
+		observer.observe(document.body, { childList: true, characterData: true, attributes: true, subtree: true });
+		const timeout = setTimeout(() => finish(ready()), 2_000);
+	});
+}
+
 async function performSend(
 	command: SendReplyCommand,
 	authorize: () => Promise<boolean>,
@@ -738,25 +767,26 @@ async function performSend(
 	};
 	editor.addEventListener("input", input);
 	const removeListener = () => editor.removeEventListener("input", input);
-	const clearOurDraft = (): boolean => {
+	const clearOurDraft = async (): Promise<boolean> => {
 		// If the user changed or left the editor, keep the draft intact.
 		if (changedByUser || !editor.isConnected || editor.textContent !== command.text || document.activeElement !== editor)
 			return false;
 		if (!selectContents(editor, false)) return false;
 		ownEdit = true;
 		try {
-			document.execCommand("delete");
-			return editor.isConnected && editor.textContent === "";
-		} catch {
 			// Leave a draft alone if Messenger will not accept an editing command.
+			if (!editComposer(editor, "deleteContentBackward")) return false;
+		} catch {
 			return false;
 		} finally {
 			ownEdit = false;
 		}
+		await waitForComposer(() => editor.textContent === "");
+		return !changedByUser && editor.isConnected && editor.textContent === "";
 	};
-	const stopBeforeDispatch = (): SendResult => {
+	const stopBeforeDispatch = async (): Promise<SendResult> => {
 		const safeToClear = !changedByUser && editor.isConnected && editor.textContent === command.text;
-		const cleared = safeToClear && clearOurDraft();
+		const cleared = safeToClear && (await clearOurDraft());
 		removeListener();
 		// A changed or retained draft may have been sent manually. Do not assume a
 		// failed Lexical deletion cleared our text without checking the composer.
@@ -785,11 +815,12 @@ async function performSend(
 		ownEdit = true;
 		let inserted: boolean;
 		try {
-			inserted = document.execCommand("insertText", false, command.text);
+			inserted = editComposer(editor, "insertText", command.text);
 		} finally {
 			ownEdit = false;
 		}
-		if (!inserted || editor.textContent !== command.text || hasUnsupportedDraft(capture.main, editor)) {
+		if (inserted) await waitForComposer(() => editor.textContent === command.text);
+		if (!inserted || changedByUser || editor.textContent !== command.text || hasUnsupportedDraft(capture.main, editor)) {
 			return stopBeforeDispatch();
 		}
 
