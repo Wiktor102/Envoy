@@ -41,9 +41,14 @@ function setup(handler: (request: BackendRequest) => unknown | Promise<unknown>)
 	let update!: (snapshot: ConversationSnapshot | null, status: string) => void;
 	let sent = 0;
 	let attempted = 0;
+	let heartbeatTick: (() => void) | null = null;
+	let heartbeatDisconnected: (() => void) | null = null;
+	let heartbeatStarts = 0;
+	let heartbeatStops = 0;
+	let read = async () => observedSnapshot;
 	const adapter: MessengerChatAdapter = {
 		async readConversation() {
-			return observedSnapshot;
+			return read();
 		},
 		async sendReply(_command, authorize, isCurrent) {
 			attempted++;
@@ -60,6 +65,16 @@ function setup(handler: (request: BackendRequest) => unknown | Promise<unknown>)
 		transport,
 		adapter,
 		lifecycle,
+		heartbeat(onTick, onDisconnect) {
+			heartbeatStarts++;
+			heartbeatTick = onTick;
+			heartbeatDisconnected = onDisconnect;
+			return () => {
+				heartbeatStops++;
+				heartbeatTick = null;
+				heartbeatDisconnected = null;
+			};
+		},
 		watch(onUpdate) {
 			update = onUpdate;
 			onUpdate(observedSnapshot, "Loaded.");
@@ -76,6 +91,29 @@ function setup(handler: (request: BackendRequest) => unknown | Promise<unknown>)
 		},
 		get attempted() {
 			return attempted;
+		},
+		get heartbeatStarts() {
+			return heartbeatStarts;
+		},
+		get heartbeatStops() {
+			return heartbeatStops;
+		},
+		tick() {
+			assert.ok(heartbeatTick, "The owner heartbeat is not connected");
+			heartbeatTick();
+		},
+		disconnectHeartbeat() {
+			assert.ok(heartbeatDisconnected, "The owner heartbeat is not connected");
+			const disconnected = heartbeatDisconnected;
+			heartbeatTick = null;
+			heartbeatDisconnected = null;
+			disconnected();
+		},
+		setRead(next: () => Promise<ConversationSnapshot>) {
+			read = next;
+		},
+		setSnapshot(snapshot: ConversationSnapshot) {
+			observedSnapshot = snapshot;
 		},
 		observe(snapshot: ConversationSnapshot) {
 			observedSnapshot = snapshot;
@@ -255,4 +293,138 @@ test("an older pageshow cannot resume a document hidden again before disconnect 
 	watchForResume = true;
 	harness.lifecycle.dispatchEvent(new Event("pageshow"));
 	await resumedHeartbeat.promise;
+});
+
+test("a background heartbeat reads the current conversation before syncing", { timeout: 5000 }, async (t) => {
+	const newerSynced = deferred<void>();
+	let started = false;
+	const harness = setup((request) => {
+		switch (request.type) {
+			case "envoy:start":
+				started = true;
+				return activeTask;
+			case "envoy:sync":
+				if (request.snapshot?.revision === "revision-2") newerSynced.resolve();
+				return syncResult(started ? activeTask : null);
+			case "envoy:disconnect":
+				return undefined;
+			default:
+				throw new Error(`Unexpected request: ${request.type}`);
+		}
+	});
+	t.after(() => harness.controller.destroy());
+	await harness.controller.start(activeTask.goal);
+	assert.equal(harness.heartbeatStarts, 1);
+	// The watcher did not fire. Only the worker's tick discovers this change.
+	harness.setSnapshot({ ...initialSnapshot, revision: "revision-2" });
+	harness.tick();
+	await newerSynced.promise;
+	assert.ok(harness.calls.some((request) => request.type === "envoy:sync" && request.snapshot?.revision === "revision-2"));
+	assert.equal(harness.heartbeatStops, 0);
+	harness.controller.setControlsAvailable(false);
+	assert.equal(harness.heartbeatStops, 1);
+});
+
+test("a failed fresh read is reported even when a later read succeeds", { timeout: 5000 }, async (t) => {
+	const firstHeartbeat = deferred<ConnectorSyncResult>();
+	const heartbeatRequested = deferred<void>();
+	const unavailableRequested = deferred<void>();
+	let started = false;
+	let held = false;
+	const harness = setup((request) => {
+		switch (request.type) {
+			case "envoy:start":
+				started = true;
+				return activeTask;
+			case "envoy:sync":
+				if (!started) return syncResult(null);
+				if (!held) {
+					held = true;
+					heartbeatRequested.resolve();
+					return firstHeartbeat.promise;
+				}
+				if (!request.snapshot) unavailableRequested.resolve();
+				return syncResult({ ...activeTask, status: "paused" });
+			case "envoy:disconnect":
+				return undefined;
+			default:
+				throw new Error(`Unexpected request: ${request.type}`);
+		}
+	});
+	t.after(() => harness.controller.destroy());
+	await harness.controller.start(activeTask.goal);
+	await heartbeatRequested.promise;
+	harness.setRead(async () => {
+		throw new Error("unavailable");
+	});
+	harness.tick();
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	// A successful watcher read may arrive before the held network response.
+	harness.observe(initialSnapshot);
+	firstHeartbeat.resolve(syncResult(activeTask));
+	await unavailableRequested.promise;
+	assert.ok(harness.calls.some((request) => request.type === "envoy:sync" && request.snapshot === null));
+});
+
+test("a stale heartbeat read cannot overwrite a newer watcher snapshot", { timeout: 5000 }, async (t) => {
+	const readStarted = deferred<void>();
+	const oldRead = deferred<ConversationSnapshot>();
+	const freshSynced = deferred<void>();
+	let started = false;
+	const harness = setup((request) => {
+		switch (request.type) {
+			case "envoy:start":
+				started = true;
+				return activeTask;
+			case "envoy:sync":
+				if (request.snapshot?.revision === "revision-3") freshSynced.resolve();
+				return syncResult(started ? activeTask : null);
+			case "envoy:disconnect":
+				return undefined;
+			default:
+				throw new Error(`Unexpected request: ${request.type}`);
+		}
+	});
+	t.after(() => harness.controller.destroy());
+	await harness.controller.start(activeTask.goal);
+	harness.setRead(() => {
+		readStarted.resolve();
+		return oldRead.promise;
+	});
+	harness.tick();
+	await readStarted.promise;
+	const newest = { ...initialSnapshot, revision: "revision-3" };
+	harness.observe(newest);
+	harness.setRead(async () => newest);
+	oldRead.resolve({ ...initialSnapshot, revision: "revision-2" });
+	await freshSynced.promise;
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	assert.equal(
+		harness.calls.some((request) => request.type === "envoy:sync" && request.snapshot?.revision === "revision-2"),
+		false,
+	);
+});
+
+test("a lost heartbeat port invalidates the owner and reports unavailable", { timeout: 5000 }, async (t) => {
+	const unavailable = deferred<void>();
+	let started = false;
+	const harness = setup((request) => {
+		switch (request.type) {
+			case "envoy:start":
+				started = true;
+				return activeTask;
+			case "envoy:sync":
+				if (started && request.snapshot === null) unavailable.resolve();
+				return syncResult(started ? { ...activeTask, status: "paused" } : null);
+			case "envoy:disconnect":
+				return undefined;
+			default:
+				throw new Error(`Unexpected request: ${request.type}`);
+		}
+	});
+	t.after(() => harness.controller.destroy());
+	await harness.controller.start(activeTask.goal);
+	harness.disconnectHeartbeat();
+	await unavailable.promise;
+	assert.ok(harness.calls.some((request) => request.type === "envoy:sync" && request.snapshot === null));
 });

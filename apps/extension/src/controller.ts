@@ -2,6 +2,7 @@ import type { ConversationSnapshot, SendReplyCommand, SendResult, TaskControlAct
 import { callBackend } from "./messaging";
 import { messengerChatAdapter, type MessengerChatAdapter } from "./messenger/chat-adapter";
 import { watchConversation } from "./ui/conversation";
+import { startOwnerHeartbeat, type StartOwnerHeartbeat } from "./heartbeat";
 
 export interface ControllerState {
 	snapshot: ConversationSnapshot | null;
@@ -26,6 +27,7 @@ interface ControllerDependencies {
 	adapter: MessengerChatAdapter;
 	watch: typeof watchConversation;
 	lifecycle: Pick<EventTarget, "addEventListener" | "removeEventListener">;
+	heartbeat: StartOwnerHeartbeat;
 }
 
 // This object belongs to one document. The server owns task state; the document
@@ -37,6 +39,7 @@ export function createEnvoyController(
 	const adapter = dependencies.adapter ?? messengerChatAdapter;
 	const watch = dependencies.watch ?? watchConversation;
 	const lifecycle = dependencies.lifecycle ?? window;
+	const heartbeat = dependencies.heartbeat ?? startOwnerHeartbeat;
 	let state: ControllerState = {
 		snapshot: null,
 		conversationStatus: "Open a conversation to read its messages.",
@@ -57,6 +60,9 @@ export function createEnvoyController(
 	let disconnectPromise: Promise<void> | null = null;
 	let syncRequested = false;
 	let syncPromise: Promise<void> | null = null;
+	let stopHeartbeat: (() => void) | null = null;
+	let refreshRequested = false;
+	let refreshPromise: Promise<void> | null = null;
 	const claimed = new Set<string>();
 
 	function publish(patch: Partial<ControllerState>) {
@@ -66,6 +72,90 @@ export function createEnvoyController(
 
 	function identity(snapshot: ConversationSnapshot | null): string | null {
 		return snapshot ? `${snapshot.chatId}:${snapshot.revision}` : null;
+	}
+
+	function observe(snapshot: ConversationSnapshot | null, conversationStatus: string) {
+		const changed = identity(snapshot) !== identity(state.snapshot);
+		// A transient unavailable read must reach the backend even if a later
+		// read succeeds while an older sync is still in flight.
+		if (changed && snapshot === null && state.isOwner) controlsLossVersion++;
+		if (changed) epoch++;
+		publish({ snapshot, conversationStatus });
+		if (changed && state.isOwner) requestSync();
+	}
+
+	function ownerAvailable(): boolean {
+		return Boolean(
+			!stopped &&
+			!suspended &&
+			controlsAvailable &&
+			state.isOwner &&
+			state.task &&
+			state.task.status !== "completed" &&
+			state.task.status !== "taken_over",
+		);
+	}
+
+	function stopOwnerHeartbeat() {
+		const stop = stopHeartbeat;
+		stopHeartbeat = null;
+		stop?.();
+	}
+
+	function reconcileHeartbeat() {
+		if (!ownerAvailable()) {
+			stopOwnerHeartbeat();
+			return;
+		}
+		if (stopHeartbeat) return;
+		try {
+			stopHeartbeat = heartbeat(requestFreshSync, () => {
+				stopHeartbeat = null;
+				if (!ownerAvailable()) return;
+				// A lost port cannot prove the tab is still receiving changes.
+				// Force an unavailable report before a later reconnect.
+				controlsLossVersion++;
+				observe(null, "Agent tab connection interrupted. Envoy is paused.");
+				requestSync();
+			});
+		} catch {
+			// The normal timer provides a fallback and the server lease expires
+			// safely if the browser worker cannot be reached.
+			stopHeartbeat = null;
+		}
+	}
+
+	function requestFreshSync() {
+		if (!ownerAvailable()) return;
+		refreshRequested = true;
+		if (refreshPromise || actionInFlight) return;
+		refreshPromise = (async () => {
+			while (refreshRequested && ownerAvailable() && !actionInFlight) {
+				refreshRequested = false;
+				const readEpoch = epoch;
+				let snapshot: ConversationSnapshot | null;
+				try {
+					snapshot = await adapter.readConversation();
+				} catch {
+					snapshot = null;
+				}
+				if (!ownerAvailable()) return;
+				if (readEpoch !== epoch || actionInFlight) {
+					// The watcher or a user action changed state during the read.
+					// Never let an older read overwrite the latest snapshot.
+					refreshRequested = true;
+					continue;
+				}
+				observe(
+					snapshot,
+					snapshot ? `${snapshot.messages.length} loaded messages.` : "Conversation unavailable. Envoy is paused.",
+				);
+				requestSync();
+			}
+		})().finally(() => {
+			refreshPromise = null;
+			if (refreshRequested && !actionInFlight) requestFreshSync();
+		});
 	}
 
 	async function execute(command: SendReplyCommand, commandEpoch: number) {
@@ -133,6 +223,7 @@ export function createEnvoyController(
 						continue;
 					}
 					publish({ task: result.task, isOwner: result.isOwner, error: null });
+					reconcileHeartbeat();
 					if (result.command) void execute(result.command, requestEpoch);
 				} catch {
 					if (!stopped) publish({ error: "Backend connection unavailable. Pending sends will pause." });
@@ -145,12 +236,13 @@ export function createEnvoyController(
 	}
 
 	const stopWatching = watch((snapshot, conversationStatus) => {
-		if (identity(snapshot) !== identity(state.snapshot)) epoch++;
-		const changed = identity(snapshot) !== identity(state.snapshot);
-		publish({ snapshot, conversationStatus });
-		if (changed && state.isOwner) requestSync();
+		if (!stopped && !suspended) observe(snapshot, conversationStatus);
 	});
-	const interval = setInterval(requestSync, 1_000);
+	const interval = setInterval(() => {
+		reconcileHeartbeat();
+		if (ownerAvailable()) requestFreshSync();
+		else requestSync();
+	}, 1_000);
 	requestSync();
 
 	async function runAction(action: () => Promise<TaskState | null>) {
@@ -164,13 +256,17 @@ export function createEnvoyController(
 			if (stopped || suspended || !controlsAvailable) throw new Error("The Envoy controls are unavailable.");
 			activeAction = action();
 			const task = await activeAction;
-			if (!stopped && !suspended) publish({ task, isOwner: task !== null, error: null });
+			if (!stopped && !suspended) {
+				publish({ task, isOwner: task !== null, error: null });
+				reconcileHeartbeat();
+			}
 		} catch (error) {
 			if (!stopped) publish({ error: error instanceof Error ? error.message : "The action failed." });
 			throw error;
 		} finally {
 			activeAction = null;
 			actionInFlight = false;
+			if (refreshRequested) requestFreshSync();
 			requestSync();
 		}
 	}
@@ -193,6 +289,8 @@ export function createEnvoyController(
 		suspended = true;
 		lifecycleVersion++;
 		epoch++;
+		stopOwnerHeartbeat();
+		publish({ snapshot: null });
 		void disconnectAfterOutstandingWork();
 	};
 	const onPageShow = () => {
@@ -202,7 +300,9 @@ export function createEnvoyController(
 			if (disconnectPromise) await disconnectPromise;
 			if (stopped || lifecycleVersion !== showVersion) return;
 			suspended = false;
-			requestSync();
+			reconcileHeartbeat();
+			if (ownerAvailable()) requestFreshSync();
+			else requestSync();
 		})();
 	};
 	lifecycle.addEventListener("pagehide", onPageHide);
@@ -275,12 +375,14 @@ export function createEnvoyController(
 			controlsAvailable = available;
 			if (!available && (state.isOwner || actionInFlight)) controlsLossVersion++;
 			epoch++;
+			reconcileHeartbeat();
 			if (state.isOwner) requestSync();
 		},
 		destroy() {
 			if (stopped) return;
 			stopped = true;
 			epoch++;
+			stopOwnerHeartbeat();
 			stopWatching();
 			clearInterval(interval);
 			lifecycle.removeEventListener("pagehide", onPageHide);

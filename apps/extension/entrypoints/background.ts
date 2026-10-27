@@ -1,14 +1,15 @@
 import { defineBackground } from "wxt/utils/define-background";
 import type { BackendRequest } from "../src/messaging";
 import { createBackendClient } from "../src/backend-client";
+import { OWNER_HEARTBEAT_PORT, startBackgroundHeartbeat } from "../src/heartbeat";
 
 // Only fixed service messages are forwarded. Provider/transport errors may
 // contain private request content and must never be surfaced or logged.
 const safeErrors = new Set([
 	"A task is already active. Take over the existing task first.",
 	"The previous send may have completed. Check the conversation and delete the old task first.",
-	"The agent tab is still connected or the task is not paused.",
 	"A previous send is still being checked. Try again shortly.",
+	"The agent tab is still connected or the task is not paused.",
 	"Reconnect the agent tab to the original conversation first.",
 	"The agent tab is disconnected.",
 	"Take over the task before deleting it.",
@@ -39,6 +40,14 @@ function connectorFor(sender: chrome.runtime.MessageSender): string | null {
 
 export default defineBackground(() => {
 	const backend = createBackendClient();
+	chrome.runtime.onConnect.addListener((port) => {
+		if (port.name !== OWNER_HEARTBEAT_PORT) return;
+		if (!port.sender || !connectorFor(port.sender)) {
+			port.disconnect();
+			return;
+		}
+		startBackgroundHeartbeat(port);
+	});
 
 	chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
 		if (typeof message !== "object" || message === null || !("type" in message)) return;
