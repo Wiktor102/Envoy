@@ -390,6 +390,29 @@ test("unknown direction, unsupported content and an outgoing last message do not
 	}
 });
 
+test("known incoming text can be considered with incomplete older history", async () => {
+	const { agent, service } = setup();
+	const current = snapshot("r1", "Does Tuesday work?");
+	const older: ConversationMessage = {
+		id: "older",
+		text: "See this",
+		direction: "unknown",
+		attachments: [{ type: "image", url: null, description: null }],
+		replyTo: { text: null, context: null, attachments: [] },
+		reactions: [],
+	};
+	const withHistory = { ...current, messages: [older, ...current.messages] };
+	const task = service.start("owner", "Arrange a meeting", withHistory);
+	assert.equal(task.status, "thinking");
+	assert.deepEqual(agent.calls[0]!.snapshot.messages[0], older);
+	agent.calls[0]!.resolve({ action: "ask", text: "Is the earlier photo relevant to Tuesday?" });
+	await Promise.resolve();
+	const result = service.sync("owner", withHistory);
+	assert.equal(result.task?.status, "needs_user");
+	assert.equal(result.task?.detail, "Is the earlier photo relevant to Tuesday?");
+	assert.equal(result.command, null);
+});
+
 test("takeover ignores a late model response", async () => {
 	const { agent, service } = setup();
 	const task = service.start("owner", "Arrange a meeting", snapshot());

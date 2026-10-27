@@ -609,29 +609,24 @@ export class TaskService {
 			this.suppressedContexts.has(textContext(snapshot))
 		)
 			return;
-		if (snapshot.messages.some((message) => message.direction === "unknown")) {
+		const latest = snapshot.messages.at(-1);
+		if (!latest || latest.direction === "outgoing") {
+			task.detail = "Waiting for a new incoming message.";
+			return;
+		}
+		if (latest.direction === "unknown") {
 			task.status = "needs_user";
-			task.detail = "Some messages have an unknown sender. Check the conversation before resuming.";
+			task.detail = "The latest message has an unknown sender. Check the conversation before resuming.";
 			return;
 		}
 		if (
-			snapshot.messages.some(
-				(message) =>
-					message.attachments.length ||
-					!message.text.trim() ||
-					(message.replyTo &&
-						(message.replyTo.attachments.length ||
-							!message.replyTo.text?.trim() ||
-							!message.replyTo.context?.trim())),
-			)
+			latest.attachments.length ||
+			!latest.text.trim() ||
+			(latest.replyTo &&
+				(latest.replyTo.attachments.length || !latest.replyTo.text?.trim() || !latest.replyTo.context?.trim()))
 		) {
 			task.status = "needs_user";
-			task.detail = "The conversation contains non-text content that Envoy cannot interpret.";
-			return;
-		}
-		const latest = snapshot.messages.at(-1);
-		if (!latest || latest.direction !== "incoming") {
-			task.detail = "Waiting for a new incoming message.";
+			task.detail = "The latest message contains content Envoy cannot interpret.";
 			return;
 		}
 		task.status = "thinking";

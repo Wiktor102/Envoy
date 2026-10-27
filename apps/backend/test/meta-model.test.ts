@@ -85,3 +85,44 @@ test("the Meta adapter rejects malformed and multiline reply decisions", async (
 		else process.env.MODEL_API_KEY = previousKey;
 	}
 });
+
+test("the Meta request marks unverified history and attachments without sending their URLs", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	let body: any;
+	globalThis.fetch = async (input, init) => {
+		body = await new Request(input, init).json();
+		return new Response(
+			JSON.stringify({ choices: [{ message: { role: "assistant", content: '{"action":"wait"}' } }] }),
+			{
+				status: 200,
+				headers: { "content-type": "application/json" },
+			},
+		);
+	};
+	try {
+		const prior = {
+			id: "older",
+			direction: "unknown" as const,
+			text: "What about this?",
+			attachments: [{ type: "image" as const, url: "https://private.example/photo", description: null }],
+			replyTo: { text: null, context: null, attachments: [{ type: "image" as const, url: null, description: null }] },
+			reactions: [],
+		};
+		await new MetaModelAdapter().run(task, { ...conversation, messages: [prior, ...conversation.messages] });
+		const content = JSON.parse(body.messages[2].content);
+		assert.deepEqual(content.conversation[0], {
+			direction: "unknown",
+			text: "What about this?",
+			attachments: [{ type: "image" }],
+			replyTo: { text: null, context: null, attachments: [{ type: "image" }] },
+		});
+		assert.doesNotMatch(body.messages[2].content, /private\.example/);
+		assert.match(body.messages[0].content, /Do not guess their authors or missing contents/);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
