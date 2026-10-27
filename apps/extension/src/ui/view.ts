@@ -23,6 +23,17 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		host.setAttribute("data-facebook", "");
 	}
 
+	// Facebook marks its active theme on <html>; CSS falls back to the system theme.
+	function syncTheme() {
+		const classes = document.documentElement.classList;
+		const theme = classes.contains("__fb-dark-mode") ? "dark" : classes.contains("__fb-light-mode") ? "light" : null;
+		if (theme) host.setAttribute("data-theme", theme);
+		else host.removeAttribute("data-theme");
+	}
+	syncTheme();
+	const themeObserver = new MutationObserver(syncTheme);
+	themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+
 	const shadow = host.attachShadow({ mode: "closed" });
 	const style = document.createElement("style");
 	style.textContent = styles;
@@ -296,6 +307,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		selectTab,
 		destroy() {
 			destroyed = true;
+			themeObserver.disconnect();
 			unsubscribe();
 			window.clearInterval(countdownTimer);
 		},

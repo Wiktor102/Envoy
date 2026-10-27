@@ -6,6 +6,51 @@
 	font:
 		14px/1.4 system-ui,
 		sans-serif;
+	--envoy-surface: #fff;
+	--envoy-facebook-surface: #fff;
+	--envoy-text: #050505;
+	--envoy-secondary-text: #65676b;
+	--envoy-disabled-text: #bcc0c4;
+	--envoy-divider: #ced0d4;
+	--envoy-control: #e4e6eb;
+	--envoy-control-border: #ced0d4;
+	--envoy-message: #f0f2f5;
+	--envoy-tab-selected: #ebf5ff;
+	--envoy-tab-selected-text: #0064d1;
+	--envoy-error: #c4251c;
+}
+
+/* Follow Messenger's own theme, or the system theme until Messenger reports one. */
+:host([data-theme="dark"]) {
+	--envoy-surface: #1f1f1f;
+	--envoy-facebook-surface: hsl(200, 4%, 15%);
+	--envoy-text: #e4e6eb;
+	--envoy-secondary-text: #b0b3b8;
+	--envoy-disabled-text: #a0a3a8;
+	--envoy-divider: #3e4042;
+	--envoy-control: #3a3b3c;
+	--envoy-control-border: #4e4f50;
+	--envoy-message: #303133;
+	--envoy-tab-selected: #263951;
+	--envoy-tab-selected-text: #75b8ff;
+	--envoy-error: #ffb4aa;
+}
+
+@media (prefers-color-scheme: dark) {
+	:host(:not([data-theme])) {
+		--envoy-surface: #1f1f1f;
+		--envoy-facebook-surface: hsl(200, 4%, 15%);
+		--envoy-text: #e4e6eb;
+		--envoy-secondary-text: #b0b3b8;
+		--envoy-disabled-text: #a0a3a8;
+		--envoy-divider: #3e4042;
+		--envoy-control: #3a3b3c;
+		--envoy-control-border: #4e4f50;
+		--envoy-message: #303133;
+		--envoy-tab-selected: #263951;
+		--envoy-tab-selected-text: #75b8ff;
+		--envoy-error: #ffb4aa;
+	}
 }
 
 * {
@@ -27,27 +72,27 @@
 	border-radius: 18px;
 	padding: 8px 12px;
 	background: transparent;
-	color: #b0b3b8;
+	color: var(--envoy-secondary-text);
 	font-weight: 600;
 	cursor: pointer;
 }
 
 .tabs button[aria-selected="true"] {
-	background: #263951;
-	color: #75b8ff;
+	background: var(--envoy-tab-selected);
+	color: var(--envoy-tab-selected-text);
 }
 
 #envoy-panel {
 	position: fixed;
 	z-index: 100;
 	overflow: auto;
-	background: #1f1f1f;
-	color: #e4e6eb;
+	background: var(--envoy-surface);
+	color: var(--envoy-text);
 	border-bottom-right-radius: 8px;
 }
 
 :host([data-facebook]) #envoy-panel {
-	background: hsl(200, 4%, 15%);
+	background: var(--envoy-facebook-surface);
 	border-bottom-right-radius: 0;
 }
 
@@ -59,7 +104,7 @@ section {
 	padding: 16px;
 }
 section + section {
-	border-top: 1px solid #3e4042;
+	border-top: 1px solid var(--envoy-divider);
 }
 
 h2 {
@@ -86,11 +131,11 @@ textarea {
 	margin: 4px 0 8px;
 	min-height: 80px;
 	resize: vertical;
-	border: 1px solid #4e4f50;
+	border: 1px solid var(--envoy-control-border);
 	border-radius: 6px;
 	padding: 8px;
-	background: #3a3b3c;
-	color: #e4e6eb;
+	background: var(--envoy-control);
+	color: var(--envoy-text);
 }
 
 button,
@@ -102,13 +147,13 @@ section button {
 	border: 0;
 	border-radius: 6px;
 	padding: 7px 10px;
-	background: #3a3b3c;
-	color: #e4e6eb;
+	background: var(--envoy-control);
+	color: var(--envoy-text);
 	cursor: pointer;
 }
 
 section button:disabled {
-	color: #a0a3a8;
+	color: var(--envoy-disabled-text);
 	cursor: default;
 }
 
@@ -120,7 +165,7 @@ section button:disabled {
 }
 
 .hint {
-	color: #b0b3b8;
+	color: var(--envoy-secondary-text);
 	font-size: 12px;
 }
 
@@ -134,13 +179,13 @@ section button:disabled {
 	margin-top: 8px;
 	padding: 8px;
 	border-radius: 6px;
-	background: #303133;
+	background: var(--envoy-message);
 }
 
 #envoy-conversation strong {
 	display: block;
 	font-size: 12px;
-	color: #b0b3b8;
+	color: var(--envoy-secondary-text);
 }
 
 .message-text {
@@ -150,5 +195,5 @@ section button:disabled {
 }
 
 #envoy-error {
-	color: #ffb4aa;
+	color: var(--envoy-error);
 }
