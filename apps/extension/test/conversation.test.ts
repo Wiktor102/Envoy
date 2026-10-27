@@ -54,6 +54,65 @@ test("reads loaded text in order, without nested duplicates or controls", async 
 	dom.window.close();
 });
 
+test("reads inline emoji in text and quoted replies and changes the revision with their alt text", async () => {
+	const dom = setup();
+	setMessages(`
+		<div data-scope="messages_table">
+			<div role="row" data-message-direction="incoming"><span dir="auto">Sounds good <img alt="👍🏽"> <img alt="🇵🇱"> <img alt="1️⃣"></span></div>
+			<div role="row" data-message-direction="incoming">
+				<div role="button" aria-label="View original message"><span dir="auto">Quoted <img alt="❤️"></span></div>
+				<span dir="auto"><img alt="👨‍👩‍👧‍👦"></span>
+			</div>
+		</div>`);
+	const original = await messengerChatAdapter.readConversation();
+	assert.equal(original.messages[0]!.text, "Sounds good 👍🏽 🇵🇱 1️⃣");
+	assert.equal(original.messages[1]!.text, "👨‍👩‍👧‍👦");
+	assert.equal(original.messages[1]!.replyTo?.text, "Quoted ❤️");
+	document.querySelector("img")!.setAttribute("alt", "👎");
+	const changed = await messengerChatAdapter.readConversation();
+	assert.equal(changed.messages[0]!.text, "Sounds good 👎 🇵🇱 1️⃣");
+	assert.notEqual(changed.revision, original.revision);
+	dom.window.close();
+});
+
+test("rejects inline media whose alternative text is not exclusively emoji", async () => {
+	const dom = setup();
+	for (const media of ['<img alt="photo 1">', '<img alt="😀2">', '<img alt="">', "<svg></svg>"]) {
+		setMessages(`<div data-scope="messages_table"><div role="row"><span dir="auto">Hello ${media}</span></div></div>`);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	dom.window.close();
+});
+
+test("rejects a snapshot if an inline emoji changes while its revision is hashing", async () => {
+	const dom = setup();
+	setMessages('<div data-scope="messages_table"><div role="row"><span dir="auto">Okay <img alt="👍"></span></div></div>');
+	let resolveDigest!: (digest: ArrayBuffer) => void;
+	Object.defineProperty(globalThis, "crypto", {
+		configurable: true,
+		value: {
+			randomUUID: webcrypto.randomUUID.bind(webcrypto),
+			subtle: {
+				digest: () =>
+					new Promise<ArrayBuffer>((resolve) => {
+						resolveDigest = resolve;
+					}),
+			},
+		},
+	});
+	const pending = messengerChatAdapter.readConversation();
+	document.querySelector("img")!.setAttribute("alt", "👎");
+	resolveDigest(new ArrayBuffer(32));
+	await assert.rejects(
+		pending,
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "changed",
+	);
+	dom.window.close();
+});
+
 test("keeps the revision when identical content is rendered with new DOM nodes", async () => {
 	const firstDom = setup();
 	setMessages(fixture);

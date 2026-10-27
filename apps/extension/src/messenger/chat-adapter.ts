@@ -114,7 +114,12 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		// A nested directional span is part of the outer text, not a second message.
 		const parent = element.parentElement?.closest('[dir="auto"]');
 		if (parent && main.contains(parent) && parent.closest('[data-scope="messages_table"]')) return false;
-		return Boolean(element.textContent?.trim()) && element.getClientRects().length > 0;
+		// Emoji can be rendered as inline images with no text nodes at all.
+		return (
+			(Boolean(element.textContent?.trim()) ||
+				Boolean(element.querySelector("img, svg, canvas, video, audio, object, embed, iframe"))) &&
+			isVisible(element)
+		);
 	});
 	const messages: RenderedMessage[] = textElements.map((element) => ({
 		element,
@@ -274,10 +279,52 @@ function readReply(boundary: Element): ConversationSnapshot["messages"][number][
 	const quote = button.querySelector<HTMLElement>('[dir="auto"]');
 	const context = boundary.querySelector<HTMLElement>('h4, [role="heading"]');
 	return {
-		text: quote?.textContent?.trim() || null,
+		text: quote ? readInlineText(quote).trim() || null : null,
 		context: context?.textContent?.trim() || null,
 		attachments: getQuotedImages(button).map(imageAttachment),
 	};
+}
+
+// Messenger can replace an emoji character with an inline image. Decode only
+// emoji-only alt text; any other embedded media is unavailable to this agent.
+// Segmenting prevents labels such as "photo 1" or "😀2" from being accepted.
+const emojiSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+function readEmojiAlt(image: Element): string | null {
+	const alt = image.getAttribute("alt")?.trim() ?? "";
+	if (!alt || alt.length > 128) return null;
+	for (const { segment } of emojiSegmenter.segment(alt)) {
+		if (
+			!/^[\p{Extended_Pictographic}\p{Emoji_Component}]+$/u.test(segment) ||
+			!/[\p{Extended_Pictographic}\p{Regional_Indicator}\u20e3]/u.test(segment)
+		) {
+			return null;
+		}
+	}
+	return alt;
+}
+
+function readInlineText(element: Element): string {
+	let text = "";
+	function append(node: Node): void {
+		if (node.nodeType === 3) {
+			text += node.nodeValue ?? "";
+			return;
+		}
+		if (node.nodeType !== 1) return;
+		const child = node as Element;
+		if (child.matches("img")) {
+			const emoji = readEmojiAlt(child);
+			if (!emoji) throw new ConversationUnavailableError("unsupported");
+			text += emoji;
+			return;
+		}
+		if (child.matches("svg, canvas, video, audio, object, embed, iframe")) {
+			throw new ConversationUnavailableError("unsupported");
+		}
+		for (const nested of child.childNodes) append(nested);
+	}
+	for (const child of element.childNodes) append(child);
+	return text;
 }
 
 function getQuotedImages(button: Element): HTMLImageElement[] {
@@ -357,7 +404,7 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 		const unique = boundary && boundaries.indexOf(boundary) === boundaries.lastIndexOf(boundary);
 		return {
 			id: messageId(element),
-			text: images.some((image) => image === element) ? "" : (element.textContent ?? ""),
+			text: images.some((image) => image === element) ? "" : readInlineText(element),
 			direction: unique ? readDirection(boundary) : "unknown",
 			replyTo: unique ? readReply(boundary) : null,
 			attachments: images.map((image) => imageAttachment(image.querySelector<HTMLImageElement>("img"))),
