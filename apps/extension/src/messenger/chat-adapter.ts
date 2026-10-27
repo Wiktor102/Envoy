@@ -159,13 +159,33 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	return ordered;
 }
 
+// Messenger also gives date separators a messages_table scope. Only ignore a
+// container made entirely of hidden date metadata and presentation wrappers.
+function isDateSeparator(element: HTMLElement): boolean {
+	if (!element.querySelector('[data-scope="date_break"][aria-hidden="true"]')) return false;
+	if (element.matches("[data-message-id], [aria-roledescription]") || element.querySelector("[data-message-id]"))
+		return false;
+	function decoration(node: Node): boolean {
+		if (node.nodeType === 3) return !node.nodeValue?.trim();
+		if (node.nodeType !== 1) return true;
+		const child = node as HTMLElement;
+		if (child.matches('[data-scope="date_break"][aria-hidden="true"]')) return true;
+		if (!child.matches("div, span") || ![null, "presentation", "none"].includes(child.getAttribute("role")))
+			return false;
+		return [...child.childNodes].every(decoration);
+	}
+	return [...element.childNodes].every(decoration);
+}
+
 function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]): boolean {
-	const scopes = [...main.querySelectorAll<HTMLElement>('[data-scope="messages_table"]')].filter(isVisible);
+	const scopes = [...main.querySelectorAll<HTMLElement>('[data-scope="messages_table"]')].filter(
+		(scope) => isVisible(scope) && !isDateSeparator(scope),
+	);
 	if (scopes.length === 0) return true;
 	// A message row may be adjacent to, rather than inside, a recognized scope.
 	// With no stable thread DOM contract, an unmapped visible row is unsafe.
 	const allRows = [...main.querySelectorAll<HTMLElement>('[role="row"], [role="article"]')].filter(
-		(row) => isVisible(row) && !row.closest('button, [role="button"], [role="toolbar"]'),
+		(row) => isVisible(row) && !isDateSeparator(row) && !row.closest('button, [role="button"], [role="toolbar"]'),
 	);
 	const leafRows = allRows.filter((row) => !allRows.some((other) => other !== row && row.contains(other)));
 	if (leafRows.some((row) => !rendered.some(({ element }) => row.contains(element)))) return true;

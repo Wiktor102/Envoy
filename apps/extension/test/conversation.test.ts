@@ -36,6 +36,31 @@ const fixture = `
 		<div aria-hidden="true"><span dir="auto">Hidden</span></div>
 	</div>`;
 
+test("ignores Messenger date scopes before, between, and after messages", async () => {
+	const dom = setup();
+	const date =
+		'<div data-scope="messages_table"><div role="presentation"><div data-scope="date_break" aria-hidden="true"><span dir="auto">Pon, 15:16</span></div></div></div>';
+	setMessages(
+		`${date}<div data-scope="messages_table"><span dir="auto">Hello</span></div>${date}<div data-scope="messages_table"><span dir="auto">Hi</span></div>${date}`,
+	);
+	assert.deepEqual(
+		(await messengerChatAdapter.readConversation()).messages.map(({ text }) => text),
+		["Hello", "Hi"],
+	);
+	for (const extra of [
+		"<span>Unmapped message</span>",
+		"<video></video>",
+		'<div role="button" aria-label="Play"></div>',
+	]) {
+		setMessages(`${fixture}${date.replace("</div></div></div>", `</div>${extra}</div></div>`)}`);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	dom.window.close();
+});
+
 test("reads loaded text in order, without nested duplicates or controls", async () => {
 	const dom = setup();
 	setMessages(fixture);
