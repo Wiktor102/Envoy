@@ -891,3 +891,33 @@ test("reads an animated preview as an unreadable attachment and tracks its blob 
 	}
 	dom.window.close();
 });
+
+test("omits Messenger delivery footers without changing real text, emoji, or revisions", async () => {
+	const dom = setup();
+	// Structure captured from Chrome, with synthetic message content.
+	const footer = (text: string) =>
+		`<div><span role="presentation"><span dir="auto"><span>${text}</span></span></span></div>`;
+	for (const [text, body] of [
+		["Hello", "Hello"],
+		["🤖", '<img alt="🤖">'],
+		["Wysłano 9 min temu", "Wysłano 9 min temu"],
+	]) {
+		setMessages(`<div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 21:59, Ty: ${text}">
+			<h4 dir="auto">Wysłano</h4><div><span dir="auto">${body}</span></div>${footer("Wysłano 10 min temu")}</div>`);
+		const before = await messengerChatAdapter.readConversation();
+		assert.deepEqual(
+			before.messages.map(({ text, direction }) => [text, direction]),
+			[[text, "outgoing"]],
+		);
+		document.querySelector('span[role="presentation"] span span')!.textContent = "Wysłano 11 min temu";
+		assert.equal((await messengerChatAdapter.readConversation()).revision, before.revision);
+	}
+	// An unmatched or differently structured candidate is still unknown content.
+	for (const status of [footer("Something else"), '<div><span dir="auto">Wysłano 9 min temu</span></div>']) {
+		setMessages(
+			`<div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 21:59, Ty: Hello"><div dir="auto">Hello</div>${status}</div>`,
+		);
+		assert.equal((await messengerChatAdapter.readConversation()).messages.length, 2);
+	}
+	dom.window.close();
+});
