@@ -90,6 +90,7 @@ interface RenderedMessage {
 	element: HTMLElement;
 	boundary: Element | null;
 	images: HTMLElement[];
+	standaloneLike?: boolean;
 }
 
 function getMessageMain(): HTMLElement {
@@ -171,6 +172,25 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 				: undefined;
 		if (imageMessage) imageMessage.images.push(image);
 		else messages.push({ element: image, boundary, images: [image] });
+	}
+	// Messenger renders its large Like as an accessible SVG rather than text.
+	// Require the enclosing message label to identify the same emoji, and do not
+	// treat reactions or a Like mixed with other content as a standalone message.
+	for (const like of main.querySelectorAll<HTMLElement>(
+		'[data-scope="messages_table"] [role="img"][aria-label="Like, thumbs up"]',
+	)) {
+		if (like.closest('button, [role="button"], [role="toolbar"], [aria-hidden="true"]') || !isVisible(like)) continue;
+		const boundary = messageBoundary(like);
+		if (
+			!boundary?.matches('[data-scope="messages_table"][data-message-id]') ||
+			!readLabeledSender(boundary) ||
+			!/:\s*👍$/.test(boundary.getAttribute("aria-label") ?? "") ||
+			!like.querySelector("svg") ||
+			like.querySelector("img, video, audio, canvas, object, embed, iframe")
+		)
+			continue;
+		if (messages.some((message) => message.boundary === boundary)) throw new ConversationUnavailableError("unsupported");
+		messages.push({ element: like, boundary, images: [], standaloneLike: true });
 	}
 	const ordered = messages.sort((a, b) => {
 		if (a.element === b.element) return 0;
@@ -457,12 +477,12 @@ function readDirection(boundary: Element): ConversationMessage["direction"] {
 
 function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messages"] {
 	const boundaries = rendered.map((message) => message.boundary);
-	return rendered.map(({ element, boundary, images }, index) => {
+	return rendered.map(({ element, boundary, images, standaloneLike }, index) => {
 		// A shared boundary cannot safely assign metadata to one message.
 		const unique = boundary && boundaries.indexOf(boundary) === boundaries.lastIndexOf(boundary);
 		return {
 			id: messageId(element),
-			text: images.some((image) => image === element) ? "" : readInlineText(element),
+			text: images.some((image) => image === element) ? "" : standaloneLike ? "👍" : readInlineText(element),
 			direction: unique ? readDirection(boundary) : "unknown",
 			replyTo: unique ? readReply(boundary) : null,
 			attachments: images.map((image) => imageAttachment(image.querySelector<HTMLImageElement>("img"))),
