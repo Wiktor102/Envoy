@@ -125,6 +125,7 @@ export class TaskService {
 		if (this.leaseActive() || this.inFlight || this.task.status !== "paused") {
 			throw new Error("The agent tab is still connected or the task is not paused.");
 		}
+		this.resumeWhenReadable = false;
 		this.owner = connectorId;
 		this.connector.updateConversation(structuredClone(snapshot));
 		this.touch();
@@ -283,14 +284,19 @@ export class TaskService {
 		const task = this.task;
 		const previous = this.connector.readConversation();
 		if (!snapshot || snapshot.chatId !== task.chatId) {
-			this.leaseUntil = 0;
 			// A photo that is still loading or a brief scroll can make the view
-			// unreadable. Resume such a pause once the same chat reads again.
+			// unreadable across several syncs. Preserve only this automatic pause.
 			const resumable =
 				!snapshot &&
-				["waiting", "thinking", "pending"].includes(task.status) &&
+				(["waiting", "thinking"].includes(task.status) ||
+					(task.status === "pending" && task.pendingReply?.sendAt != null) ||
+					(task.status === "paused" && this.resumeWhenReadable)) &&
 				!this.inFlight &&
 				!this.requiresVerification;
+			// Failed reads still prove the owner is connected. A missing heartbeat
+			// must expire this recovery permission just like any other connection.
+			if (resumable) this.touch();
+			else this.leaseUntil = 0;
 			this.pauseForDisconnect(
 				snapshot
 					? "The agent tab changed conversations."
