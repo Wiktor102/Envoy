@@ -30,12 +30,14 @@ In `chrome://extensions`, enable Developer mode and load `apps/extension/.output
 ## Delegate a conversation
 
 1. Open the private Messenger conversation in a dedicated tab, then reload that tab. Reload after selecting a different conversation too. Envoy stops when the tab navigates because the URL may change before Messenger replaces the old messages.
-2. Open the **Envoy** tab in the chats sidebar. Check the chat ID and expand **Message preview** to check the latest loaded messages. Enter the goal and its limits, then select **Start task**. Keep the computer awake and this tab open. You can use other tabs while it runs.
+2. Open the **Envoy** tab in the chats sidebar. Check the selected conversation in Messenger, enter the goal and its limits, then select **Start task**. Keep the computer awake and this tab open. You can use other tabs while it runs.
 3. Envoy waits for an identifiable incoming text message and sends the goal and loaded text to Meta Model API for a decision. It can wait, propose a reply, ask you for guidance, or mark the task complete. Update the instructions and resume if it needs your input.
 4. A proposed reply has a 10-second countdown. **Edit** stops it; after saving an edit, choose **Send now** to send. **Cancel reply** stops it and waits for a new message. **Pause** stops pending work; **Take over** ends the task. Envoy checks the chat, current message revision, and composer again immediately before sending.
 5. A disconnected or navigated tab pauses the task. The extension asks the dedicated tab to reread the conversation while it is in the background; if the tab cannot respond, the backend pauses. Reopen the same chat, reload it, and use **Reconnect** and then **Resume**. If a send could not be confirmed, check the actual conversation before resuming or deleting the task. Envoy will not automatically retry an uncertain send.
 
 Only the messages rendered by Messenger are visible to Envoy. It cannot infer missing history. It stops if the latest message has an unknown sender or unreadable content, or if it cannot establish the latest messages or an empty composer. Earlier messages with unknown senders or recognized attachments are labeled for the model; it cannot inspect the attachments and should ask when missing context matters. Entirely unrecognized media still pauses the reader. Message attribution and send controls depend on Messenger's rendered markup and may need adjustment for a particular account, language, or UI version. A visible outgoing bubble is evidence that Messenger displayed the send, not proof of final delivery.
+
+Use **Dev mode** beside the sidebar tabs to show message history, chat and task IDs, and backend connection controls. It is off by default. Envoy remembers this setting in the extension on this browser.
 
 ## Privacy and storage
 

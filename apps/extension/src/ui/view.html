@@ -1,21 +1,25 @@
-<div class="tabs" role="tablist" aria-label="Chats sidebar">
-	<button type="button" role="tab" id="chats-tab" aria-selected="true">Chats</button>
-	<button type="button" role="tab" id="envoy-tab" aria-selected="false" aria-controls="envoy-panel">Envoy</button>
+<div class="toolbar">
+	<div class="tabs" role="tablist" aria-label="Chats sidebar">
+		<button type="button" role="tab" id="chats-tab" aria-selected="true">Chats</button>
+		<button type="button" role="tab" id="envoy-tab" aria-selected="false" aria-controls="envoy-panel">Envoy</button>
+	</div>
+	<button
+		type="button"
+		id="envoy-developer-mode"
+		class="developer-toggle"
+		role="switch"
+		aria-label="Developer mode"
+		aria-checked="false"
+		aria-controls="envoy-developer-details"
+		hidden
+	>
+		Dev mode <span class="switch-track" aria-hidden="true"></span>
+	</button>
 </div>
 <div id="envoy-panel" role="tabpanel" aria-labelledby="envoy-tab" tabindex="0" hidden>
-	<section aria-labelledby="envoy-conversation-title">
-		<h2 id="envoy-conversation-title">Conversation</h2>
-		<p id="envoy-chat-id" class="chat-id">No conversation selected.</p>
-		<p id="envoy-conversation-status" class="secondary-text" role="status">Open a conversation to read its messages.</p>
-		<details class="conversation-preview">
-			<summary>Message preview <span class="hint">Latest 5</span></summary>
-			<p class="hint">Only messages currently loaded in Messenger are available to Envoy.</p>
-			<p id="envoy-conversation-empty" class="empty-state">No messages loaded yet.</p>
-			<ol id="envoy-conversation" aria-label="Latest loaded messages"></ol>
-		</details>
-	</section>
 	<section aria-labelledby="envoy-goal-title">
 		<h2 id="envoy-goal-title">Your instructions</h2>
+		<p id="envoy-conversation-notice" class="hint" role="status" hidden></p>
 		<label for="envoy-goal">Goal and limits</label>
 		<textarea
 			id="envoy-goal"
@@ -32,7 +36,7 @@
 	<section aria-labelledby="envoy-controls-title">
 		<h2 id="envoy-controls-title">Agent</h2>
 		<p id="envoy-task-status" class="task-status" role="status">No active task.</p>
-		<p id="envoy-task-chat" class="chat-id" hidden></p>
+		<p id="envoy-task-notice" class="hint" role="status" hidden></p>
 		<p id="envoy-task-detail" class="task-detail message-text" hidden></p>
 		<div id="envoy-pending" class="pending-reply" hidden>
 			<h3>Proposed reply</h3>
@@ -60,9 +64,24 @@
 		<p id="envoy-delete-hint" class="hint" hidden></p>
 		<p id="envoy-error" role="alert" hidden></p>
 	</section>
-	<details class="diagnostics">
-		<summary>Backend connection</summary>
-		<button type="button" id="envoy-health">Check backend health</button>
-		<p id="envoy-health-status" class="hint" role="status"></p>
-	</details>
+	<div id="envoy-developer-details" hidden>
+		<section aria-labelledby="envoy-conversation-title">
+			<h2 id="envoy-conversation-title">Conversation diagnostics</h2>
+			<p id="envoy-chat-id" class="chat-id">No conversation selected.</p>
+			<p id="envoy-task-id" class="chat-id" hidden></p>
+			<p id="envoy-task-chat" class="chat-id" hidden></p>
+			<p id="envoy-conversation-status" class="secondary-text">Open a conversation to read its messages.</p>
+			<details class="conversation-preview">
+				<summary>Message preview <span class="hint">Latest 5</span></summary>
+				<p class="hint">Only messages currently loaded in Messenger are available to Envoy.</p>
+				<p id="envoy-conversation-empty" class="empty-state">No messages loaded yet.</p>
+				<ol id="envoy-conversation" aria-label="Latest loaded messages"></ol>
+			</details>
+		</section>
+		<details class="diagnostics">
+			<summary>Backend connection</summary>
+			<button type="button" id="envoy-health">Check backend health</button>
+			<p id="envoy-health-status" class="hint" role="status"></p>
+		</details>
+	</div>
 </div>

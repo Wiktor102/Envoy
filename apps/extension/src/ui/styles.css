@@ -76,14 +76,22 @@
 	display: none !important;
 }
 
+.toolbar {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding-inline-end: 12px;
+}
+
 .tabs {
 	display: flex;
+	flex-shrink: 0;
 	gap: 4px;
-	padding: 8px 12px;
+	padding: 8px 4px 8px 12px;
 }
 
 :host([data-facebook]) .tabs {
-	padding-inline: 16px;
+	padding-inline-start: 16px;
 }
 
 button,
@@ -130,6 +138,45 @@ summary:focus-visible,
 	color: var(--envoy-tab-selected-text);
 }
 
+.developer-toggle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-inline-start: auto;
+	padding: 4px;
+	background: transparent;
+	color: var(--envoy-secondary-text);
+	font-size: 12px;
+	white-space: nowrap;
+}
+
+.switch-track {
+	display: block;
+	flex: 0 0 28px;
+	height: 16px;
+	padding: 2px;
+	border-radius: 8px;
+	background: var(--envoy-secondary-text);
+}
+
+.switch-track::before {
+	content: "";
+	display: block;
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	background: var(--envoy-surface);
+}
+
+.developer-toggle[aria-checked="true"] .switch-track {
+	background: var(--envoy-primary);
+}
+
+.developer-toggle[aria-checked="true"] .switch-track::before {
+	transform: translateX(12px);
+	background: var(--envoy-on-primary);
+}
+
 #envoy-panel {
 	position: fixed;
 	z-index: 100;
@@ -154,6 +201,7 @@ section,
 }
 
 section + section,
+#envoy-developer-details,
 .diagnostics {
 	border-top: 1px solid var(--envoy-divider);
 }
