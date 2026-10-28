@@ -50,15 +50,21 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const chatsTab = element<HTMLButtonElement>("#chats-tab");
 	const envoyTab = element<HTMLButtonElement>("#envoy-tab");
 	const panel = element<HTMLElement>("#envoy-panel");
+	const developerToggle = element<HTMLButtonElement>("#envoy-developer-mode");
+	const developerDetails = element<HTMLElement>("#envoy-developer-details");
 	const chatId = element<HTMLElement>("#envoy-chat-id");
 	const conversationStatus = element<HTMLElement>("#envoy-conversation-status");
+	const conversationNotice = element<HTMLElement>("#envoy-conversation-notice");
 	const conversation = element<HTMLOListElement>("#envoy-conversation");
+	const conversationEmpty = element<HTMLElement>("#envoy-conversation-empty");
 	const goal = element<HTMLTextAreaElement>("#envoy-goal");
 	const goalHint = element<HTMLElement>("#envoy-goal-hint");
 	const startButton = element<HTMLButtonElement>("#envoy-start");
 	const updateGoalButton = element<HTMLButtonElement>("#envoy-update-goal");
 	const taskStatus = element<HTMLElement>("#envoy-task-status");
+	const taskId = element<HTMLElement>("#envoy-task-id");
 	const taskChat = element<HTMLElement>("#envoy-task-chat");
+	const taskNotice = element<HTMLElement>("#envoy-task-notice");
 	const taskDetail = element<HTMLElement>("#envoy-task-detail");
 	const pendingSection = element<HTMLElement>("#envoy-pending");
 	const pendingText = element<HTMLElement>("#envoy-pending-text");
@@ -68,6 +74,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	isolateTextInput(goal);
 	isolateTextInput(editText);
 	const saveEditButton = element<HTMLButtonElement>("#envoy-save-edit");
+	const replyControls = element<HTMLElement>("#envoy-reply-controls");
+	const taskControls = element<HTMLElement>("#envoy-task-controls");
 	const sendButton = element<HTMLButtonElement>("#envoy-send-now");
 	const editButton = element<HTMLButtonElement>("#envoy-edit");
 	const cancelButton = element<HTMLButtonElement>("#envoy-cancel");
@@ -96,6 +104,39 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	let goalDirty = false;
 	let editingCommandId: string | null = null;
 	let renderedConversation: string | null = null;
+	let developerMode = false;
+	let developerModeChanged = false;
+	let preferenceWrite = Promise.resolve();
+
+	function setDeveloperMode(enabled: boolean) {
+		developerMode = enabled;
+		developerToggle.setAttribute("aria-checked", String(enabled));
+		developerDetails.hidden = !enabled;
+	}
+
+	async function restoreDeveloperMode() {
+		try {
+			const saved = await chrome.storage.local.get("envoyDeveloperMode");
+			// A slow storage read must not undo a choice made in this view.
+			if (!destroyed && !developerModeChanged) setDeveloperMode(saved.envoyDeveloperMode === true);
+		} catch {
+			// Keep diagnostics off if extension storage is unavailable.
+		}
+	}
+
+	developerToggle.addEventListener("click", () => {
+		developerModeChanged = true;
+		const enabled = !developerMode;
+		setDeveloperMode(enabled);
+		// Preserve the last choice even when storage writes complete slowly.
+		preferenceWrite = preferenceWrite.then(async () => {
+			try {
+				await chrome.storage.local.set({ envoyDeveloperMode: enabled });
+			} catch {
+				// The toggle still works for this view if saving is unavailable.
+			}
+		});
+	});
 
 	function selectTab(showEnvoy: boolean) {
 		chatsTab.setAttribute("aria-selected", String(!showEnvoy));
@@ -103,6 +144,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		chatsTab.tabIndex = showEnvoy ? -1 : 0;
 		envoyTab.tabIndex = showEnvoy ? 0 : -1;
 		panel.hidden = !showEnvoy;
+		developerToggle.hidden = !showEnvoy;
 		onSelectionChange();
 	}
 
@@ -122,6 +164,9 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		const snapshot = state.snapshot;
 		chatId.textContent = snapshot ? `Chat: ${snapshot.chatId}` : "No conversation selected.";
 		conversationStatus.textContent = state.conversationStatus;
+		conversationNotice.textContent = snapshot ? "" : state.conversationStatus;
+		conversationNotice.hidden = Boolean(snapshot);
+		conversationEmpty.hidden = Boolean(snapshot?.messages.length);
 		const key = snapshot ? JSON.stringify([snapshot.chatId, snapshot.revision]) : null;
 		if (key === renderedConversation) return;
 		renderedConversation = key;
@@ -130,6 +175,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 
 		for (const message of snapshot.messages.slice(-5)) {
 			const item = document.createElement("li");
+			item.dataset.direction = message.direction;
 			const sender = document.createElement("strong");
 			sender.textContent =
 				message.direction === "outgoing"
@@ -141,6 +187,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 							: "Unknown sender";
 			const text = document.createElement("span");
 			text.className = "message-text";
+			text.dir = "auto";
 			text.textContent = message.text || (message.attachments.length ? "[Attachment]" : "[Empty message]");
 			item.append(sender, text);
 			conversation.append(item);
@@ -188,8 +235,13 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		taskStatus.textContent = task
 			? `${statusLabels[task.status]}${active && !owner ? " (not connected to this tab)" : ""}.`
 			: "No active task.";
+		taskStatus.dataset.status = task?.status ?? "idle";
+		taskId.textContent = task ? `Task ID: ${task.id}` : "";
+		taskId.hidden = !task;
 		taskChat.textContent = task ? `Task chat: ${task.chatId}` : "";
 		taskChat.hidden = !task || currentChat;
+		taskNotice.textContent = "This task belongs to another conversation. Reopen its dedicated tab to continue.";
+		taskNotice.hidden = !task || !state.snapshot || currentChat;
 		taskDetail.textContent = owner ? (task?.detail ?? "") : "";
 		taskDetail.hidden = !owner || !task?.detail;
 		const pending = owner ? (task?.pendingReply ?? null) : null;
@@ -204,6 +256,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			editingCommandId = null;
 		}
 
+		replyControls.hidden = !owner || !task || !["thinking", "pending", "editing", "sending"].includes(task.status);
+		taskControls.hidden = !task;
 		sendButton.disabled = busy || !owner || !currentChat || task?.status !== "pending" || !pending;
 		editButton.disabled =
 			busy || !owner || !currentChat || !(task?.status === "sending" || (task?.status === "pending" && pending));
@@ -301,6 +355,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	});
 	const countdownTimer = window.setInterval(renderCountdown, 1000);
 	render();
+	void restoreDeveloperMode();
 	return {
 		host,
 		panel,

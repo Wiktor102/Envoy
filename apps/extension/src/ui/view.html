@@ -1,54 +1,87 @@
-<div class="tabs" role="tablist" aria-label="Chats sidebar">
-	<button type="button" role="tab" id="chats-tab" aria-selected="true">Chats</button>
-	<button type="button" role="tab" id="envoy-tab" aria-selected="false" aria-controls="envoy-panel">Envoy</button>
+<div class="toolbar">
+	<div class="tabs" role="tablist" aria-label="Chats sidebar">
+		<button type="button" role="tab" id="chats-tab" aria-selected="true">Chats</button>
+		<button type="button" role="tab" id="envoy-tab" aria-selected="false" aria-controls="envoy-panel">Envoy</button>
+	</div>
+	<button
+		type="button"
+		id="envoy-developer-mode"
+		class="developer-toggle"
+		role="switch"
+		aria-label="Developer mode"
+		aria-checked="false"
+		aria-controls="envoy-developer-details"
+		hidden
+	>
+		Dev mode <span class="switch-track" aria-hidden="true"></span>
+	</button>
 </div>
-<div id="envoy-panel" role="tabpanel" aria-labelledby="envoy-tab" hidden>
-	<section aria-labelledby="envoy-conversation-title">
-		<h2 id="envoy-conversation-title">Conversation</h2>
-		<p id="envoy-chat-id">No conversation selected.</p>
-		<p id="envoy-conversation-status" role="status">Open a conversation to read its messages.</p>
-		<p class="hint">Only messages currently loaded in Messenger are available to Envoy.</p>
-		<ol id="envoy-conversation" aria-label="Latest loaded messages"></ol>
-	</section>
+<div id="envoy-panel" role="tabpanel" aria-labelledby="envoy-tab" tabindex="0" hidden>
 	<section aria-labelledby="envoy-goal-title">
 		<h2 id="envoy-goal-title">Your instructions</h2>
+		<p id="envoy-conversation-notice" class="hint" role="status" hidden></p>
 		<label for="envoy-goal">Goal and limits</label>
-		<textarea id="envoy-goal" placeholder="Describe what Envoy should arrange and any limits it must follow."></textarea>
+		<textarea
+			id="envoy-goal"
+			rows="4"
+			aria-describedby="envoy-goal-hint"
+			placeholder="Arrange a coffee next week. I’m free Tuesday or Thursday after 3 pm. Ask me before confirming a place."
+		></textarea>
 		<p id="envoy-goal-hint" class="hint"></p>
-		<div class="controls">
-			<button type="button" id="envoy-start">Start task</button>
-			<button type="button" id="envoy-update-goal" hidden>Update instructions</button>
+		<div class="controls goal-controls">
+			<button type="button" id="envoy-start" class="primary">Start task</button>
+			<button type="button" id="envoy-update-goal" class="primary" hidden>Update instructions</button>
 		</div>
 	</section>
 	<section aria-labelledby="envoy-controls-title">
 		<h2 id="envoy-controls-title">Agent</h2>
-		<p id="envoy-task-status" role="status">No active task.</p>
-		<p id="envoy-task-chat" hidden></p>
-		<p id="envoy-task-detail" hidden></p>
-		<div id="envoy-pending" hidden>
+		<p id="envoy-task-status" class="task-status" role="status">No active task.</p>
+		<p id="envoy-task-notice" class="hint" role="status" hidden></p>
+		<p id="envoy-task-detail" class="task-detail message-text" hidden></p>
+		<div id="envoy-pending" class="pending-reply" hidden>
 			<h3>Proposed reply</h3>
-			<p id="envoy-pending-text" class="message-text"></p>
+			<p id="envoy-pending-text" class="message-text" dir="auto"></p>
 			<p id="envoy-countdown"></p>
 			<div id="envoy-editor" hidden>
 				<label for="envoy-reply-edit">Edit reply</label>
-				<textarea id="envoy-reply-edit"></textarea>
-				<button type="button" id="envoy-save-edit">Save reply</button>
-				<p class="hint">Saving keeps the reply paused. Use Send now when it is ready.</p>
+				<textarea id="envoy-reply-edit" rows="4" aria-describedby="envoy-edit-hint"></textarea>
+				<button type="button" id="envoy-save-edit" class="primary">Save reply</button>
+				<p id="envoy-edit-hint" class="hint">Saving keeps the reply paused. Use Send now when it is ready.</p>
 			</div>
 		</div>
-		<div class="controls">
-			<button type="button" id="envoy-send-now">Send now</button>
+		<div id="envoy-reply-controls" class="controls reply-controls" aria-label="Reply controls" role="group" hidden>
+			<button type="button" id="envoy-send-now" class="primary">Send now</button>
 			<button type="button" id="envoy-edit">Edit</button>
 			<button type="button" id="envoy-cancel">Cancel reply</button>
+		</div>
+		<div id="envoy-task-controls" class="controls task-controls" aria-label="Task controls" role="group" hidden>
 			<button type="button" id="envoy-pause">Pause</button>
 			<button type="button" id="envoy-resume">Resume</button>
 			<button type="button" id="envoy-reconnect" hidden>Reconnect</button>
 			<button type="button" id="envoy-take-over">Take over</button>
-			<button type="button" id="envoy-delete" hidden>Delete task</button>
+			<button type="button" id="envoy-delete" class="danger" hidden>Delete task</button>
 		</div>
 		<p id="envoy-delete-hint" class="hint" hidden></p>
 		<p id="envoy-error" role="alert" hidden></p>
-		<button type="button" id="envoy-health">Check backend health</button>
-		<p id="envoy-health-status" role="status"></p>
 	</section>
+	<div id="envoy-developer-details" hidden>
+		<section aria-labelledby="envoy-conversation-title">
+			<h2 id="envoy-conversation-title">Conversation diagnostics</h2>
+			<p id="envoy-chat-id" class="chat-id">No conversation selected.</p>
+			<p id="envoy-task-id" class="chat-id" hidden></p>
+			<p id="envoy-task-chat" class="chat-id" hidden></p>
+			<p id="envoy-conversation-status" class="secondary-text">Open a conversation to read its messages.</p>
+			<details class="conversation-preview">
+				<summary>Message preview <span class="hint">Latest 5</span></summary>
+				<p class="hint">Only messages currently loaded in Messenger are available to Envoy.</p>
+				<p id="envoy-conversation-empty" class="empty-state">No messages loaded yet.</p>
+				<ol id="envoy-conversation" aria-label="Latest loaded messages"></ol>
+			</details>
+		</section>
+		<details class="diagnostics">
+			<summary>Backend connection</summary>
+			<button type="button" id="envoy-health">Check backend health</button>
+			<p id="envoy-health-status" class="hint" role="status"></p>
+		</details>
+	</div>
 </div>
