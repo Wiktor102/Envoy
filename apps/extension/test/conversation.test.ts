@@ -116,6 +116,80 @@ test("reads inline emoji in text and quoted replies and changes the revision wit
 	dom.window.close();
 });
 
+for (const quoted of [false, true]) {
+	test(`preserves line breaks and revisions in ${quoted ? "quoted replies" : "message text"}`, async () => {
+		const dom = setup();
+		const html = `<div data-scope="messages_table"><div role="row" data-message-direction="incoming">${
+			quoted
+				? '<div role="button" aria-label="View original message"><span dir="auto">10<br>30</span></div><span dir="auto">My answer</span>'
+				: '<span dir="auto">10<br>30</span>'
+		}</div></div>`;
+		setMessages(html);
+		const original = await messengerChatAdapter.readConversation();
+		const textOf = (snapshot: typeof original) =>
+			quoted ? snapshot.messages[0]!.replyTo?.text : snapshot.messages[0]!.text;
+		assert.equal(textOf(original), "10\n30");
+		assert.equal(original.messages[0]!.direction, "incoming");
+		if (quoted) assert.equal(original.messages[0]!.text, "My answer");
+
+		setMessages(html);
+		const remounted = await messengerChatAdapter.readConversation();
+		assert.notEqual(remounted.messages[0]!.id, original.messages[0]!.id);
+		assert.equal(remounted.revision, original.revision);
+
+		const text = document.querySelector('[dir="auto"]')!;
+		const revisions = [original.revision];
+		for (const [content, expected] of [
+			["1030", "1030"],
+			["1<br>030", "1\n030"],
+			["10<br><br>30", "10\n\n30"],
+			["<br>1030<br>", "\n1030\n"],
+		] as const) {
+			text.innerHTML = content;
+			const changed = await messengerChatAdapter.readConversation();
+			assert.equal(textOf(changed), expected);
+			assert.equal(changed.messages[0]!.id, remounted.messages[0]!.id);
+			assert.ok(!revisions.includes(changed.revision));
+			revisions.push(changed.revision);
+		}
+		dom.window.close();
+	});
+
+	test(`preserves rendered block separators in ${quoted ? "quoted replies" : "message text"}`, async () => {
+		const dom = setup();
+		for (const [content, expected] of [
+			["<div>10</div><div>30</div>", "10\n30"],
+			["<p>10</p><p>30</p>", "10\n30"],
+			['10<span style="display: block">30</span>40', "10\n30\n40"],
+			["<div><div>10</div><div>30</div></div>", "10\n30"],
+			["<div>10<br></div><div>30</div>", "10\n30"],
+			["<div>10</div><div><br></div><div>30</div>", "10\n\n30"],
+			['<div>10<img alt="👍🏽"></div><div>30</div>', "10👍🏽\n30"],
+			['<div style="display: inline">10</div><div style="display: inline">30</div>', "1030"],
+		] as const) {
+			setMessages(
+				`<div data-scope="messages_table"><div role="row" data-message-direction="incoming">${
+					quoted
+						? `<div role="button" aria-label="View original message"><span dir="auto">${content}</span></div><span dir="auto">My answer</span>`
+						: `<span dir="auto">${content}</span>`
+				}</div></div>`,
+			);
+			const original = await messengerChatAdapter.readConversation();
+			const textOf = (snapshot: typeof original) =>
+				quoted ? snapshot.messages[0]!.replyTo?.text : snapshot.messages[0]!.text;
+			assert.equal(textOf(original), expected, content);
+
+			const text = document.querySelector('[dir="auto"]')!;
+			text.textContent = expected.replaceAll("\n", "");
+			const changed = await messengerChatAdapter.readConversation();
+			assert.equal(textOf(changed), text.textContent);
+			if (expected.includes("\n")) assert.notEqual(changed.revision, original.revision, content);
+			else assert.equal(changed.revision, original.revision, content);
+		}
+		dom.window.close();
+	});
+}
+
 test("rejects inline media whose alternative text is not exclusively emoji", async () => {
 	const dom = setup();
 	for (const media of ['<img alt="photo 1">', '<img alt="😀2">', '<img alt="">', "<svg></svg>"]) {
