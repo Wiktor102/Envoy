@@ -77,6 +77,68 @@ test("ignores Messenger date scopes before, between, and after messages", async 
 	dom.window.close();
 });
 
+test("reads standalone Messenger Likes as messages with their sender and revision", async () => {
+	const dom = setup();
+	setMessages(`
+		<div role="article"><div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O poniedziałek 11:11, Alex: Hello"><span dir="auto">Hello</span></div></div>
+		<div role="article"><div data-scope="messages_table" data-message-id="2" aria-roledescription="wiadomość" aria-label="O poniedziałek 11:12, Ty: 👍"><div role="img" aria-label="Like, thumbs up"><svg><title>Like, thumbs up</title></svg></div></div></div>`);
+	const first = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		first.messages.map(({ text, direction }) => [text, direction]),
+		[
+			["Hello", "incoming"],
+			["👍", "outgoing"],
+		],
+	);
+	const last = document.querySelector('[data-message-id="2"]')!;
+	last.setAttribute("aria-label", "O poniedziałek 11:12, Alex: 👍");
+	const changed = await messengerChatAdapter.readConversation();
+	assert.equal(changed.messages[1]!.direction, "incoming");
+	assert.notEqual(changed.revision, first.revision);
+	last.querySelector('[role="img"]')!.setAttribute("aria-label", "Unknown illustration");
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+	);
+	dom.window.close();
+});
+
+test("does not mistake reactions or mixed content for a standalone Like", async () => {
+	const dom = setup();
+	const like = '<div role="img" aria-label="Like, thumbs up"><svg><title>Like, thumbs up</title></svg></div>';
+	const message = (body: string, label = "👍") =>
+		`<div role="article"><div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 11:12, Ty: ${label}">${body}</div></div>`;
+	setMessages(message(`<span dir="auto">Hello</span><div role="button" aria-label="reaction">${like}</div>`, "Hello"));
+	assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.text, "Hello");
+	for (const body of [
+		`${like}<span dir="auto">Other content</span>`,
+		`${like}${like}`,
+		`<div role="img" aria-label="Like, thumbs up"><svg></svg><video></video></div>`,
+	]) {
+		setMessages(message(body));
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	setMessages(message(like, "Other content"));
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+	);
+	setMessages(
+		message(
+			'<div role="img" dir="auto" aria-label="Like, thumbs up"><svg><title>Like</title></svg></div>',
+			"Other content",
+		),
+	);
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+	);
+	dom.window.close();
+});
+
 test("reads loaded text in order, without nested duplicates or controls", async () => {
 	const dom = setup();
 	setMessages(fixture);
