@@ -435,14 +435,20 @@ function readReactions(boundary: Element): ConversationSnapshot["messages"][numb
 
 // Only metadata that explicitly describes the sender is used here. Message
 // alignment, color, and an arbitrary person's name do not establish who sent it.
-function readLabeledSender(boundary: Element): string | null {
+function readLabeledMessage(boundary: Element): { sender: string; text: string } | null {
 	// This is Messenger's per-message accessibility label, not message text or
 	// a group heading. Consecutive bubbles often have no sender heading at all.
 	if (!boundary.matches('[data-scope="messages_table"][data-message-id]')) return null;
 	if (!/^(?:message|wiadomość)$/i.test(boundary.getAttribute("aria-roledescription") ?? "")) return null;
 	const label = boundary.getAttribute("aria-label") ?? "";
 	const match = label.match(/^(?:O|At) [^\n]*?\d{1,2}:\d{2}(?:\s?[AP]M)?, ([^:\n]{1,100})(?::(?:\s|$)|$)/i);
-	return match?.[1]?.trim() || null;
+	if (!match) return null;
+	const sender = match[1]?.trim();
+	return sender ? { sender, text: label.slice(match[0].length).trim() } : null;
+}
+
+function readLabeledSender(boundary: Element): string | null {
+	return readLabeledMessage(boundary)?.sender ?? null;
 }
 
 function readDirection(boundary: Element): ConversationMessage["direction"] {
@@ -477,13 +483,24 @@ function readDirection(boundary: Element): ConversationMessage["direction"] {
 
 function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messages"] {
 	const boundaries = rendered.map((message) => message.boundary);
-	return rendered.map(({ element, boundary, images, standaloneLike }, index) => {
+	const texts = rendered.map(({ element, images, standaloneLike }) =>
+		images.some((image) => image === element) ? "" : standaloneLike ? "👍" : readInlineText(element),
+	);
+	return rendered.map(({ element, boundary, images }, index) => {
 		// A shared boundary cannot safely assign metadata to one message.
 		const unique = boundary && boundaries.indexOf(boundary) === boundaries.lastIndexOf(boundary);
+		// A fresh bubble can share its container with a rendered delivery status.
+		// Attribute only the one text candidate named by the per-message label;
+		// leave status candidates and ambiguous matches unknown.
+		const labeled = !unique && boundary ? readLabeledMessage(boundary) : null;
+		const matchesLabel =
+			labeled?.text &&
+			texts[index]!.trim() === labeled.text &&
+			rendered.filter((message, i) => message.boundary === boundary && texts[i]!.trim() === labeled.text).length === 1;
 		return {
 			id: messageId(element),
-			text: images.some((image) => image === element) ? "" : standaloneLike ? "👍" : readInlineText(element),
-			direction: unique ? readDirection(boundary) : "unknown",
+			text: texts[index]!,
+			direction: boundary && (unique || matchesLabel) ? readDirection(boundary) : "unknown",
 			replyTo: unique ? readReply(boundary) : null,
 			attachments: images.map((image) => imageAttachment(image.querySelector<HTMLImageElement>("img"))),
 			reactions: unique ? readReactions(boundary) : [],

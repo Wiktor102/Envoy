@@ -402,6 +402,54 @@ test("changes the revision when a quoted reply changes", async () => {
 	dom.window.close();
 });
 
+test("attributes fresh text and emoji bubbles sharing a container with a delivery status", async () => {
+	const dom = setup();
+	for (const [text, body] of [
+		["Hi there", "Hi there"],
+		["🤖", '<img alt="🤖">'],
+	]) {
+		for (const [sender, direction] of [
+			["Ty", "outgoing"],
+			["Alex", "incoming"],
+		]) {
+			setMessages(`<div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 21:58, ${sender}: ${text}">
+				<span dir="auto">${body}</span><span dir="auto">Wysłano</span>
+				<button aria-label="1 reaction">👍</button></div>`);
+			const snapshot = await messengerChatAdapter.readConversation();
+			assert.deepEqual(
+				snapshot.messages.map(({ text, direction }) => [text, direction]),
+				[
+					[text, direction],
+					["Wysłano", "unknown"],
+				],
+			);
+			assert.deepEqual(
+				snapshot.messages.map(({ reactions }) => reactions),
+				[[], []],
+			);
+			// Conflicting metadata must still fail closed.
+			document
+				.querySelector("[data-message-id]")!
+				.setAttribute("data-message-direction", direction === "outgoing" ? "incoming" : "outgoing");
+			assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.direction, "unknown");
+		}
+	}
+	dom.window.close();
+});
+
+test("does not attribute shared-container text without a unique match to the message label", async () => {
+	const dom = setup();
+	for (const label of ["O 21:58, Ty: Other", "O 21:58, Ty: Hi", "O 21:58, Ty", "You sent"]) {
+		setMessages(`<div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="${label}">
+			<span dir="auto">Hi</span><span dir="auto">Hi</span></div>`);
+		assert.deepEqual(
+			(await messengerChatAdapter.readConversation()).messages.map(({ direction }) => direction),
+			["unknown", "unknown"],
+		);
+	}
+	dom.window.close();
+});
+
 test("does not attach metadata from a boundary shared by multiple messages", async () => {
 	const dom = setup();
 	setMessages(`
