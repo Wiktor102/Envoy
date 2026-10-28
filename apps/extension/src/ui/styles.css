@@ -4,57 +4,76 @@
 	position: relative;
 	z-index: 1000;
 	font:
-		14px/1.4 system-ui,
+		14px/1.5 system-ui,
 		sans-serif;
+	color-scheme: light;
 	--envoy-surface: #fff;
 	--envoy-facebook-surface: #fff;
 	--envoy-text: #050505;
 	--envoy-secondary-text: #65676b;
-	--envoy-disabled-text: #bcc0c4;
-	--envoy-divider: #ced0d4;
-	--envoy-control: #e4e6eb;
+	--envoy-disabled-text: #65676b;
+	--envoy-divider: #e4e6eb;
+	--envoy-control: #f0f2f5;
+	--envoy-control-hover: #e4e6eb;
 	--envoy-control-border: #ced0d4;
 	--envoy-message: #f0f2f5;
 	--envoy-tab-selected: #ebf5ff;
 	--envoy-tab-selected-text: #0064d1;
+	--envoy-primary: #0866ff;
+	--envoy-on-primary: #fff;
+	--envoy-focus: #0866ff;
 	--envoy-error: #c4251c;
 }
 
 /* Follow Messenger's own theme, or the system theme until Messenger reports one. */
 :host([data-theme="dark"]) {
+	color-scheme: dark;
 	--envoy-surface: #1f1f1f;
 	--envoy-facebook-surface: hsl(200, 4%, 15%);
 	--envoy-text: #e4e6eb;
 	--envoy-secondary-text: #b0b3b8;
 	--envoy-disabled-text: #a0a3a8;
 	--envoy-divider: #3e4042;
-	--envoy-control: #3a3b3c;
-	--envoy-control-border: #4e4f50;
+	--envoy-control: #303133;
+	--envoy-control-hover: #3e4042;
+	--envoy-control-border: #65676b;
 	--envoy-message: #303133;
 	--envoy-tab-selected: #263951;
 	--envoy-tab-selected-text: #75b8ff;
+	--envoy-primary: #75b8ff;
+	--envoy-on-primary: #10243d;
+	--envoy-focus: #75b8ff;
 	--envoy-error: #ffb4aa;
 }
 
 @media (prefers-color-scheme: dark) {
 	:host(:not([data-theme])) {
+		color-scheme: dark;
 		--envoy-surface: #1f1f1f;
 		--envoy-facebook-surface: hsl(200, 4%, 15%);
 		--envoy-text: #e4e6eb;
 		--envoy-secondary-text: #b0b3b8;
 		--envoy-disabled-text: #a0a3a8;
 		--envoy-divider: #3e4042;
-		--envoy-control: #3a3b3c;
-		--envoy-control-border: #4e4f50;
+		--envoy-control: #303133;
+		--envoy-control-hover: #3e4042;
+		--envoy-control-border: #65676b;
 		--envoy-message: #303133;
 		--envoy-tab-selected: #263951;
 		--envoy-tab-selected-text: #75b8ff;
+		--envoy-primary: #75b8ff;
+		--envoy-on-primary: #10243d;
+		--envoy-focus: #75b8ff;
 		--envoy-error: #ffb4aa;
 	}
 }
 
 * {
 	box-sizing: border-box;
+}
+
+[hidden] {
+	display: none !important;
 }
 
 .tabs {
@@ -67,14 +86,43 @@
 	padding-inline: 16px;
 }
 
+button,
+textarea {
+	font: inherit;
+}
+
+button {
+	min-height: 36px;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	padding: 7px 12px;
+	background: var(--envoy-control);
+	color: var(--envoy-text);
+	font-weight: 600;
+	line-height: 1.4;
+	cursor: pointer;
+}
+
+button:not(:disabled):hover {
+	background: var(--envoy-control-hover);
+}
+
+button:disabled {
+	color: var(--envoy-disabled-text);
+	cursor: default;
+}
+
+button:focus-visible,
+summary:focus-visible,
+#envoy-panel:focus-visible {
+	outline: 2px solid var(--envoy-focus);
+	outline-offset: -2px;
+}
+
 .tabs button {
-	border: 0;
 	border-radius: 18px;
-	padding: 8px 12px;
 	background: transparent;
 	color: var(--envoy-secondary-text);
-	font-weight: 600;
-	cursor: pointer;
 }
 
 .tabs button[aria-selected="true"] {
@@ -86,9 +134,13 @@
 	position: fixed;
 	z-index: 100;
 	overflow: auto;
+	overscroll-behavior-y: contain;
+	scrollbar-width: thin;
+	scrollbar-color: var(--envoy-control-border) transparent;
 	background: var(--envoy-surface);
 	color: var(--envoy-text);
 	border-bottom-right-radius: 8px;
+	overflow-wrap: anywhere;
 }
 
 :host([data-facebook]) #envoy-panel {
@@ -96,29 +148,37 @@
 	border-bottom-right-radius: 0;
 }
 
-#envoy-panel[hidden] {
-	display: none;
+section,
+.diagnostics {
+	padding: 20px 16px;
 }
 
-section {
-	padding: 16px;
-}
-section + section {
+section + section,
+.diagnostics {
 	border-top: 1px solid var(--envoy-divider);
 }
 
 h2 {
-	margin: 0 0 8px;
-	font-size: 16px;
+	margin: 0 0 12px;
+	font-size: 15px;
+	font-weight: 650;
+	line-height: 1.4;
 }
 
 h3 {
-	margin: 12px 0 4px;
-	font-size: 14px;
+	margin: 0 0 8px;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--envoy-secondary-text);
 }
 
 p {
 	margin: 8px 0;
+}
+
+section > :last-child,
+.diagnostics > :last-child {
+	margin-bottom: 0;
 }
 
 label,
@@ -127,64 +187,145 @@ textarea {
 	width: 100%;
 }
 
+label {
+	margin-bottom: 6px;
+	font-size: 12px;
+	font-weight: 600;
+}
+
 textarea {
-	margin: 4px 0 8px;
-	min-height: 80px;
+	min-height: 112px;
 	resize: vertical;
 	border: 1px solid var(--envoy-control-border);
-	border-radius: 6px;
-	padding: 8px;
+	border-radius: 10px;
+	padding: 10px 12px;
 	background: var(--envoy-control);
 	color: var(--envoy-text);
+	line-height: 1.5;
 }
 
-button,
-textarea {
-	font: inherit;
+textarea::placeholder {
+	color: var(--envoy-secondary-text);
+	opacity: 1;
 }
 
-section button {
-	border: 0;
-	border-radius: 6px;
-	padding: 7px 10px;
-	background: var(--envoy-control);
-	color: var(--envoy-text);
-	cursor: pointer;
+textarea:focus-visible {
+	border-color: var(--envoy-focus);
+	outline: 2px solid var(--envoy-focus);
+	outline-offset: 1px;
 }
 
-section button:disabled {
+textarea:disabled {
 	color: var(--envoy-disabled-text);
-	cursor: default;
+	cursor: not-allowed;
 }
 
 .controls {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 4px;
-	margin-bottom: 8px;
+	gap: 8px;
+	margin-top: 12px;
+}
+
+.goal-controls button {
+	width: 100%;
+}
+
+.reply-controls {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#envoy-send-now {
+	grid-column: 1 / -1;
+}
+
+.primary:not(:disabled) {
+	background: var(--envoy-primary);
+	color: var(--envoy-on-primary);
+}
+
+.primary:not(:disabled):hover {
+	filter: brightness(0.92);
+}
+
+button.primary:focus-visible:not(:disabled) {
+	outline-color: var(--envoy-on-primary);
+	outline-offset: -4px;
+}
+
+.danger:not(:disabled) {
+	color: var(--envoy-error);
+}
+
+.task-controls {
+	padding-top: 12px;
+	border-top: 1px solid var(--envoy-divider);
+}
+
+.hint,
+.secondary-text {
+	color: var(--envoy-secondary-text);
 }
 
 .hint {
-	color: var(--envoy-secondary-text);
 	font-size: 12px;
 }
 
+.chat-id {
+	font-size: 12px;
+	color: var(--envoy-secondary-text);
+	overflow-wrap: anywhere;
+}
+
+summary {
+	border-radius: 4px;
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+summary .hint {
+	margin-inline-start: 6px;
+	font-weight: 400;
+}
+
+.conversation-preview {
+	margin-top: 12px;
+}
+
+.empty-state {
+	padding: 12px;
+	border: 1px dashed var(--envoy-control-border);
+	border-radius: 10px;
+	color: var(--envoy-secondary-text);
+	font-size: 13px;
+}
+
 #envoy-conversation {
-	margin: 8px 0 0;
+	margin: 12px 0 0;
 	padding: 0;
 	list-style: none;
 }
 
 #envoy-conversation li {
 	margin-top: 8px;
-	padding: 8px;
-	border-radius: 6px;
+	padding: 10px 12px;
+	border-radius: 10px 10px 10px 2px;
 	background: var(--envoy-message);
+}
+
+#envoy-conversation li[data-direction="outgoing"] {
+	margin-inline-start: 16px;
+	border-radius: 10px 10px 2px 10px;
+	background: var(--envoy-tab-selected);
 }
 
 #envoy-conversation strong {
 	display: block;
+	margin-bottom: 4px;
 	font-size: 12px;
+	font-weight: 600;
 	color: var(--envoy-secondary-text);
 }
 
@@ -194,6 +335,86 @@ section button:disabled {
 	overflow-wrap: anywhere;
 }
 
+.task-status {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 10px 12px;
+	border-radius: 10px;
+	background: var(--envoy-control);
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.task-status::before {
+	content: "";
+	flex: 0 0 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--envoy-secondary-text);
+}
+
+.task-status:is([data-status="thinking"], [data-status="pending"], [data-status="sending"])::before {
+	background: var(--envoy-focus);
+}
+
+.task-status[data-status="needs_user"]::before {
+	background: var(--envoy-error);
+}
+
+.task-detail {
+	padding: 4px 0;
+}
+
+.pending-reply {
+	margin-top: 12px;
+	padding: 12px;
+	border: 1px solid var(--envoy-control-border);
+	border-radius: 12px;
+}
+
+#envoy-pending-text {
+	margin: 0;
+}
+
+#envoy-countdown:not(:empty) {
+	margin: 12px 0 0;
+	padding-top: 10px;
+	border-top: 1px solid var(--envoy-divider);
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--envoy-secondary-text);
+	font-variant-numeric: tabular-nums;
+}
+
+.task-status:is([data-status="pending"], [data-status="sending"]) ~ .pending-reply #envoy-countdown {
+	color: var(--envoy-tab-selected-text);
+}
+
+#envoy-editor {
+	margin-top: 12px;
+}
+
+#envoy-save-edit {
+	margin-top: 10px;
+}
+
 #envoy-error {
+	margin-top: 12px;
+	padding: 10px 12px;
+	border: 1px solid var(--envoy-error);
+	border-radius: 10px;
 	color: var(--envoy-error);
+}
+
+.diagnostics {
+	color: var(--envoy-secondary-text);
+}
+
+.diagnostics button {
+	margin-top: 12px;
+}
+
+#envoy-health-status:empty {
+	display: none;
 }

@@ -53,6 +53,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const chatId = element<HTMLElement>("#envoy-chat-id");
 	const conversationStatus = element<HTMLElement>("#envoy-conversation-status");
 	const conversation = element<HTMLOListElement>("#envoy-conversation");
+	const conversationEmpty = element<HTMLElement>("#envoy-conversation-empty");
 	const goal = element<HTMLTextAreaElement>("#envoy-goal");
 	const goalHint = element<HTMLElement>("#envoy-goal-hint");
 	const startButton = element<HTMLButtonElement>("#envoy-start");
@@ -68,6 +69,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	isolateTextInput(goal);
 	isolateTextInput(editText);
 	const saveEditButton = element<HTMLButtonElement>("#envoy-save-edit");
+	const replyControls = element<HTMLElement>("#envoy-reply-controls");
+	const taskControls = element<HTMLElement>("#envoy-task-controls");
 	const sendButton = element<HTMLButtonElement>("#envoy-send-now");
 	const editButton = element<HTMLButtonElement>("#envoy-edit");
 	const cancelButton = element<HTMLButtonElement>("#envoy-cancel");
@@ -122,6 +125,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		const snapshot = state.snapshot;
 		chatId.textContent = snapshot ? `Chat: ${snapshot.chatId}` : "No conversation selected.";
 		conversationStatus.textContent = state.conversationStatus;
+		conversationEmpty.hidden = Boolean(snapshot?.messages.length);
 		const key = snapshot ? JSON.stringify([snapshot.chatId, snapshot.revision]) : null;
 		if (key === renderedConversation) return;
 		renderedConversation = key;
@@ -130,6 +134,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 
 		for (const message of snapshot.messages.slice(-5)) {
 			const item = document.createElement("li");
+			item.dataset.direction = message.direction;
 			const sender = document.createElement("strong");
 			sender.textContent =
 				message.direction === "outgoing"
@@ -141,6 +146,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 							: "Unknown sender";
 			const text = document.createElement("span");
 			text.className = "message-text";
+			text.dir = "auto";
 			text.textContent = message.text || (message.attachments.length ? "[Attachment]" : "[Empty message]");
 			item.append(sender, text);
 			conversation.append(item);
@@ -188,6 +194,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		taskStatus.textContent = task
 			? `${statusLabels[task.status]}${active && !owner ? " (not connected to this tab)" : ""}.`
 			: "No active task.";
+		taskStatus.dataset.status = task?.status ?? "idle";
 		taskChat.textContent = task ? `Task chat: ${task.chatId}` : "";
 		taskChat.hidden = !task || currentChat;
 		taskDetail.textContent = owner ? (task?.detail ?? "") : "";
@@ -204,6 +211,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			editingCommandId = null;
 		}
 
+		replyControls.hidden = !owner || !task || !["thinking", "pending", "editing", "sending"].includes(task.status);
+		taskControls.hidden = !task;
 		sendButton.disabled = busy || !owner || !currentChat || task?.status !== "pending" || !pending;
 		editButton.disabled =
 			busy || !owner || !currentChat || !(task?.status === "sending" || (task?.status === "pending" && pending));
