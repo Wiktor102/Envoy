@@ -1051,6 +1051,85 @@ test("reads an animated preview as an unreadable attachment and tracks its blob 
 	dom.window.close();
 });
 
+test("reads unsent placeholders as unsent messages without placeholder text", async () => {
+	const dom = setup();
+	for (const placeholder of [
+		'<div><span dir="auto">Alex cofnął wysłanie wiadomości</span></div>',
+		"<div><div>Alex unsent a message</div></div>",
+		"<div><span>You unsent a message</span></div>",
+	]) {
+		setMessages(`
+			<div data-scope="messages_table" data-message-id="text" aria-roledescription="message" aria-label="At 19:03, Alex: Hi"><span dir="auto">Hi</span></div>
+			<div data-scope="messages_table" data-message-id="unsent" aria-roledescription="wiadomość" aria-label="O 19:05, Alex">${placeholder}</div>`);
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(
+			snapshot.messages.map(({ text, direction, unsent }) => ({ text, direction, unsent })),
+			[
+				{ text: "Hi", direction: "incoming", unsent: false },
+				{ text: "", direction: "incoming", unsent: true },
+			],
+		);
+	}
+	dom.window.close();
+});
+
+test("changes the revision when a message is unsent", async () => {
+	const dom = setup();
+	setMessages('<div data-scope="messages_table"><div role="row"><span dir="auto">Can we meet at 5?</span></div></div>');
+	const original = await messengerChatAdapter.readConversation();
+	document.querySelector('[dir="auto"]')!.textContent = "Alex unsent a message";
+	const changed = await messengerChatAdapter.readConversation();
+	assert.equal(changed.messages[0]!.unsent, true);
+	assert.notEqual(changed.revision, original.revision);
+	dom.window.close();
+});
+
+test("preserves Likes and ignores delivery footers when another message is unsent", async () => {
+	const dom = setup();
+	setMessages(`
+		<div data-scope="messages_table" data-message-id="like" aria-roledescription="message" aria-label="At 19:03, Alex: 👍"><div role="img" aria-label="Like, thumbs up"><svg><title>Like, thumbs up</title></svg></div></div>
+		<div data-scope="messages_table" data-message-id="text" aria-roledescription="message" aria-label="At 19:05, You: Hi"><span dir="auto">Hi</span><div><span role="presentation"><span dir="auto"><span>Sent 1 minute ago</span></span></span></div></div>`);
+	const original = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		original.messages.map(({ text, direction, unsent }) => [text, direction, unsent]),
+		[
+			["👍", "incoming", false],
+			["Hi", "outgoing", false],
+		],
+	);
+	const message = document.querySelector('[data-message-id="text"]')!;
+	message.querySelector('[dir="auto"]')!.textContent = "You unsent a message";
+	message.setAttribute("aria-label", "At 19:05, You: You unsent a message");
+	const changed = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		changed.messages.map(({ text, direction, unsent }) => [text, direction, unsent]),
+		[
+			["👍", "incoming", false],
+			["", "outgoing", true],
+		],
+	);
+	assert.notEqual(changed.revision, original.revision);
+	message.querySelector('span[role="presentation"] span span')!.textContent = "Sent 2 minutes ago";
+	assert.equal((await messengerChatAdapter.readConversation()).revision, changed.revision);
+	dom.window.close();
+});
+
+test("does not read a quote of an unavailable message as quoted text", async () => {
+	const dom = setup();
+	for (const quote of ["Wiadomość niedostępna", "Original message was deleted", "Alex unsent a message"]) {
+		setMessages(`<div data-scope="messages_table" data-message-id="reply">
+			<h4>Alex replied to you</h4>
+			<div role="button" aria-label="View original message"><span dir="auto">${quote}</span></div>
+			<span dir="auto">ok</span>
+		</div>`);
+		const [message] = (await messengerChatAdapter.readConversation()).messages;
+		assert.equal(message!.text, "ok");
+		assert.equal(message!.unsent, false);
+		assert.equal(message!.replyTo?.text, null);
+	}
+	dom.window.close();
+});
+
 test("omits Messenger delivery footers without changing real text, emoji, or revisions", async () => {
 	const dom = setup();
 	// Structure captured from Chrome, with synthetic message content.

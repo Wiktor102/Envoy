@@ -3,7 +3,15 @@ import assert from "node:assert/strict";
 import { appRouter } from "../src/router.js";
 
 const caller = appRouter.createCaller({});
-const message = { id: "id", text: "hello", direction: "incoming", replyTo: null, attachments: [], reactions: [] };
+const message = {
+	id: "id",
+	text: "hello",
+	direction: "incoming",
+	replyTo: null,
+	attachments: [],
+	reactions: [],
+	unsent: false,
+};
 const snapshot = { chatId: "chat", revision: "rev", messages: [message] };
 
 test("task and connector procedures reject invalid or oversized inputs without leaking text", async () => {
@@ -16,6 +24,11 @@ test("task and connector procedures reject invalid or oversized inputs without l
 				connectorId: "owner",
 				goal: "goal",
 				snapshot: { ...snapshot, messages: [{ ...message, text: secret, direction: "unclear" }] },
+			} as never),
+		() =>
+			caller.connector.sync({
+				connectorId: "owner",
+				snapshot: { ...snapshot, messages: [{ ...message, unsent: undefined }] },
 			} as never),
 		() =>
 			caller.connector.sync({

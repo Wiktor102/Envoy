@@ -19,7 +19,17 @@ function deferred<T>() {
 const initialSnapshot: ConversationSnapshot = {
 	chatId: "chat-1",
 	revision: "revision-1",
-	messages: [{ id: "message-1", text: "Hello", direction: "incoming", replyTo: null, attachments: [], reactions: [] }],
+	messages: [
+		{
+			id: "message-1",
+			text: "Hello",
+			direction: "incoming",
+			replyTo: null,
+			attachments: [],
+			reactions: [],
+			unsent: false,
+		},
+	],
 };
 
 const activeTask: TaskState = {

@@ -90,7 +90,21 @@ interface RenderedMessage {
 	element: HTMLElement;
 	boundary: Element | null;
 	images: HTMLElement[];
+	unsent: boolean;
 	standaloneLike?: boolean;
+}
+
+// Messenger keeps an unsent message's bubble and replaces its text with a
+// placeholder. The placeholder is not the sender's words. A real message that
+// reads like one is treated the same way, which only stops the agent.
+const unsentPlaceholder =
+	/^(?:[^\n]{1,100} )?(?:unsent a message|cofn\S*(?: ?\(-[^)]*\))? wysłanie wiadomości)\.?$|^(?:this |ta )?(?:message|wiadomość) (?:was |została )?(?:unsent|removed|deleted|cofnięta|usunięta)\.?$|^usunięto wiadomość\.?$/i;
+// A quote of a withdrawn message names its state instead of quoting it.
+const unavailableQuote =
+	/^(?:message unavailable|(?:the )?original message (?:was )?(?:unsent|removed|deleted)|wiadomość (?:jest )?niedostępna|oryginalna wiadomość została (?:cofnięta|usunięta))\.?$/i;
+
+function normalizedText(value: string | null | undefined): string {
+	return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
 function isDeliveryStatus(element: HTMLElement, candidates: HTMLElement[]): boolean {
@@ -159,6 +173,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		element,
 		boundary: messageBoundary(element),
 		images: [],
+		unsent: unsentPlaceholder.test(normalizedText(element.textContent)),
 	}));
 
 	// Ordinary chats use viewer links; encrypted chats use photo buttons with
@@ -200,7 +215,26 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 				? messages.find((message) => message.boundary === boundary && !textElements.includes(message.element))
 				: undefined;
 		if (imageMessage) imageMessage.images.push(image);
-		else messages.push({ element: image, boundary, images: [image] });
+		else messages.push({ element: image, boundary, images: [image], unsent: false });
+	}
+	// The placeholder may be plain text outside a directional text element.
+	for (const element of main.querySelectorAll<HTMLElement>(
+		'[data-scope="messages_table"] div, [data-scope="messages_table"] span',
+	)) {
+		const scope = element.closest('[data-scope="messages_table"]');
+		if (
+			(scope && isGroupIntro(scope)) ||
+			element.closest(
+				'[dir="auto"], button, [role="button"], [contenteditable="true"], [aria-hidden="true"], h1, h2, h3, h4, h5, h6, [role="heading"]',
+			)
+		)
+			continue;
+		const ownText = [...element.childNodes]
+			.filter((node) => node.nodeType === 3)
+			.map((node) => node.nodeValue)
+			.join("");
+		if (!unsentPlaceholder.test(normalizedText(ownText)) || !isVisible(element)) continue;
+		messages.push({ element, boundary: messageBoundary(element), images: [], unsent: true });
 	}
 	// Messenger renders its large Like as an accessible SVG rather than text.
 	// Require the enclosing message label to identify the same emoji, and do not
@@ -219,7 +253,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		)
 			continue;
 		if (messages.some((message) => message.boundary === boundary)) throw new ConversationUnavailableError("unsupported");
-		messages.push({ element: like, boundary, images: [], standaloneLike: true });
+		messages.push({ element: like, boundary, images: [], unsent: false, standaloneLike: true });
 	}
 	const ordered = messages.sort((a, b) => {
 		if (a.element === b.element) return 0;
@@ -373,8 +407,14 @@ function readReply(boundary: Element): ConversationSnapshot["messages"][number][
 	const quote = button.querySelector<HTMLElement>('[dir="auto"]');
 	const text = quote ? readInlineText(quote) : "";
 	const context = boundary.querySelector<HTMLElement>('h4, [role="heading"]');
+	const quoteText = normalizedText(quote?.textContent);
 	return {
-		text: text.trim() ? text : null,
+		text:
+			!quote || unsentPlaceholder.test(quoteText) || unavailableQuote.test(quoteText)
+				? null
+				: text.trim()
+					? text
+					: null,
 		context: context?.textContent?.trim() || null,
 		attachments: getQuotedImages(button).map(imageAttachment),
 	};
@@ -538,10 +578,10 @@ function readDirection(boundary: Element): ConversationMessage["direction"] {
 
 function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messages"] {
 	const boundaries = rendered.map((message) => message.boundary);
-	const texts = rendered.map(({ element, images, standaloneLike }) =>
-		images.some((image) => image === element) ? "" : standaloneLike ? "👍" : readInlineText(element),
+	const texts = rendered.map(({ element, images, unsent, standaloneLike }) =>
+		unsent || images.some((image) => image === element) ? "" : standaloneLike ? "👍" : readInlineText(element),
 	);
-	return rendered.map(({ element, boundary, images }, index) => {
+	return rendered.map(({ element, boundary, images, unsent }, index) => {
 		// A shared boundary cannot safely assign metadata to one message.
 		const unique = boundary && boundaries.indexOf(boundary) === boundaries.lastIndexOf(boundary);
 		// A fresh bubble can share its container with a rendered delivery status.
@@ -559,6 +599,7 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 			replyTo: unique ? readReply(boundary) : null,
 			attachments: images.map((image) => imageAttachment(image.querySelector<HTMLImageElement>("img"))),
 			reactions: unique ? readReactions(boundary) : [],
+			unsent,
 		};
 	});
 }
@@ -584,12 +625,13 @@ async function revisionOf(
 	imageState: string[][],
 ): Promise<string> {
 	// DOM-node IDs are temporary. Only the ordered message content contributes to the revision.
-	const content = messages.map(({ text, direction, replyTo, attachments, reactions }) => ({
+	const content = messages.map(({ text, direction, replyTo, attachments, reactions, unsent }) => ({
 		text,
 		direction,
 		replyTo,
 		attachments,
 		reactions,
+		unsent,
 	}));
 	const bytes = new TextEncoder().encode(JSON.stringify([chatId, content, imageState]));
 	const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -631,12 +673,13 @@ function captureIsCurrent(capture: ConversationCapture): boolean {
 }
 
 function contentOf(messages: ConversationSnapshot["messages"]): unknown[] {
-	return messages.map(({ text, direction, replyTo, attachments, reactions }) => ({
+	return messages.map(({ text, direction, replyTo, attachments, reactions, unsent }) => ({
 		text,
 		direction,
 		replyTo,
 		attachments,
 		reactions,
+		unsent,
 	}));
 }
 

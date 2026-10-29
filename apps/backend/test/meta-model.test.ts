@@ -21,6 +21,7 @@ const conversation = {
 			replyTo: null,
 			attachments: [],
 			reactions: [],
+			unsent: false,
 		},
 	],
 } as const;
@@ -109,12 +110,14 @@ test("the Meta request marks unverified history and attachments without sending 
 			attachments: [{ type: "image" as const, url: "https://private.example/photo", description: null }],
 			replyTo: { text: null, context: null, attachments: [{ type: "image" as const, url: null, description: null }] },
 			reactions: [],
+			unsent: false,
 		};
 		await new MetaModelAdapter().run(task, { ...conversation, messages: [prior, ...conversation.messages] });
 		const content = JSON.parse(body.messages[2].content);
 		assert.deepEqual(content.conversation[0], {
 			direction: "unknown",
 			text: "What about this?",
+			unsent: false,
 			attachments: [{ type: "image" }],
 			replyTo: { text: null, context: null, attachments: [{ type: "image" }] },
 		});

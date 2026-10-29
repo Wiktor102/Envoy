@@ -36,6 +36,7 @@ export class MetaModelAdapter implements Agent {
 							"Only the currently visible portion of the chat is available; do not assume unseen history. " +
 							"Some earlier messages may have unknown authors, unreadable attachments, empty text, or incomplete reply previews. " +
 							"Do not guess their authors or missing contents. Ask the user if that information matters to the decision. " +
+							"A message marked unsent was withdrawn by its sender; its contents are unavailable. " +
 							"Return one JSON object with action: reply, wait, ask, or finish. " +
 							"For reply, text is the exact message to send, on one line without tabs or control characters. For ask, text is a question to the user, not the other person. " +
 							"For finish, text briefly tells the user what was achieved. For wait, omit text. " +
@@ -45,9 +46,10 @@ export class MetaModelAdapter implements Agent {
 					{
 						role: "user",
 						content: JSON.stringify({
-							conversation: conversation.messages.map(({ direction, text, replyTo, attachments }) => ({
+							conversation: conversation.messages.map(({ direction, text, replyTo, attachments, unsent }) => ({
 								direction,
 								text,
+								unsent,
 								// Do not send attachment URLs; the text-only agent cannot inspect them.
 								attachments: attachments.map(({ type }) => ({ type })),
 								replyTo: replyTo

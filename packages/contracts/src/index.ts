@@ -22,6 +22,8 @@ export interface ConversationMessage {
 	replyTo: { text: string | null; context: string | null; attachments: readonly ImageAttachment[] } | null;
 	attachments: readonly ImageAttachment[];
 	reactions: readonly { label: string; emojis: readonly string[]; count: number | null }[];
+	// The sender withdrew this message. Its placeholder is not message text.
+	unsent: boolean;
 }
 
 export interface ConversationSnapshot {
