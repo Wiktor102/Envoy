@@ -3,7 +3,8 @@ import { test } from "node:test";
 import type { ConnectorSyncResult, ConversationSnapshot, SendReplyCommand, TaskState } from "@envoy/contracts";
 import { createEnvoyController } from "../src/controller";
 import type { BackendRequest, callBackend } from "../src/messaging";
-import type { MessengerChatAdapter } from "../src/messenger/chat-adapter";
+import { ConversationUnavailableError, type MessengerChatAdapter } from "../src/messenger/chat-adapter";
+import { conversationErrorStatus } from "../src/ui/conversation";
 import { TaskService } from "../../backend/src/tasks/service.js";
 
 function deferred<T>() {
@@ -125,6 +126,9 @@ function setup(handler: (request: BackendRequest) => unknown | Promise<unknown>)
 		},
 		setSnapshot(snapshot: ConversationSnapshot) {
 			observedSnapshot = snapshot;
+		},
+		observeFailure(error: unknown) {
+			update(null, conversationErrorStatus(error));
 		},
 		observe(snapshot: ConversationSnapshot) {
 			observedSnapshot = snapshot;
@@ -468,6 +472,58 @@ test("a background heartbeat reads the current conversation before syncing", { t
 	assert.equal(harness.heartbeatStops, 0);
 	harness.controller.setControlsAvailable(false);
 	assert.equal(harness.heartbeatStops, 1);
+});
+
+test("watcher and heartbeat keep the same failure notice until the read changes", { timeout: 5000 }, async (t) => {
+	let started = false;
+	const harness = setup((request) => {
+		switch (request.type) {
+			case "envoy:start":
+				started = true;
+				return activeTask;
+			case "envoy:sync":
+				return syncResult(started ? activeTask : null);
+			case "envoy:disconnect":
+				return undefined;
+			default:
+				throw new Error(`Unexpected request: ${request.type}`);
+		}
+	});
+	t.after(() => harness.controller.destroy());
+	let status = "";
+	const notices: string[] = [];
+	harness.controller.subscribe((state) => {
+		status = state.conversationStatus;
+		notices.push(status);
+	});
+	await harness.controller.start(activeTask.goal);
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	const unsupported = new ConversationUnavailableError("unsupported");
+	harness.setRead(async () => {
+		throw unsupported;
+	});
+	const start = notices.length;
+	for (let i = 0; i < 3; i++) {
+		harness.observeFailure(unsupported);
+		harness.tick();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+	}
+	assert.ok(
+		notices
+			.slice(start)
+			.every((notice) => notice === "Some messages can't be read. Envoy is paused for this conversation."),
+	);
+	const changed = new ConversationUnavailableError("not-latest");
+	harness.setRead(async () => {
+		throw changed;
+	});
+	harness.tick();
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	assert.equal(status, "Can't confirm the latest messages. Scroll to the bottom or reload this tab.");
+	harness.setRead(async () => initialSnapshot);
+	harness.tick();
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	assert.equal(status, "1 loaded messages.");
 });
 
 test("a failed fresh read is reported even when a later read succeeds", { timeout: 5000 }, async (t) => {
