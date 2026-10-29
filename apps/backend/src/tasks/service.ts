@@ -29,6 +29,9 @@ type Attempt = {
 	// Even an unauthorized command may have inserted a draft that the user sent.
 	// Wait for its result before allowing any replacement send or task.
 	awaitingRetiredResult: boolean;
+	// Send now arrived after this attempt was claimed but before it was
+	// authorized. A rejection then retries once instead of waiting for the user.
+	sendNowRequested: boolean;
 	deadline: number;
 };
 type Options = {
@@ -185,6 +188,12 @@ export class TaskService {
 				break;
 			}
 			case "send-now": {
+				// The countdown can hand the reply to the tab while this request is
+				// in flight. The tab may reject that claim, so keep the request.
+				if (task.status === "sending" && this.inFlight) {
+					if (!this.inFlight.authorized) this.inFlight.sendNowRequested = true;
+					break;
+				}
 				if (task.status !== "pending" || !task.pendingReply) throw new Error("There is no reply ready to send.");
 				if (!this.leaseActive()) throw new Error("The agent tab is disconnected.");
 				task.pendingReply.sendAt = this.now();
@@ -363,6 +372,7 @@ export class TaskService {
 						authorized: false,
 						retired: false,
 						awaitingRetiredResult: false,
+						sendNowRequested: false,
 						deadline: this.now() + SEND_RESULT_TIMEOUT_MS,
 					};
 					this.inFlight = attempt;
@@ -440,6 +450,26 @@ export class TaskService {
 		this.scheduleAttemptTimeout();
 		if (attempt.retired) return returnState();
 		this.processedRevisions.add(attempt.command.expectedRevision);
+		const current = this.connector.readConversation();
+		if (
+			result === "rejected" &&
+			this.task.status === "sending" &&
+			current?.chatId === attempt.command.chatId &&
+			current.revision === attempt.command.expectedRevision
+		) {
+			// A rejection proves the reply was not dispatched. Return it to the
+			// user under a new command ID; only an explicit Send now retries it.
+			this.task.pendingReply = {
+				...attempt.command,
+				commandId: randomUUID(),
+				sendAt: attempt.sendNowRequested ? this.now() : null,
+			};
+			this.task.status = "pending";
+			this.task.detail = attempt.sendNowRequested
+				? "Sending when the agent tab checks in."
+				: "The reply was not sent. Choose Send now to try again, or cancel it.";
+			return returnState();
+		}
 		this.suppressedRevisions.add(attempt.command.expectedRevision);
 		this.suppressedContexts.add(attempt.context);
 		if (this.task.status !== "sending") return returnState();

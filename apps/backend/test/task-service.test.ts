@@ -94,6 +94,58 @@ test("a claim can be revoked for editing, and the new reply waits for Send now",
 	assert.equal(agent.calls.length, 1);
 });
 
+test("a rejected claim returns the reply for Send now instead of dropping it", async () => {
+	const { agent, service, advance } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	advance(10_000);
+	const claim = service.sync("owner", snapshot()).command!;
+	const rejected = service.report("owner", claim.commandId, "rejected")!;
+	assert.equal(rejected.status, "pending");
+	assert.equal(rejected.pendingReply?.text, "Tuesday works.");
+	assert.equal(rejected.pendingReply?.sendAt, null);
+	assert.notEqual(rejected.pendingReply?.commandId, claim.commandId);
+	advance(20_000);
+	assert.equal(service.sync("owner", snapshot()).command, null);
+	service.control("owner", task.id, "send-now");
+	const retry = service.sync("owner", snapshot()).command!;
+	assert.equal(retry.text, "Tuesday works.");
+	assert.equal(service.authorize("owner", retry.commandId, retry.chatId, retry.expectedRevision), true);
+	assert.equal(service.report("owner", retry.commandId, "sent")?.status, "waiting");
+	assert.equal(agent.calls.length, 1);
+});
+
+test("Send now during an unauthorized claim retries once if the tab rejects it", async () => {
+	const { agent, service, advance } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	advance(10_000);
+	const claim = service.sync("owner", snapshot()).command!;
+	assert.equal(service.control("owner", task.id, "send-now").status, "sending");
+	assert.equal(service.report("owner", claim.commandId, "rejected")?.status, "pending");
+	const retry = service.sync("owner", snapshot()).command!;
+	assert.equal(retry.text, "Tuesday works.");
+	assert.notEqual(retry.commandId, claim.commandId);
+	const rejectedAgain = service.report("owner", retry.commandId, "rejected")!;
+	assert.equal(rejectedAgain.status, "pending");
+	assert.equal(rejectedAgain.pendingReply?.sendAt, null);
+	assert.equal(service.sync("owner", snapshot()).command, null);
+});
+
+test("a rejected claim is not restored after the conversation changed", async () => {
+	const { agent, service, advance } = setup();
+	service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	advance(10_000);
+	const claim = service.sync("owner", snapshot()).command!;
+	assert.equal(service.authorize("owner", claim.commandId, claim.chatId, claim.expectedRevision), true);
+	service.sync("owner", snapshot("r2", "Actually, Friday?"));
+	const state = service.report("owner", claim.commandId, "rejected")!;
+	assert.equal(state.status, "needs_user");
+	assert.equal(state.pendingReply, null);
+	assert.match(state.detail!, /not sent/);
+});
+
 test("a rejected retired claim does not suppress a paused edit on resume", async () => {
 	const { agent, service, advance } = setup();
 	const task = service.start("owner", "Arrange a meeting", snapshot());

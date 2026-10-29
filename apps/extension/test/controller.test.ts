@@ -869,3 +869,61 @@ for (const status of ["taken_over", "completed"] as const) {
 		assert.equal(harness.sent, 0);
 	});
 }
+
+test("Send now during an in-flight claiming sync still sends the reply", { timeout: 5000 }, async (t) => {
+	let time = 1_000;
+	let agentCalls = 0;
+	const service = new TaskService(
+		{
+			async run() {
+				agentCalls++;
+				return { action: "reply", text: "Tuesday works." };
+			},
+		},
+		{ now: () => time, leaseMs: 100_000 },
+	);
+	let holdClaim = false;
+	const claimHeld = deferred<void>();
+	const releaseClaim = deferred<void>();
+	const harness = setup(async (request) => {
+		switch (request.type) {
+			case "envoy:start":
+				return service.start("owner", request.goal, request.snapshot);
+			case "envoy:sync": {
+				const result = service.sync("owner", request.snapshot);
+				if (holdClaim && result.command) {
+					holdClaim = false;
+					claimHeld.resolve();
+					await releaseClaim.promise;
+				}
+				return result;
+			}
+			case "envoy:control":
+				return service.control("owner", request.taskId, request.action, request.text);
+			case "envoy:authorize":
+				return service.authorize("owner", request.commandId, request.chatId, request.revision);
+			case "envoy:report":
+				return service.report("owner", request.commandId, request.result);
+			case "envoy:disconnect":
+				return service.disconnect("owner");
+			default:
+				throw new Error(`Unexpected request: ${request.type}`);
+		}
+	});
+	t.after(() => harness.controller.destroy());
+	await harness.controller.start(activeTask.goal);
+	await flush();
+	// The countdown ends and a heartbeat claims the reply, but its response is
+	// still in flight when the user chooses Send now.
+	time += 10_000;
+	holdClaim = true;
+	harness.tick();
+	await claimHeld.promise;
+	const sendNow = harness.controller.control("send-now");
+	await flush();
+	releaseClaim.resolve();
+	await sendNow;
+	for (let turn = 0; turn < 10 && harness.sent === 0; turn++) await flush();
+	assert.equal(harness.sent, 1);
+	assert.equal(agentCalls, 1);
+});
