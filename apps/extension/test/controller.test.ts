@@ -568,3 +568,61 @@ for (const cause of ["lease expiry", "disconnect"] as const) {
 		assert.equal(harness.sent, 0);
 	});
 }
+
+for (const status of ["taken_over", "completed"] as const) {
+	test(`${status} tasks poll without uploading later conversation text`, { timeout: 5000 }, async (t) => {
+		t.mock.timers.enable({ apis: ["setInterval"] });
+		let task: TaskState | null = null;
+		const harness = setup((request) => {
+			switch (request.type) {
+				case "envoy:start":
+					task = { ...activeTask };
+					return task;
+				case "envoy:sync":
+					return syncResult(task);
+				case "envoy:control":
+					task = { ...activeTask, status: "taken_over" };
+					return task;
+				case "envoy:clear":
+					task = null;
+					return undefined;
+				case "envoy:disconnect":
+					return undefined;
+				default:
+					throw new Error(`Unexpected request: ${request.type}`);
+			}
+		});
+		t.after(() => harness.controller.destroy());
+		await harness.controller.start(activeTask.goal);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		if (status === "taken_over") await harness.controller.control("take-over");
+		else {
+			task = { ...activeTask, status };
+			harness.tick();
+		}
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(harness.heartbeatStops, 1);
+		const endedAt = harness.calls.length;
+		const newer = {
+			...initialSnapshot,
+			revision: "after-task",
+			messages: [
+				...initialSnapshot.messages,
+				{ ...initialSnapshot.messages[0]!, id: "later-message", text: "Later private message" },
+			],
+		};
+		harness.observe(newer);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		t.mock.timers.tick(1000);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const polls = harness.calls.slice(endedAt).filter((request) => request.type === "envoy:sync");
+		assert.ok(polls.length >= 2, "Both watcher updates and timer polls must be checked");
+		assert.ok(polls.every((request) => request.snapshot === null));
+		await harness.controller.clear();
+		await harness.controller.start(activeTask.goal);
+		assert.ok(
+			harness.calls.some((request) => request.type === "envoy:start" && request.snapshot.revision === newer.revision),
+		);
+		assert.equal(harness.heartbeatStarts, 2);
+	});
+}

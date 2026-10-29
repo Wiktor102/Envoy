@@ -227,10 +227,10 @@ export function createEnvoyController(
 				const lossVersion = controlsLossVersion;
 				const reportingLoss = state.isOwner && lossVersion !== reportedLossVersion;
 				try {
-					// Other tabs only discover task status. They never upload their messages.
+					// Other tabs and ended tasks only discover task status.
 					const result = await transport({
 						type: "envoy:sync",
-						snapshot: state.isOwner && controlsAvailable && !reportingLoss ? state.snapshot : null,
+						snapshot: ownerAvailable() && !reportingLoss ? state.snapshot : null,
 					});
 					if (reportingLoss) reportedLossVersion = lossVersion;
 					if (stopped) return;
