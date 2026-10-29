@@ -49,6 +49,7 @@ export function createEnvoyController(
 	};
 	const listeners = new Set<(state: ControllerState) => void>();
 	let epoch = 0;
+	let sendVersion = 0;
 	let actionInFlight = false;
 	let activeAction: Promise<TaskState | null> | null = null;
 	let stopped = false;
@@ -66,7 +67,18 @@ export function createEnvoyController(
 	const claimed = new Set<string>();
 
 	function publish(patch: Partial<ControllerState>) {
-		state = { ...state, ...patch };
+		const next = { ...state, ...patch };
+		// Backend revocations must survive a later return to sending. A delayed
+		// authorization belongs only to the task and send that requested it.
+		if (
+			state.task?.id !== next.task?.id ||
+			state.task?.chatId !== next.task?.chatId ||
+			state.isOwner !== next.isOwner ||
+			(state.task?.status === "sending" && next.task?.status !== "sending")
+		) {
+			sendVersion++;
+		}
+		state = next;
 		for (const listener of listeners) listener(state);
 	}
 
@@ -162,12 +174,19 @@ export function createEnvoyController(
 		if (claimed.has(command.commandId)) return;
 		claimed.add(command.commandId);
 		let result: SendResult = "rejected";
+		const taskId = state.task?.id;
+		const commandVersion = sendVersion;
 		const isCurrent = () =>
 			!stopped &&
 			!suspended &&
 			controlsAvailable &&
 			!actionInFlight &&
 			epoch === commandEpoch &&
+			sendVersion === commandVersion &&
+			state.isOwner &&
+			state.task?.id === taskId &&
+			state.task?.status === "sending" &&
+			state.task.chatId === command.chatId &&
 			identity(state.snapshot) === `${command.chatId}:${command.expectedRevision}`;
 		try {
 			if (isCurrent())
