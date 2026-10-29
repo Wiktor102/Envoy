@@ -1,78 +1,71 @@
 # Envoy
 
-An AI agent that talks things through for you, built for the Meta Global AI Developer Hackathon.
+Envoy is an experimental Messenger agent built for the Meta Global AI Developer Hackathon. Give it a goal and limits for one private text conversation. It reads the messages loaded in a dedicated Messenger tab, asks Meta Model API what to do, and can propose a reply. The backend owns the task and a default 10-second countdown. You can edit or cancel a reply, pause the task, or take over.
 
-Give Envoy a goal in a private Messenger conversation, such as "Arrange a meeting. I can do Tuesday after 17:00 or Thursday evening. Ask me if neither works." It follows the discussion, asks for missing information, remembers agreements, and responds within the limits you set.
+The implementation has synthetic tests but has not been verified against a signed-in Messenger account or a live Meta Model API key. Messenger's DOM is not a stable API. The reader and sender deliberately stop when they cannot identify the chat, sender, newest messages, or composer confidently. Validate the full flow with a willing participant before relying on it.
 
-Envoy runs through a browser extension and a small backend powered by Meta Model API. It uses a dedicated Messenger tab so you can keep chatting elsewhere. Before each reply sends, you get a short countdown to edit or cancel it. You can pause the agent or take over at any time.
+## Setup
 
-The hackathon version handles one text conversation and one goal at a time, with a default 10-second reply delay. Your computer must stay awake and the agent's tab must remain open and connected. Reliable background reading and sending is coming later.
-
-## Scaffold status
-
-The code is a compileable foundation only. The backend exposes one tRPC `health` query over WebSocket. The extension adds an Envoy tab to the chats sidebar with goal setup and agent controls using Shadow DOM. There is no toolbar popup or separate browser window.
-
-Only the backend health button works. Goal setup and task controls are disabled. Messenger access, sending, countdowns, task lifecycle, persistence, agent reasoning, Meta API calls, and authentication are TODOs. No messages are read or sent, and no API keys are needed.
-
-## Prerequisites
-
-- Node.js 22.19 or newer.
-- pnpm 10.20.0, pinned in `package.json`. Install with `npm install --global pnpm@10.20.0` if needed.
-- Chrome 116 or newer to load the extension.
-
-## Commands
-
-Run these from the repository root:
+Requirements: Node.js 22.19 or newer, pnpm 10.20.0, Chrome 116 or newer, and a [Meta Model API](https://dev.meta.ai/docs/quickstart) key.
 
 ```sh
 pnpm install
 cp apps/backend/.env.example apps/backend/.env.development
 cp apps/backend/.env.example apps/backend/.env.production
-pnpm dev
-pnpm typecheck
-pnpm build
 ```
 
-`pnpm dev` builds the shared packages, then starts the contracts compiler, backend watcher, and WXT development process. WXT may open Chrome for development. Use `pnpm dev:backend` or `pnpm dev:extension` to start either app separately. Restart development after changing the backend router's exported types so the extension sees fresh declarations.
+Put `MODEL_API_KEY` in the backend env files. Set `NODE_ENV=production` in `.env.production`. `MODEL_API_MODEL` defaults to `muse-spark-1.3`; change it if your Meta account uses a different supported model. Restart the backend after changing an env file. Existing process environment variables take precedence. Never put the key in the extension.
 
-`pnpm typecheck` builds contracts and backend declarations before checking all three workspaces. `pnpm build` builds each workspace in dependency order. Installation and extension typechecking generate the ignored `.wxt` types automatically.
+For development run `pnpm dev`. WXT may open Chrome. To run each part separately, use `pnpm dev:backend` or `pnpm dev:extension`. Restart development after backend router type changes so the extension picks up the new declarations.
 
-Run `pnpm format` to format the workspace or `pnpm format:check` to check formatting. Prettier uses tabs with a width of 4. `pnpm install` sets up the Husky pre-commit hook, which runs Prettier on staged files through lint-staged and stages the formatting changes.
-
-After a production build, start the backend and check its real WebSocket procedure in another terminal:
+For a production build:
 
 ```sh
+pnpm build
 pnpm start:backend
 ```
 
+In `chrome://extensions`, enable Developer mode and load `apps/extension/.output/chrome-mv3` as an unpacked extension. Reload the extension after rebuilding it.
+
+## Delegate a conversation
+
+1. Open the private Messenger conversation in a dedicated tab, then reload that tab. Reload after selecting a different conversation too. Envoy stops when the tab navigates because the URL may change before Messenger replaces the old messages.
+2. Open the **Envoy** tab in the chats sidebar. Check the selected conversation in Messenger, enter the goal and its limits, then select **Start task**. Keep the computer awake and this tab open. You can use other tabs while it runs.
+3. Envoy waits for an identifiable incoming text message and sends the goal and loaded text to Meta Model API for a decision. It can wait, propose a reply, ask you for guidance, or mark the task complete. Update the instructions and resume if it needs your input.
+4. A proposed reply has a 10-second countdown. **Edit** stops it; after saving an edit, choose **Send now** to send. **Cancel reply** stops it and waits for a new message. **Pause** stops pending work; **Take over** ends the task. Envoy checks the chat, current message revision, and composer again immediately before sending.
+5. A disconnected or navigated tab pauses the task. The extension asks the dedicated tab to reread the conversation while it is in the background; if the tab cannot respond, the backend pauses. Reopen the same chat, reload it, and use **Reconnect** and then **Resume**. If a send could not be confirmed, check the actual conversation before resuming or deleting the task. Envoy will not automatically retry an uncertain send.
+
+Only the messages rendered by Messenger are visible to Envoy. It cannot infer missing history. It stops if the latest message has an unknown sender or unreadable content, or if it cannot establish the latest messages or an empty composer. Earlier messages with unknown senders or recognized attachments are labeled for the model; it cannot inspect the attachments and should ask when missing context matters. Entirely unrecognized media still pauses the reader. Message attribution and send controls depend on Messenger's rendered markup and may need adjustment for a particular account, language, or UI version. A visible outgoing bubble is evidence that Messenger displayed the send, not proof of final delivery.
+
+Use **Dev mode** beside the sidebar tabs to show message history, chat and task IDs, and backend connection controls. It is off by default. Envoy remembers this setting in the extension on this browser.
+
+## Privacy and storage
+
+The extension sends the chosen chat's loaded context and your instructions to the local backend; the backend sends text and instructions to Meta Model API. Other Messenger tabs do not upload their conversation snapshots. Once Envoy shows a task as completed or taken over, it stops uploading conversation snapshots. The backend also ignores late conversation updates for ended tasks. The project does not log message bodies or provider errors. Conversation text remains untrusted input and cannot authorize changes to your instructions.
+
+Task state, context, and pending replies exist only in backend memory. There is no database or cross-restart recovery. Restarting the backend deletes them and cannot resume a pending send. Use **Delete task** after completion or takeover to remove the in-memory record. Otherwise, ended tasks are deleted after one hour, except when a send needs user verification. Memory and messaging-style detection are not implemented.
+
+The default backend listens at `127.0.0.1:3001` and the extension connects to `ws://127.0.0.1:3001`. Keep those defaults for local use. The server rejects ordinary web page WebSocket origins, but local programs and installed extensions are not authenticated. Do not expose this backend to a network; hosted use requires authentication, HTTPS, and an appropriate retention policy.
+
+## Checks
+
 ```sh
-pnpm health:prod
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm format:check
 ```
 
-The health command should print `{"status":"ok","service":"envoy-backend"}`. Use `pnpm health` for the development backend.
+The test suites use synthetic Messenger DOM fixtures and a fake agent. They do not replace a real Messenger or Meta API integration test. To check the production backend's WebSocket health endpoint, run `pnpm health:prod` in another terminal after starting it. The response should be `{"status":"ok","service":"envoy-backend"}`. Use `pnpm health` for the development backend.
 
-The backend loads `apps/backend/.env.development` for `dev` and `health`, and `.env.production` for `start` and `health:prod`. These local files are ignored by Git. Copy the committed `.env.example` to both files when setting up a new checkout, using `Copy-Item` in PowerShell or `cp` in a POSIX shell. Set `NODE_ENV=production` in `.env.production`. Restart the backend after changing its env file. Existing process environment variables take precedence over file values.
-
-The example sets `HOST=127.0.0.1` and `PORT=3001`. The server and health command use the configured host and port. The extension still connects to `ws://127.0.0.1:3001`, so keep those defaults when using it. API credentials, when added, belong only in the backend env files. Deployment, authentication, and service-worker connection recovery remain future work.
-
-If a local certificate proxy causes dependency downloads to fail, configure Node to trust your organization's certificate store. This workspace does not disable TLS verification.
-
-## Load the extension
-
-After `pnpm build`, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `apps/extension/.output/chrome-mv3`. Open or reload `https://www.messenger.com/` or a `https://www.facebook.com/messages/` page to see the Envoy tab in the chats sidebar. Select it to open the placeholders. If the extension is already loaded, reload it in `chrome://extensions` first. Reload the chat page after navigating to it from elsewhere on Facebook. With the backend running, **Check backend health** checks the content script to background worker to tRPC path.
-
-The production manifest contains only the Messenger and Facebook messages content-script matches and background worker. It requests no additional extension permissions. WXT adds development permissions for its reload tooling during `pnpm dev`.
+`pnpm typecheck` and `pnpm test` build shared contracts and backend declarations first. WXT generates its ignored types during installation and extension typechecking. `pnpm format` formats the workspace; the Husky pre-commit hook formats staged files.
 
 ## Workspace layout
 
-| Workspace            | Contents                                                                                        | Build output                |
-| -------------------- | ----------------------------------------------------------------------------------------------- | --------------------------- |
-| `packages/contracts` | Browser-neutral types and the default reply delay constant                                      | `dist` ESM and declarations |
-| `apps/backend`       | tRPC router/server, task service/repository interfaces, connector and agent placeholders        | `dist` ESM and declarations |
-| `apps/extension`     | WXT manifest config, MV3 worker, Messenger content script, DOM adapter placeholder, injected UI | `.output/chrome-mv3`        |
+| Workspace            | Contents                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------- |
+| `packages/contracts` | Browser-neutral task, conversation, and send contracts                                        |
+| `apps/backend`       | Meta Model API adapter, in-memory task service, connector boundary, and tRPC WebSocket server |
+| `apps/extension`     | Messenger DOM reader and sender, background transport, and injected sidebar controls          |
 
-Contracts and backend use TypeScript `NodeNext` resolution and `.js` imports for emitted Node ESM. The extension uses WXT's generated configuration and bundler resolution. Node ambient types belong to the backend; Chrome and DOM ambient types belong to the extension; contracts include neither.
-
-Workspace imports resolve through package exports to built files. The backend exposes `@envoy/backend/router` as a types-only export, and the extension uses `import type` for `AppRouter`. No server implementation or credentials enter the browser bundle. Task state and pending replies will belong to the backend, with browser access behind `BrowserConnector`.
-
-See [PLAN.md](PLAN.md) for the intended behavior. Configuration follows the [WXT TypeScript guide](https://wxt.dev/guide/essentials/config/typescript.html) and [tRPC WebSocket transport documentation](https://trpc.io/docs/server/websockets).
+Contracts and backend use TypeScript `NodeNext` resolution. The extension imports only backend router types; the server implementation and credentials do not enter its bundle. See [PLAN.md](PLAN.md) for scope and remaining work.

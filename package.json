@@ -12,6 +12,7 @@
 		"dev:extension": "pnpm run build:packages && pnpm --filter @envoy/extension dev",
 		"build:packages": "pnpm --filter @envoy/contracts build && pnpm --filter @envoy/backend build",
 		"typecheck": "pnpm run build:packages && pnpm -r typecheck",
+		"test": "pnpm run build:packages && pnpm -r --if-present test",
 		"build": "pnpm -r build",
 		"start:backend": "pnpm --filter @envoy/backend start",
 		"health": "pnpm --filter @envoy/backend health",

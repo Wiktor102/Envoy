@@ -59,10 +59,22 @@ function findSidebar(): {
 }
 
 // Keep the overlay aligned with Messenger and restore the chat list on cleanup.
-export function createSidebarController(host: HTMLElement, panel: HTMLElement, onSidebarMissing: () => void) {
+export function createSidebarController(
+	host: HTMLElement,
+	panel: HTMLElement,
+	onSidebarMissing: () => void,
+	onAvailabilityChange: (available: boolean) => void = () => {},
+) {
 	let sidebar: HTMLElement | null = null;
 	let frame = 0;
+	let available: boolean | undefined;
 	const inertElements = new Map<HTMLElement, boolean>();
+
+	function setAvailable(next: boolean) {
+		if (available === next) return;
+		available = next;
+		onAvailabilityChange(next);
+	}
 
 	function updateChatListAccessibility() {
 		for (const [element, wasInert] of inertElements) element.inert = wasInert;
@@ -101,6 +113,7 @@ export function createSidebarController(host: HTMLElement, panel: HTMLElement, o
 		frame = 0;
 		const found = findSidebar();
 		if (!found) {
+			setAvailable(false);
 			onSidebarMissing();
 			host.remove();
 			sidebar = null;
@@ -111,12 +124,16 @@ export function createSidebarController(host: HTMLElement, panel: HTMLElement, o
 		if (found.insertionPoint.nextElementSibling !== host) {
 			found.insertionPoint.insertAdjacentElement("afterend", host);
 		}
+		setAvailable(host.isConnected);
 
 		updateChatListAccessibility();
 		positionPanel();
 	}
 
 	function scheduleUpdate() {
+		// Stop local sends as soon as Messenger detaches the controls. The next
+		// frame will reattach them if the sidebar was merely remounted.
+		if (!host.isConnected) setAvailable(false);
 		if (!frame) frame = requestAnimationFrame(update);
 	}
 
@@ -132,6 +149,7 @@ export function createSidebarController(host: HTMLElement, panel: HTMLElement, o
 			positionPanel();
 		},
 		destroy() {
+			setAvailable(false);
 			observer.disconnect();
 			onSidebarMissing();
 			window.removeEventListener("resize", scheduleUpdate);

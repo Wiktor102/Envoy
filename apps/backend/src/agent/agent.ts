@@ -1,6 +1,6 @@
-import type { ConversationSnapshot, TaskState } from "@envoy/contracts";
+import type { AgentDecision, ConversationSnapshot, TaskState } from "@envoy/contracts";
 
-// TODO: Add the reasoning loop and explicit wait/reply/ask/finish decisions.
+// The task service is independent of both the model provider and the browser.
 export interface Agent {
-	run(task: TaskState, conversation: ConversationSnapshot): Promise<void>;
+	run(task: TaskState, conversation: ConversationSnapshot, signal?: AbortSignal): Promise<AgentDecision>;
 }
