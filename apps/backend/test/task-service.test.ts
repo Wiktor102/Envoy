@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AgentDecision, ConversationMessage, ConversationSnapshot } from "@envoy/contracts";
 import type { Agent } from "../src/agent/agent.js";
+import { ExtensionConnector } from "../src/connectors/extension-connector.js";
 import { TaskService } from "../src/tasks/service.js";
 import { allowedOrigin } from "../src/origin.js";
 
@@ -534,3 +535,39 @@ test("system events remain context, invalidate pending replies, and do not hide 
 	assert.equal(service.sync("owner", unknown).task?.status, "needs_user");
 	assert.equal(agent.calls.length, 2);
 });
+
+for (const status of ["taken_over", "completed"] as const) {
+	test(`${status} tasks ignore late conversation updates without renewing the lease`, async () => {
+		let time = 1000;
+		const agent = new ControlledAgent();
+		const connector = new ExtensionConnector();
+		const service = new TaskService(agent, { now: () => time, connector: () => connector });
+		const initial = snapshot();
+		const task = service.start("owner", "Arrange a meeting", initial);
+		agent.calls[0]!.resolve(status === "completed" ? { action: "finish", text: "Done" } : { action: "wait" });
+		await Promise.resolve();
+		const terminal =
+			status === "taken_over" ? service.control("owner", task.id, "take-over") : service.sync("owner", initial).task!;
+		assert.equal(terminal.status, status);
+		time += 4000;
+		for (const update of [
+			snapshot("r2", "Later private message"),
+			snapshot("r1", "Changed content"),
+			{ ...snapshot(), chatId: "other-chat" },
+			null,
+		]) {
+			assert.deepEqual(service.sync("owner", update), { task: terminal, isOwner: true, command: null });
+			assert.deepEqual(connector.readConversation(), initial);
+		}
+		assert.equal(agent.calls.length, 1);
+		// The original eight-second lease still expires despite terminal polls.
+		time += 4001;
+		service.sync("other", null);
+		assert.equal(connector.readConversation(), null);
+		assert.equal(service.sync("owner", snapshot("r3", "Another later message")).task?.status, status);
+		assert.equal(connector.readConversation(), null);
+		service.clear("owner", task.id);
+		assert.equal(service.sync("owner", null).task, null);
+		assert.notEqual(service.start("owner", "A new goal", snapshot("r4")).id, task.id);
+	});
+}

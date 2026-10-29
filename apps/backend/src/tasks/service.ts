@@ -276,6 +276,11 @@ export class TaskService {
 			return { task: { ...this.state()!, goal: "", pendingReply: null, detail: null }, isOwner: false, command: null };
 		}
 		const task = this.task;
+		// Ended tasks can still be viewed and deleted, but no longer accept
+		// conversation updates, including requests sent before the task ended.
+		if (task.status === "completed" || task.status === "taken_over") {
+			return { task: this.state(), isOwner: true, command: null };
+		}
 		const previous = this.connector.readConversation();
 		if (!snapshot || snapshot.chatId !== task.chatId) {
 			this.leaseUntil = 0;

@@ -41,7 +41,7 @@ Use **Dev mode** beside the sidebar tabs to show message history, chat and task 
 
 ## Privacy and storage
 
-The extension sends the chosen chat's loaded context and your instructions to the local backend; the backend sends text and instructions to Meta Model API. Other Messenger tabs do not upload their conversation snapshots. The project does not log message bodies or provider errors. Conversation text remains untrusted input and cannot authorize changes to your instructions.
+The extension sends the chosen chat's loaded context and your instructions to the local backend; the backend sends text and instructions to Meta Model API. Other Messenger tabs do not upload their conversation snapshots. Once Envoy shows a task as completed or taken over, it stops uploading conversation snapshots. The backend also ignores late conversation updates for ended tasks. The project does not log message bodies or provider errors. Conversation text remains untrusted input and cannot authorize changes to your instructions.
 
 Task state, context, and pending replies exist only in backend memory. There is no database or cross-restart recovery. Restarting the backend deletes them and cannot resume a pending send. Use **Delete task** after completion or takeover to remove the in-memory record. Otherwise, ended tasks are deleted after one hour, except when a send needs user verification. Memory and messaging-style detection are not implemented.
 
