@@ -378,8 +378,15 @@ function readInlineText(element: Element): string {
 		if (child.matches("svg, canvas, video, audio, object, embed, iframe")) {
 			throw new ConversationUnavailableError("unsupported");
 		}
+		const display = window.getComputedStyle(child).display;
+		// Atomic inline boxes keep their descendants' block boundaries local.
+		// Preserve interior breaks without adding breaks around the box.
+		if (["inline-block", "inline-flex", "inline-grid", "inline-table"].includes(display)) {
+			appendText(readInlineText(child));
+			return;
+		}
 		const block = ["block", "flow-root", "list-item", "flex", "grid", "table", "table-row", "table-caption"].includes(
-			window.getComputedStyle(child).display,
+			display,
 		);
 		// Defer implicit separators to avoid extra breaks from nested wrappers or
 		// a trailing block. Explicit BRs still preserve consecutive blank lines.

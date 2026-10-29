@@ -166,6 +166,9 @@ for (const quoted of [false, true]) {
 			["<div>10</div><div><br></div><div>30</div>", "10\n\n30"],
 			['<div>10<img alt="👍🏽"></div><div>30</div>', "10👍🏽\n30"],
 			['<div style="display: inline">10</div><div style="display: inline">30</div>', "1030"],
+			['10<span style="display: inline-block"><div>30</div><div>40</div></span>50', "1030\n4050"],
+			['10<span style="display: inline-block"><br>30<br></span>40', "10\n30\n40"],
+			['10<div><span style="display: inline-block"><div>30</div></span></div>40', "10\n30\n40"],
 		] as const) {
 			setMessages(
 				`<div data-scope="messages_table"><div role="row" data-message-direction="incoming">${
@@ -185,6 +188,40 @@ for (const quoted of [false, true]) {
 			assert.equal(textOf(changed), text.textContent);
 			if (expected.includes("\n")) assert.notEqual(changed.revision, original.revision, content);
 			else assert.equal(changed.revision, original.revision, content);
+		}
+		dom.window.close();
+	});
+
+	test(`isolates block boundaries inside atomic inline boxes in ${quoted ? "quoted replies" : "message text"}`, async () => {
+		const dom = setup();
+		for (const display of ["inline-block", "inline-flex", "inline-grid", "inline-table"]) {
+			const content = `10<span style="display: ${display}"><div>30</div></span>40`;
+			setMessages(
+				`<div data-scope="messages_table"><div role="row" data-message-direction="incoming">${
+					quoted
+						? `<div role="button" aria-label="View original message"><span dir="auto">${content}</span></div><span dir="auto">My answer</span>`
+						: `<span dir="auto">${content}</span>`
+				}</div></div>`,
+			);
+			const original = await messengerChatAdapter.readConversation();
+			const textOf = (snapshot: typeof original) =>
+				quoted ? snapshot.messages[0]!.replyTo?.text : snapshot.messages[0]!.text;
+			assert.equal(textOf(original), "103040", display);
+
+			const text = document.querySelector('[dir="auto"]')!;
+			// An ordinary inline wrapper lets the block split the surrounding line.
+			text.querySelector<HTMLElement>("span")!.style.display = "inline";
+			const changed = await messengerChatAdapter.readConversation();
+			assert.equal(textOf(changed), "10\n30\n40", display);
+			assert.equal(changed.messages[0]!.id, original.messages[0]!.id);
+			assert.notEqual(changed.revision, original.revision, display);
+
+			text.innerHTML = "10<br>30<br>40";
+			const explicitBreaks = await messengerChatAdapter.readConversation();
+			assert.equal(explicitBreaks.revision, changed.revision, display);
+			text.textContent = "103040";
+			const flattened = await messengerChatAdapter.readConversation();
+			assert.equal(flattened.revision, original.revision, display);
 		}
 		dom.window.close();
 	});
