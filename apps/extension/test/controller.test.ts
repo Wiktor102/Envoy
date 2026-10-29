@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ConnectorSyncResult, ConversationSnapshot, SendReplyCommand, TaskState } from "@envoy/contracts";
+import { TaskService } from "../../backend/src/tasks/service";
 import { createEnvoyController } from "../src/controller";
 import type { BackendRequest, callBackend } from "../src/messaging";
 import type { MessengerChatAdapter } from "../src/messenger/chat-adapter";
@@ -428,3 +429,200 @@ test("a lost heartbeat port invalidates the owner and reports unavailable", { ti
 	await unavailable.promise;
 	assert.ok(harness.calls.some((request) => request.type === "envoy:sync" && request.snapshot === null));
 });
+
+for (const change of [
+	"paused",
+	"needs_user",
+	"completed",
+	"taken_over",
+	"deleted",
+	"replaced",
+	"ownership lost",
+	"paused then sending",
+	"still sending",
+] as const) {
+	test(`a delayed authorization respects backend state: ${change}`, { timeout: 5000 }, async (t) => {
+		const authorization = deferred<boolean>();
+		const authorizing = deferred<void>();
+		const reported = deferred<BackendRequest>();
+		const sendingTask: TaskState = { ...activeTask, status: "sending" };
+		let current = syncResult(sendingTask);
+		let started = false;
+		let claimed = false;
+		const harness = setup((request) => {
+			switch (request.type) {
+				case "envoy:start":
+					started = true;
+					return activeTask;
+				case "envoy:sync":
+					if (!started) return syncResult(null);
+					if (claimed) return current;
+					claimed = true;
+					return syncResult(sendingTask, {
+						commandId: "reply-1",
+						chatId: initialSnapshot.chatId,
+						expectedRevision: initialSnapshot.revision,
+						text: "Hi",
+					});
+				case "envoy:authorize":
+					authorizing.resolve();
+					return authorization.promise;
+				case "envoy:report":
+					reported.resolve(request);
+					return current.task;
+				case "envoy:disconnect":
+					return undefined;
+				default:
+					throw new Error(`Unexpected request: ${request.type}`);
+			}
+		});
+		t.after(() => harness.controller.destroy());
+		await harness.controller.start(activeTask.goal);
+		await authorizing.promise;
+		switch (change) {
+			case "deleted":
+				current = syncResult(null);
+				break;
+			case "replaced":
+				current = syncResult({ ...sendingTask, id: "replacement-task" });
+				break;
+			case "ownership lost":
+				current = { ...syncResult(sendingTask), isOwner: false };
+				break;
+			case "paused then sending":
+				current = syncResult({ ...sendingTask, status: "paused" });
+				break;
+			case "still sending":
+				break;
+			default:
+				current = syncResult({ ...sendingTask, status: change });
+		}
+		harness.tick();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		if (change === "paused then sending") {
+			current = syncResult(sendingTask);
+			harness.tick();
+			await new Promise<void>((resolve) => setImmediate(resolve));
+		}
+		authorization.resolve(true);
+		const report = await reported.promise;
+		const shouldSend = change === "still sending";
+		assert.deepEqual(report, { type: "envoy:report", commandId: "reply-1", result: shouldSend ? "sent" : "rejected" });
+		assert.equal(harness.sent, shouldSend ? 1 : 0);
+		assert.equal(harness.attempted, 1);
+	});
+}
+
+for (const cause of ["lease expiry", "disconnect"] as const) {
+	test(`a granted authorization cannot outlive a backend ${cause} pause`, { timeout: 5000 }, async (t) => {
+		let time = 1000;
+		const service = new TaskService(
+			{
+				async run() {
+					return { action: "reply", text: "Hi" };
+				},
+			},
+			{ now: () => time, replyDelayMs: 0 },
+		);
+		const authorization = deferred<boolean>();
+		const authorizing = deferred<void>();
+		const reported = deferred<BackendRequest>();
+		const paused = deferred<void>();
+		const harness = setup((request) => {
+			switch (request.type) {
+				case "envoy:start":
+					return service.start("owner", request.goal, request.snapshot);
+				case "envoy:sync":
+					return service.sync("owner", request.snapshot);
+				case "envoy:authorize": {
+					assert.equal(service.authorize("owner", request.commandId, request.chatId, request.revision), true);
+					authorizing.resolve();
+					return authorization.promise;
+				}
+				case "envoy:report": {
+					const task = service.report("owner", request.commandId, request.result);
+					reported.resolve(request);
+					return task;
+				}
+				case "envoy:disconnect":
+					return service.disconnect("owner");
+				default:
+					throw new Error(`Unexpected request: ${request.type}`);
+			}
+		});
+		t.after(() => harness.controller.destroy());
+		harness.controller.subscribe((state) => {
+			if (state.task?.status === "paused") paused.resolve();
+		});
+		await harness.controller.start(activeTask.goal);
+		await authorizing.promise;
+		if (cause === "lease expiry") time += 8001;
+		else service.disconnect("owner");
+		harness.tick();
+		await paused.promise;
+		authorization.resolve(true);
+		const report = await reported.promise;
+		const request = harness.calls.find((call) => call.type === "envoy:authorize");
+		assert.ok(request?.type === "envoy:authorize");
+		assert.deepEqual(report, { type: "envoy:report", commandId: request.commandId, result: "rejected" });
+		assert.equal(harness.sent, 0);
+	});
+}
+
+for (const status of ["taken_over", "completed"] as const) {
+	test(`${status} tasks poll without uploading later conversation text`, { timeout: 5000 }, async (t) => {
+		t.mock.timers.enable({ apis: ["setInterval"] });
+		let task: TaskState | null = null;
+		const harness = setup((request) => {
+			switch (request.type) {
+				case "envoy:start":
+					task = { ...activeTask };
+					return task;
+				case "envoy:sync":
+					return syncResult(task);
+				case "envoy:control":
+					task = { ...activeTask, status: "taken_over" };
+					return task;
+				case "envoy:clear":
+					task = null;
+					return undefined;
+				case "envoy:disconnect":
+					return undefined;
+				default:
+					throw new Error(`Unexpected request: ${request.type}`);
+			}
+		});
+		t.after(() => harness.controller.destroy());
+		await harness.controller.start(activeTask.goal);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		if (status === "taken_over") await harness.controller.control("take-over");
+		else {
+			task = { ...activeTask, status };
+			harness.tick();
+		}
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(harness.heartbeatStops, 1);
+		const endedAt = harness.calls.length;
+		const newer = {
+			...initialSnapshot,
+			revision: "after-task",
+			messages: [
+				...initialSnapshot.messages,
+				{ ...initialSnapshot.messages[0]!, id: "later-message", text: "Later private message" },
+			],
+		};
+		harness.observe(newer);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		t.mock.timers.tick(1000);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const polls = harness.calls.slice(endedAt).filter((request) => request.type === "envoy:sync");
+		assert.ok(polls.length >= 2, "Both watcher updates and timer polls must be checked");
+		assert.ok(polls.every((request) => request.snapshot === null));
+		await harness.controller.clear();
+		await harness.controller.start(activeTask.goal);
+		assert.ok(
+			harness.calls.some((request) => request.type === "envoy:start" && request.snapshot.revision === newer.revision),
+		);
+		assert.equal(harness.heartbeatStarts, 2);
+	});
+}
