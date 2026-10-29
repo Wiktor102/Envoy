@@ -371,9 +371,10 @@ function readReply(boundary: Element): ConversationSnapshot["messages"][number][
 	const button = findReplyButton(boundary);
 	if (!button) return null;
 	const quote = button.querySelector<HTMLElement>('[dir="auto"]');
+	const text = quote ? readInlineText(quote) : "";
 	const context = boundary.querySelector<HTMLElement>('h4, [role="heading"]');
 	return {
-		text: quote ? readInlineText(quote).trim() || null : null,
+		text: text.trim() ? text : null,
 		context: context?.textContent?.trim() || null,
 		attachments: getQuotedImages(button).map(imageAttachment),
 	};
@@ -399,23 +400,48 @@ function readEmojiAlt(image: Element): string | null {
 
 function readInlineText(element: Element): string {
 	let text = "";
+	let blockBreakPending = false;
+	function appendText(value: string): void {
+		if (!value) return;
+		if (blockBreakPending && text && !text.endsWith("\n")) text += "\n";
+		blockBreakPending = false;
+		text += value;
+	}
 	function append(node: Node): void {
 		if (node.nodeType === 3) {
-			text += node.nodeValue ?? "";
+			appendText(node.nodeValue ?? "");
 			return;
 		}
 		if (node.nodeType !== 1) return;
 		const child = node as Element;
+		if (child.matches("br")) {
+			appendText("\n");
+			return;
+		}
 		if (child.matches("img")) {
 			const emoji = readEmojiAlt(child);
 			if (!emoji) throw new ConversationUnavailableError("unsupported");
-			text += emoji;
+			appendText(emoji);
 			return;
 		}
 		if (child.matches("svg, canvas, video, audio, object, embed, iframe")) {
 			throw new ConversationUnavailableError("unsupported");
 		}
+		const display = window.getComputedStyle(child).display;
+		// Atomic inline boxes keep their descendants' block boundaries local.
+		// Preserve interior breaks without adding breaks around the box.
+		if (["inline-block", "inline-flex", "inline-grid", "inline-table"].includes(display)) {
+			appendText(readInlineText(child));
+			return;
+		}
+		const block = ["block", "flow-root", "list-item", "flex", "grid", "table", "table-row", "table-caption"].includes(
+			display,
+		);
+		// Defer implicit separators to avoid extra breaks from nested wrappers or
+		// a trailing block. Explicit BRs still preserve consecutive blank lines.
+		if (block) blockBreakPending = true;
 		for (const nested of child.childNodes) append(nested);
+		if (block) blockBreakPending = true;
 	}
 	for (const child of element.childNodes) append(child);
 	return text;
