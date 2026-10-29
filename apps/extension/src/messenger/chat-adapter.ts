@@ -91,6 +91,7 @@ interface RenderedMessage {
 	boundary: Element | null;
 	images: HTMLElement[];
 	unsent: boolean;
+	standaloneLike?: boolean;
 }
 
 // Messenger keeps an unsent message's bubble and replaces its text with a
@@ -106,6 +107,34 @@ function normalizedText(value: string | null | undefined): string {
 	return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function isDeliveryStatus(element: HTMLElement, candidates: HTMLElement[]): boolean {
+	const boundary = messageBoundary(element);
+	if (!boundary) return false;
+	const labeled = readLabeledMessage(boundary);
+	if (!labeled?.text || !/^(?:you|ty)$/i.test(labeled.sender)) return false;
+	// Messenger puts the visible elapsed delivery status in a presentation span
+	// in the final direct child of the message scope, outside the bubble.
+	const wrapper = element.parentElement;
+	const footer = wrapper?.parentElement;
+	if (
+		!wrapper?.matches('span[role="presentation"]') ||
+		!footer?.matches("div") ||
+		footer.parentElement !== boundary ||
+		boundary.lastElementChild !== footer
+	)
+		return false;
+	const text = element.textContent?.trim() ?? "";
+	if (!/^(?:wysłano|sent)(?:\s|$)/i.test(text) || text === labeled.text) return false;
+	// Keep uncertain content. A separate bubble must match the message label,
+	// so a real message whose text is itself "Wysłano" is never discarded.
+	return candidates.some(
+		(candidate) =>
+			candidate !== element &&
+			messageBoundary(candidate) === boundary &&
+			readInlineText(candidate).trim() === labeled.text,
+	);
+}
+
 function getMessageMain(): HTMLElement {
 	const mains = [...document.querySelectorAll<HTMLElement>('[role="main"]')].filter((main) =>
 		main.querySelector('[data-scope="messages_table"]'),
@@ -118,7 +147,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	const candidates = main.querySelectorAll<HTMLElement>(
 		'[data-scope="messages_table"][dir="auto"], [data-scope="messages_table"] [dir="auto"]',
 	);
-	const textElements = [...candidates].filter((element) => {
+	const textCandidates = [...candidates].filter((element) => {
 		const scope = element.closest('[data-scope="messages_table"]');
 		if (scope && isGroupIntro(scope)) return false;
 		if (
@@ -139,6 +168,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 			isVisible(element)
 		);
 	});
+	const textElements = textCandidates.filter((element) => !isDeliveryStatus(element, textCandidates));
 	const messages: RenderedMessage[] = textElements.map((element) => ({
 		element,
 		boundary: messageBoundary(element),
@@ -205,6 +235,25 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 			.join("");
 		if (!unsentPlaceholder.test(normalizedText(ownText)) || !isVisible(element)) continue;
 		messages.push({ element, boundary: messageBoundary(element), images: [], unsent: true });
+	}
+	// Messenger renders its large Like as an accessible SVG rather than text.
+	// Require the enclosing message label to identify the same emoji, and do not
+	// treat reactions or a Like mixed with other content as a standalone message.
+	for (const like of main.querySelectorAll<HTMLElement>(
+		'[data-scope="messages_table"] [role="img"][aria-label="Like, thumbs up"]',
+	)) {
+		if (like.closest('button, [role="button"], [role="toolbar"], [aria-hidden="true"]') || !isVisible(like)) continue;
+		const boundary = messageBoundary(like);
+		if (
+			!boundary?.matches('[data-scope="messages_table"][data-message-id]') ||
+			!readLabeledSender(boundary) ||
+			!/:\s*👍$/.test(boundary.getAttribute("aria-label") ?? "") ||
+			!like.querySelector("svg") ||
+			like.querySelector("img, video, audio, canvas, object, embed, iframe")
+		)
+			continue;
+		if (messages.some((message) => message.boundary === boundary)) throw new ConversationUnavailableError("unsupported");
+		messages.push({ element: like, boundary, images: [], unsent: false, standaloneLike: true });
 	}
 	const ordered = messages.sort((a, b) => {
 		if (a.element === b.element) return 0;
@@ -453,14 +502,20 @@ function readReactions(boundary: Element): ConversationSnapshot["messages"][numb
 
 // Only metadata that explicitly describes the sender is used here. Message
 // alignment, color, and an arbitrary person's name do not establish who sent it.
-function readLabeledSender(boundary: Element): string | null {
+function readLabeledMessage(boundary: Element): { sender: string; text: string } | null {
 	// This is Messenger's per-message accessibility label, not message text or
 	// a group heading. Consecutive bubbles often have no sender heading at all.
 	if (!boundary.matches('[data-scope="messages_table"][data-message-id]')) return null;
 	if (!/^(?:message|wiadomość)$/i.test(boundary.getAttribute("aria-roledescription") ?? "")) return null;
 	const label = boundary.getAttribute("aria-label") ?? "";
 	const match = label.match(/^(?:O|At) [^\n]*?\d{1,2}:\d{2}(?:\s?[AP]M)?, ([^:\n]{1,100})(?::(?:\s|$)|$)/i);
-	return match?.[1]?.trim() || null;
+	if (!match) return null;
+	const sender = match[1]?.trim();
+	return sender ? { sender, text: label.slice(match[0].length).trim() } : null;
+}
+
+function readLabeledSender(boundary: Element): string | null {
+	return readLabeledMessage(boundary)?.sender ?? null;
 }
 
 function readDirection(boundary: Element): ConversationMessage["direction"] {
@@ -495,13 +550,24 @@ function readDirection(boundary: Element): ConversationMessage["direction"] {
 
 function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messages"] {
 	const boundaries = rendered.map((message) => message.boundary);
-	return rendered.map(({ element, boundary, images, unsent }) => {
+	const texts = rendered.map(({ element, images, unsent, standaloneLike }) =>
+		unsent || images.some((image) => image === element) ? "" : standaloneLike ? "👍" : readInlineText(element),
+	);
+	return rendered.map(({ element, boundary, images, unsent }, index) => {
 		// A shared boundary cannot safely assign metadata to one message.
 		const unique = boundary && boundaries.indexOf(boundary) === boundaries.lastIndexOf(boundary);
+		// A fresh bubble can share its container with a rendered delivery status.
+		// Attribute only the one text candidate named by the per-message label;
+		// leave status candidates and ambiguous matches unknown.
+		const labeled = !unique && boundary ? readLabeledMessage(boundary) : null;
+		const matchesLabel =
+			labeled?.text &&
+			texts[index]!.trim() === labeled.text &&
+			rendered.filter((message, i) => message.boundary === boundary && texts[i]!.trim() === labeled.text).length === 1;
 		return {
 			id: messageId(element),
-			text: unsent || images.some((image) => image === element) ? "" : readInlineText(element),
-			direction: unique ? readDirection(boundary) : "unknown",
+			text: texts[index]!,
+			direction: boundary && (unique || matchesLabel) ? readDirection(boundary) : "unknown",
 			replyTo: unique ? readReply(boundary) : null,
 			attachments: images.map((image) => imageAttachment(image.querySelector<HTMLImageElement>("img"))),
 			reactions: unique ? readReactions(boundary) : [],

@@ -77,6 +77,68 @@ test("ignores Messenger date scopes before, between, and after messages", async 
 	dom.window.close();
 });
 
+test("reads standalone Messenger Likes as messages with their sender and revision", async () => {
+	const dom = setup();
+	setMessages(`
+		<div role="article"><div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O poniedziałek 11:11, Alex: Hello"><span dir="auto">Hello</span></div></div>
+		<div role="article"><div data-scope="messages_table" data-message-id="2" aria-roledescription="wiadomość" aria-label="O poniedziałek 11:12, Ty: 👍"><div role="img" aria-label="Like, thumbs up"><svg><title>Like, thumbs up</title></svg></div></div></div>`);
+	const first = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		first.messages.map(({ text, direction }) => [text, direction]),
+		[
+			["Hello", "incoming"],
+			["👍", "outgoing"],
+		],
+	);
+	const last = document.querySelector('[data-message-id="2"]')!;
+	last.setAttribute("aria-label", "O poniedziałek 11:12, Alex: 👍");
+	const changed = await messengerChatAdapter.readConversation();
+	assert.equal(changed.messages[1]!.direction, "incoming");
+	assert.notEqual(changed.revision, first.revision);
+	last.querySelector('[role="img"]')!.setAttribute("aria-label", "Unknown illustration");
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+	);
+	dom.window.close();
+});
+
+test("does not mistake reactions or mixed content for a standalone Like", async () => {
+	const dom = setup();
+	const like = '<div role="img" aria-label="Like, thumbs up"><svg><title>Like, thumbs up</title></svg></div>';
+	const message = (body: string, label = "👍") =>
+		`<div role="article"><div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 11:12, Ty: ${label}">${body}</div></div>`;
+	setMessages(message(`<span dir="auto">Hello</span><div role="button" aria-label="reaction">${like}</div>`, "Hello"));
+	assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.text, "Hello");
+	for (const body of [
+		`${like}<span dir="auto">Other content</span>`,
+		`${like}${like}`,
+		`<div role="img" aria-label="Like, thumbs up"><svg></svg><video></video></div>`,
+	]) {
+		setMessages(message(body));
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	setMessages(message(like, "Other content"));
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+	);
+	setMessages(
+		message(
+			'<div role="img" dir="auto" aria-label="Like, thumbs up"><svg><title>Like</title></svg></div>',
+			"Other content",
+		),
+	);
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+	);
+	dom.window.close();
+});
+
 test("reads loaded text in order, without nested duplicates or controls", async () => {
 	const dom = setup();
 	setMessages(fixture);
@@ -337,6 +399,54 @@ test("changes the revision when a quoted reply changes", async () => {
 	document.querySelector('[role="button"][aria-label*="odpowiadasz"] [dir="auto"]')!.textContent = "Different quote";
 	const changed = await messengerChatAdapter.readConversation();
 	assert.notEqual(changed.revision, original.revision);
+	dom.window.close();
+});
+
+test("attributes fresh text and emoji bubbles sharing a container with a delivery status", async () => {
+	const dom = setup();
+	for (const [text, body] of [
+		["Hi there", "Hi there"],
+		["🤖", '<img alt="🤖">'],
+	]) {
+		for (const [sender, direction] of [
+			["Ty", "outgoing"],
+			["Alex", "incoming"],
+		]) {
+			setMessages(`<div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 21:58, ${sender}: ${text}">
+				<span dir="auto">${body}</span><span dir="auto">Wysłano</span>
+				<button aria-label="1 reaction">👍</button></div>`);
+			const snapshot = await messengerChatAdapter.readConversation();
+			assert.deepEqual(
+				snapshot.messages.map(({ text, direction }) => [text, direction]),
+				[
+					[text, direction],
+					["Wysłano", "unknown"],
+				],
+			);
+			assert.deepEqual(
+				snapshot.messages.map(({ reactions }) => reactions),
+				[[], []],
+			);
+			// Conflicting metadata must still fail closed.
+			document
+				.querySelector("[data-message-id]")!
+				.setAttribute("data-message-direction", direction === "outgoing" ? "incoming" : "outgoing");
+			assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.direction, "unknown");
+		}
+	}
+	dom.window.close();
+});
+
+test("does not attribute shared-container text without a unique match to the message label", async () => {
+	const dom = setup();
+	for (const label of ["O 21:58, Ty: Other", "O 21:58, Ty: Hi", "O 21:58, Ty", "You sent"]) {
+		setMessages(`<div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="${label}">
+			<span dir="auto">Hi</span><span dir="auto">Hi</span></div>`);
+		assert.deepEqual(
+			(await messengerChatAdapter.readConversation()).messages.map(({ direction }) => direction),
+			["unknown", "unknown"],
+		);
+	}
 	dom.window.close();
 });
 
@@ -863,6 +973,36 @@ test("changes the revision when a message is unsent", async () => {
 	dom.window.close();
 });
 
+test("preserves Likes and ignores delivery footers when another message is unsent", async () => {
+	const dom = setup();
+	setMessages(`
+		<div data-scope="messages_table" data-message-id="like" aria-roledescription="message" aria-label="At 19:03, Alex: 👍"><div role="img" aria-label="Like, thumbs up"><svg><title>Like, thumbs up</title></svg></div></div>
+		<div data-scope="messages_table" data-message-id="text" aria-roledescription="message" aria-label="At 19:05, You: Hi"><span dir="auto">Hi</span><div><span role="presentation"><span dir="auto"><span>Sent 1 minute ago</span></span></span></div></div>`);
+	const original = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		original.messages.map(({ text, direction, unsent }) => [text, direction, unsent]),
+		[
+			["👍", "incoming", false],
+			["Hi", "outgoing", false],
+		],
+	);
+	const message = document.querySelector('[data-message-id="text"]')!;
+	message.querySelector('[dir="auto"]')!.textContent = "You unsent a message";
+	message.setAttribute("aria-label", "At 19:05, You: You unsent a message");
+	const changed = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		changed.messages.map(({ text, direction, unsent }) => [text, direction, unsent]),
+		[
+			["👍", "incoming", false],
+			["", "outgoing", true],
+		],
+	);
+	assert.notEqual(changed.revision, original.revision);
+	message.querySelector('span[role="presentation"] span span')!.textContent = "Sent 2 minutes ago";
+	assert.equal((await messengerChatAdapter.readConversation()).revision, changed.revision);
+	dom.window.close();
+});
+
 test("does not read a quote of an unavailable message as quoted text", async () => {
 	const dom = setup();
 	for (const quote of ["Wiadomość niedostępna", "Original message was deleted", "Alex unsent a message"]) {
@@ -875,6 +1015,36 @@ test("does not read a quote of an unavailable message as quoted text", async () 
 		assert.equal(message!.text, "ok");
 		assert.equal(message!.unsent, false);
 		assert.equal(message!.replyTo?.text, null);
+	}
+	dom.window.close();
+});
+
+test("omits Messenger delivery footers without changing real text, emoji, or revisions", async () => {
+	const dom = setup();
+	// Structure captured from Chrome, with synthetic message content.
+	const footer = (text: string) =>
+		`<div><span role="presentation"><span dir="auto"><span>${text}</span></span></span></div>`;
+	for (const [text, body] of [
+		["Hello", "Hello"],
+		["🤖", '<img alt="🤖">'],
+		["Wysłano 9 min temu", "Wysłano 9 min temu"],
+	]) {
+		setMessages(`<div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 21:59, Ty: ${text}">
+			<h4 dir="auto">Wysłano</h4><div><span dir="auto">${body}</span></div>${footer("Wysłano 10 min temu")}</div>`);
+		const before = await messengerChatAdapter.readConversation();
+		assert.deepEqual(
+			before.messages.map(({ text, direction }) => [text, direction]),
+			[[text, "outgoing"]],
+		);
+		document.querySelector('span[role="presentation"] span span')!.textContent = "Wysłano 11 min temu";
+		assert.equal((await messengerChatAdapter.readConversation()).revision, before.revision);
+	}
+	// An unmatched or differently structured candidate is still unknown content.
+	for (const status of [footer("Something else"), '<div><span dir="auto">Wysłano 9 min temu</span></div>']) {
+		setMessages(
+			`<div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 21:59, Ty: Hello"><div dir="auto">Hello</div>${status}</div>`,
+		);
+		assert.equal((await messengerChatAdapter.readConversation()).messages.length, 2);
 	}
 	dom.window.close();
 });
