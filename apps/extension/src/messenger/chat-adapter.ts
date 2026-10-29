@@ -93,6 +93,34 @@ interface RenderedMessage {
 	standaloneLike?: boolean;
 }
 
+function isDeliveryStatus(element: HTMLElement, candidates: HTMLElement[]): boolean {
+	const boundary = messageBoundary(element);
+	if (!boundary) return false;
+	const labeled = readLabeledMessage(boundary);
+	if (!labeled?.text || !/^(?:you|ty)$/i.test(labeled.sender)) return false;
+	// Messenger puts the visible elapsed delivery status in a presentation span
+	// in the final direct child of the message scope, outside the bubble.
+	const wrapper = element.parentElement;
+	const footer = wrapper?.parentElement;
+	if (
+		!wrapper?.matches('span[role="presentation"]') ||
+		!footer?.matches("div") ||
+		footer.parentElement !== boundary ||
+		boundary.lastElementChild !== footer
+	)
+		return false;
+	const text = element.textContent?.trim() ?? "";
+	if (!/^(?:wysłano|sent)(?:\s|$)/i.test(text) || text === labeled.text) return false;
+	// Keep uncertain content. A separate bubble must match the message label,
+	// so a real message whose text is itself "Wysłano" is never discarded.
+	return candidates.some(
+		(candidate) =>
+			candidate !== element &&
+			messageBoundary(candidate) === boundary &&
+			readInlineText(candidate).trim() === labeled.text,
+	);
+}
+
 function getMessageMain(): HTMLElement {
 	const mains = [...document.querySelectorAll<HTMLElement>('[role="main"]')].filter((main) =>
 		main.querySelector('[data-scope="messages_table"]'),
@@ -105,7 +133,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	const candidates = main.querySelectorAll<HTMLElement>(
 		'[data-scope="messages_table"][dir="auto"], [data-scope="messages_table"] [dir="auto"]',
 	);
-	const textElements = [...candidates].filter((element) => {
+	const textCandidates = [...candidates].filter((element) => {
 		const scope = element.closest('[data-scope="messages_table"]');
 		if (scope && isGroupIntro(scope)) return false;
 		if (
@@ -126,6 +154,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 			isVisible(element)
 		);
 	});
+	const textElements = textCandidates.filter((element) => !isDeliveryStatus(element, textCandidates));
 	const messages: RenderedMessage[] = textElements.map((element) => ({
 		element,
 		boundary: messageBoundary(element),
