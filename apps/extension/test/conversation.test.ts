@@ -139,6 +139,78 @@ test("does not mistake reactions or mixed content for a standalone Like", async 
 	dom.window.close();
 });
 
+test("omits edit labels while preserving edited text, attribution, and revision changes", async () => {
+	const dom = setup();
+	for (const [sender, status] of [
+		["Alex", "Edytowano"],
+		["You", "Edited"],
+	]) {
+		setMessages(`<div data-scope="messages_table" data-message-id="1" aria-roledescription="message" aria-label="At 11:12, ${sender}: Updated text">
+			<h4 dir="auto">${sender} · ${status}</h4>
+			<div><span dir="auto">Updated text</span></div>
+			<div role="presentation"><div role="presentation"><span dir="auto"><span><span><div role="button" aria-expanded="false" aria-label="${status}" tabindex="-1"><span>${status}</span></div></span></span></span></div></div>
+		</div>`);
+		const original = await messengerChatAdapter.readConversation();
+		assert.deepEqual(
+			original.messages.map(({ text, direction }) => [text, direction]),
+			[["Updated text", sender === "You" ? "outgoing" : "incoming"]],
+		);
+		document.querySelector("h4")!.remove();
+		document.querySelectorAll('[dir="auto"]')[1]!.remove();
+		assert.equal((await messengerChatAdapter.readConversation()).revision, original.revision);
+		document.querySelector('[dir="auto"]')!.textContent = "Edited again";
+		document.querySelector("[data-message-id]")!.setAttribute("aria-label", `At 11:12, ${sender}: Edited again`);
+		const changed = await messengerChatAdapter.readConversation();
+		assert.equal(changed.messages[0]!.text, "Edited again");
+		assert.notEqual(changed.revision, original.revision);
+	}
+	dom.window.close();
+});
+
+test("preserves literal edit-label messages and uncertain text", async () => {
+	const dom = setup();
+	for (const status of ["Edytowano", "Edited"]) {
+		setMessages(
+			`<div data-scope="messages_table" data-message-id="1" aria-roledescription="message" aria-label="At 11:12, Alex: ${status}"><span dir="auto">${status}</span></div>`,
+		);
+		assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.text, status);
+		// A label in another message must not justify dropping this text.
+		setMessages(`<div data-scope="messages_table" data-message-id="1" aria-roledescription="message" aria-label="At 11:12, Alex: Hello"><span dir="auto">Hello</span></div>
+			<div data-scope="messages_table"><span dir="auto">${status}</span></div>`);
+		assert.deepEqual(
+			(await messengerChatAdapter.readConversation()).messages.map(({ text }) => text),
+			["Hello", status],
+		);
+		setMessages(
+			`<div data-scope="messages_table" data-message-id="1" aria-roledescription="message" aria-label="At 11:12, Alex: Missing text"><span dir="auto">${status}</span></div>`,
+		);
+		assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.text, status);
+	}
+	dom.window.close();
+});
+
+test("ignores control wrappers by structure regardless of language or message labels", async () => {
+	const dom = setup();
+	for (const control of [
+		'<div role="button" aria-expanded="false" tabindex="-1">Modifié</div>',
+		"<button>Bearbeitet</button>",
+	]) {
+		setMessages(
+			`<div data-scope="messages_table"><span dir="auto">Hello</span><span dir="auto"> <span>${control}</span> </span></div>`,
+		);
+		assert.deepEqual(
+			(await messengerChatAdapter.readConversation()).messages.map(({ text }) => text),
+			["Hello"],
+		);
+		// Content beside a control must not be silently discarded.
+		setMessages(`<div data-scope="messages_table"><span dir="auto">Actual text ${control}</span></div>`);
+		assert.equal((await messengerChatAdapter.readConversation()).messages.length, 1);
+		setMessages(`<div data-scope="messages_table"><span dir="auto"><video></video>${control}</span></div>`);
+		await assert.rejects(messengerChatAdapter.readConversation(), ConversationUnavailableError);
+	}
+	dom.window.close();
+});
+
 test("reads loaded text in order, without nested duplicates or controls", async () => {
 	const dom = setup();
 	setMessages(fixture);

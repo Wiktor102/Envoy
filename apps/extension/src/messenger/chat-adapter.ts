@@ -107,6 +107,23 @@ function normalizedText(value: string | null | undefined): string {
 	return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function isControlWrapper(element: HTMLElement): boolean {
+	if (!element.querySelector('button, [role="button"]')) return false;
+	// Messenger's edit control sits inside a directional span, so checking
+	// ancestors alone misses it. Ignore only wrappers made entirely of controls
+	// and whitespace; keep mixed text or media for the reader to validate.
+	function controlOrDecoration(node: Node): boolean {
+		if (node.nodeType === 3) return !node.nodeValue?.trim();
+		if (node.nodeType !== 1) return true;
+		const child = node as Element;
+		if (child.matches('button, [role="button"]')) return true;
+		if (!child.matches("div, span") || ![null, "presentation", "none"].includes(child.getAttribute("role")))
+			return false;
+		return [...child.childNodes].every(controlOrDecoration);
+	}
+	return [...element.childNodes].every(controlOrDecoration);
+}
+
 function isDeliveryStatus(element: HTMLElement, candidates: HTMLElement[]): boolean {
 	const boundary = messageBoundary(element);
 	if (!boundary) return false;
@@ -156,6 +173,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 			)
 		)
 			return false;
+		if (isControlWrapper(element)) return false;
 		const photoLink = element.closest<HTMLAnchorElement>("a[href]");
 		if (photoLink && isMessengerPhotoLink(photoLink)) return false;
 		// A nested directional span is part of the outer text, not a second message.
