@@ -1,7 +1,7 @@
 import type { ConversationSnapshot, SendReplyCommand, SendResult, TaskControlAction, TaskState } from "@envoy/contracts";
 import { callBackend } from "./messaging";
 import { messengerChatAdapter, type MessengerChatAdapter } from "./messenger/chat-adapter";
-import { watchConversation } from "./ui/conversation";
+import { conversationErrorStatus, watchConversation } from "./ui/conversation";
 import { startOwnerHeartbeat, type StartOwnerHeartbeat } from "./heartbeat";
 
 export interface ControllerState {
@@ -148,10 +148,12 @@ export function createEnvoyController(
 				refreshRequested = false;
 				const readEpoch = epoch;
 				let snapshot: ConversationSnapshot | null;
+				let status = conversationErrorStatus(null);
 				try {
 					snapshot = await adapter.readConversation();
-				} catch {
+				} catch (error) {
 					snapshot = null;
+					status = conversationErrorStatus(error);
 				}
 				if (!ownerAvailable()) return;
 				if (readEpoch !== epoch || actionInFlight) {
@@ -160,10 +162,7 @@ export function createEnvoyController(
 					refreshRequested = true;
 					continue;
 				}
-				observe(
-					snapshot,
-					snapshot ? `${snapshot.messages.length} loaded messages.` : "Conversation unavailable. Envoy is paused.",
-				);
+				observe(snapshot, snapshot ? `${snapshot.messages.length} loaded messages.` : status);
 				requestSync();
 			}
 		})().finally(() => {

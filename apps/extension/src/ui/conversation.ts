@@ -1,6 +1,22 @@
 import type { ConversationSnapshot } from "@envoy/contracts";
 import { ConversationUnavailableError, messengerChatAdapter } from "../messenger/chat-adapter";
 
+export function conversationErrorStatus(error: unknown): string {
+	if (error instanceof ConversationUnavailableError) {
+		switch (error.reason) {
+			case "navigated":
+				return "The selected chat changed. Reload this tab to use Envoy in it.";
+			case "unsupported":
+				return "Some messages can't be read. Envoy is paused for this conversation.";
+			case "not-latest":
+				return "Can't confirm the latest messages. Scroll to the bottom or reload this tab.";
+			case "no-chat":
+				return "Open a conversation and reload this tab to use Envoy in it.";
+		}
+	}
+	return "Conversation messages are unavailable or still loading.";
+}
+
 // Observe Messenger, not the shadow-root output, so rendering never triggers another read.
 export function watchConversation(onUpdate: (snapshot: ConversationSnapshot | null, status: string) => void): () => void {
 	let stopped = false;
@@ -44,17 +60,7 @@ export function watchConversation(onUpdate: (snapshot: ConversationSnapshot | nu
 			}
 		} catch (error) {
 			if (stopped || current !== sequence) return;
-			const status =
-				error instanceof ConversationUnavailableError && error.reason === "navigated"
-					? "The selected chat changed. Reload this tab to use Envoy in it."
-					: error instanceof ConversationUnavailableError && error.reason === "unsupported"
-						? "Some messages can't be read. Envoy is paused for this conversation."
-						: error instanceof ConversationUnavailableError && error.reason === "not-latest"
-							? "Can't confirm the latest messages. Scroll to the bottom or reload this tab."
-							: error instanceof ConversationUnavailableError && error.reason === "no-chat"
-								? "Open a conversation and reload this tab to use Envoy in it."
-								: "Conversation messages are unavailable or still loading.";
-			onUpdate(null, status);
+			onUpdate(null, conversationErrorStatus(error));
 		}
 	}
 
