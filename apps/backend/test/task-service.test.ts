@@ -536,6 +536,148 @@ test("system events remain context, invalidate pending replies, and do not hide 
 	assert.equal(agent.calls.length, 2);
 });
 
+test("a transient unreadable view resumes the agent once the same chat reads again", async () => {
+	const { agent, service } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	const paused = service.sync("owner", null).task!;
+	assert.equal(paused.status, "paused");
+	assert.equal(paused.pendingReply, null);
+	assert.match(paused.detail!, /resumes when it can read/);
+	const resumed = service.sync("owner", snapshot()).task!;
+	assert.equal(resumed.status, "thinking");
+	assert.equal(agent.calls.length, 2);
+
+	// A pause by the user, or while waiting for the user, is never lifted.
+	agent.calls[1]!.resolve({ action: "ask", text: "Which day?" });
+	await Promise.resolve();
+	assert.equal(service.sync("owner", snapshot()).task?.status, "needs_user");
+	service.sync("owner", null);
+	assert.equal(service.sync("owner", snapshot()).task?.status, "paused");
+	service.control("owner", task.id, "resume");
+	service.sync("owner", null);
+	service.control("owner", task.id, "pause");
+	assert.equal(service.sync("owner", snapshot()).task?.status, "paused");
+	assert.equal(agent.calls.length, 2);
+});
+
+test("an unreadable view does not resume a send that may have completed", async () => {
+	for (const authorized of [false, true]) {
+		const { agent, service, advance } = setup();
+		service.start("owner", "Arrange a meeting", snapshot());
+		await resolveReply(agent);
+		advance(10_000);
+		const claim = service.sync("owner", snapshot()).command!;
+		if (authorized)
+			assert.equal(service.authorize("owner", claim.commandId, claim.chatId, claim.expectedRevision), true);
+		for (let read = 0; read < 3; read++) assert.equal(service.sync("owner", null).task?.status, "paused");
+		const after = service.sync("owner", snapshot("r2", "Thursday instead?")).task!;
+		assert.equal(after.status, "paused");
+		assert.match(after.detail!, /may have completed/);
+		assert.equal(service.authorize("owner", claim.commandId, claim.chatId, claim.expectedRevision), false);
+		assert.equal(agent.calls.length, 1);
+	}
+});
+
+test("repeated unreadable views recover with a fresh decision and full countdown", async () => {
+	for (const status of ["waiting", "thinking", "pending"] as const) {
+		const { agent, service, advance } = setup();
+		const initial = status === "waiting" ? snapshot("r1", "I'll check.", "outgoing") : snapshot();
+		service.start("owner", "Arrange a meeting", initial);
+		if (status === "pending") await resolveReply(agent);
+		const original = service.sync("owner", initial).task!;
+		assert.equal(original.status, status);
+		const previousCalls = agent.calls.length;
+		for (let read = 0; read < 3; read++) {
+			advance(40_000);
+			const paused = service.sync("owner", null);
+			assert.equal(paused.task?.status, "paused");
+			assert.equal(paused.task?.pendingReply, null);
+			assert.equal(paused.command, null);
+			assert.match(paused.task!.detail!, /resumes when it can read/);
+		}
+		const current = snapshot("r2", "Thursday instead?");
+		const recovered = service.sync("owner", current);
+		assert.equal(recovered.task?.status, "thinking");
+		assert.equal(recovered.command, null);
+		assert.equal(agent.calls.length, previousCalls + 1);
+		assert.deepEqual(agent.calls.at(-1)!.snapshot, current);
+		if (status === "thinking") {
+			assert.equal(agent.calls[0]!.signal?.aborted, true);
+			await resolveReply(agent, 0, "Stale reply.");
+			assert.equal(service.sync("owner", current).task?.pendingReply, null);
+		}
+		await resolveReply(agent, previousCalls, "Thursday works.");
+		const pending = service.sync("owner", current).task!.pendingReply!;
+		assert.notEqual(pending.commandId, original.pendingReply?.commandId);
+		advance(9_999);
+		assert.equal(service.sync("owner", current).command, null);
+		advance(1);
+		assert.deepEqual(service.sync("owner", current).command, {
+			commandId: pending.commandId,
+			chatId: current.chatId,
+			expectedRevision: "r2",
+			text: "Thursday works.",
+		});
+	}
+});
+
+test("user controls, changed chats and connection loss cancel automatic recovery", () => {
+	for (const interruption of ["pause", "update-goal", "take-over", "changed-chat", "disconnect", "timeout"] as const) {
+		const { agent, service, advance } = setup();
+		const task = service.start("owner", "Arrange a meeting", snapshot());
+		service.sync("owner", null);
+		if (interruption === "changed-chat") service.sync("owner", { ...snapshot(), chatId: "different-chat" });
+		else if (interruption === "disconnect") service.disconnect("owner");
+		else if (interruption === "timeout") advance(100_001);
+		else
+			service.control("owner", task.id, interruption, interruption === "update-goal" ? "Arrange Thursday" : undefined);
+		service.sync("owner", null);
+		const result = service.sync("owner", snapshot("r2", "Thursday instead?"));
+		assert.equal(result.task?.status, interruption === "take-over" ? "taken_over" : "paused", interruption);
+		assert.equal(result.task?.pendingReply, null);
+		assert.equal(result.command, null);
+		assert.equal(agent.calls.length, 1, interruption);
+	}
+});
+
+test("reconnecting after an unreadable view still requires an explicit resume", () => {
+	for (const connectorId of ["owner", "replacement"]) {
+		const { agent, service, advance } = setup();
+		const task = service.start("owner", "Arrange a meeting", snapshot());
+		service.sync("owner", null);
+		assert.throws(() => service.attach(connectorId, task.id, snapshot()));
+		advance(100_001);
+		assert.equal(service.attach(connectorId, task.id, snapshot()).status, "paused");
+		const current = snapshot("r2", "Thursday instead?");
+		assert.equal(service.sync(connectorId, current).task?.status, "paused");
+		assert.equal(agent.calls.length, 1);
+		assert.equal(service.control(connectorId, task.id, "resume").status, "thinking");
+		assert.equal(agent.calls.length, 2);
+	}
+});
+
+test("unreadable views do not automatically resume editing or requests for user input", async () => {
+	for (const status of ["editing", "saved-edit", "needs_user"] as const) {
+		const { agent, service } = setup();
+		const task = service.start("owner", "Arrange a meeting", snapshot());
+		if (status !== "needs_user") {
+			await resolveReply(agent);
+			service.control("owner", task.id, "edit");
+			if (status === "saved-edit") service.control("owner", task.id, "save-edit", "I will check Thursday.");
+		} else {
+			agent.calls[0]!.resolve({ action: "ask", text: "Which day?" });
+			await Promise.resolve();
+		}
+		assert.equal(service.sync("owner", snapshot()).task?.status, status === "saved-edit" ? "pending" : status);
+		for (let read = 0; read < 3; read++) service.sync("owner", null);
+		const result = service.sync("owner", snapshot("r2", "Thursday instead?"));
+		assert.equal(result.task?.status, "paused");
+		assert.equal(result.command, null);
+		assert.equal(agent.calls.length, 1);
+	}
+});
+
 for (const status of ["taken_over", "completed"] as const) {
 	test(`${status} tasks ignore late conversation updates without renewing the lease`, async () => {
 		let time = 1000;

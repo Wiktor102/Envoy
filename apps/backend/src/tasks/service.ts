@@ -56,6 +56,9 @@ export class TaskService {
 	private readonly suppressedRevisions = new Set<string>();
 	private readonly suppressedContexts = new Set<string>();
 	private requiresVerification = false;
+	// Set only when an unreadable view paused an agent that was not waiting for
+	// the user or an edit. Any other pause, control, or reconnection clears it.
+	private resumeWhenReadable = false;
 	private readonly now: () => number;
 	private readonly replyDelayMs: number;
 	private readonly leaseMs: number;
@@ -97,6 +100,7 @@ export class TaskService {
 		}
 		this.attempts.clear();
 		this.inFlight = null;
+		this.resumeWhenReadable = false;
 		this.owner = connectorId;
 		this.task = {
 			id: randomUUID(),
@@ -121,6 +125,7 @@ export class TaskService {
 		if (this.leaseActive() || this.inFlight || this.task.status !== "paused") {
 			throw new Error("The agent tab is still connected or the task is not paused.");
 		}
+		this.resumeWhenReadable = false;
 		this.owner = connectorId;
 		this.connector.updateConversation(structuredClone(snapshot));
 		this.touch();
@@ -149,6 +154,7 @@ export class TaskService {
 	control(connectorId: string, taskId: string, action: TaskControlAction, text?: string): TaskState {
 		this.expireLease();
 		const task = this.requireOwner(connectorId, taskId);
+		this.resumeWhenReadable = false;
 		switch (action) {
 			case "edit": {
 				if (task.status === "sending" && this.inFlight) {
@@ -283,8 +289,27 @@ export class TaskService {
 		}
 		const previous = this.connector.readConversation();
 		if (!snapshot || snapshot.chatId !== task.chatId) {
-			this.leaseUntil = 0;
-			this.pauseForDisconnect(snapshot ? "The agent tab changed conversations." : "The conversation is unavailable.");
+			// A photo that is still loading or a brief scroll can make the view
+			// unreadable across several syncs. Preserve only this automatic pause.
+			const resumable =
+				!snapshot &&
+				(["waiting", "thinking"].includes(task.status) ||
+					(task.status === "pending" && task.pendingReply?.sendAt != null) ||
+					(task.status === "paused" && this.resumeWhenReadable)) &&
+				!this.inFlight &&
+				!this.requiresVerification;
+			// Failed reads still prove the owner is connected. A missing heartbeat
+			// must expire this recovery permission just like any other connection.
+			if (resumable) this.touch();
+			else this.leaseUntil = 0;
+			this.pauseForDisconnect(
+				snapshot
+					? "The agent tab changed conversations."
+					: resumable
+						? "The conversation is unavailable. Envoy resumes when it can read the latest messages."
+						: "The conversation is unavailable.",
+			);
+			this.resumeWhenReadable = resumable;
 			this.connector.updateConversation(null);
 			return { task: this.state(), isOwner: true, command: null };
 		}
@@ -312,6 +337,13 @@ export class TaskService {
 			}
 		}
 		this.connector.updateConversation(copy);
+		if (this.resumeWhenReadable) {
+			this.resumeWhenReadable = false;
+			if (task.status === "paused" && !this.requiresVerification && !this.inFlight) {
+				task.status = "waiting";
+				task.detail = null;
+			}
+		}
 		if (task.status === "waiting") this.maybeGenerate();
 		let command: SendReplyCommand | null = null;
 		if (task.status === "pending" && task.pendingReply?.sendAt !== null && task.pendingReply?.sendAt !== undefined) {
@@ -455,6 +487,7 @@ export class TaskService {
 		this.suppressedRevisions.clear();
 		this.suppressedContexts.clear();
 		this.requiresVerification = false;
+		this.resumeWhenReadable = false;
 	}
 
 	private scheduleRetention(taskId: string): void {
@@ -559,6 +592,7 @@ export class TaskService {
 	}
 
 	private pauseForDisconnect(message: string): void {
+		this.resumeWhenReadable = false;
 		if (!this.task || this.task.status === "completed" || this.task.status === "taken_over") return;
 		const discarded = this.task.pendingReply;
 		const uncertain = this.invalidate();

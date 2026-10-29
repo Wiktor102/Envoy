@@ -56,8 +56,10 @@ export function createEnvoyController(
 	let suspended = false;
 	let lifecycleVersion = 0;
 	let controlsAvailable = false;
-	let controlsLossVersion = 0;
+	let unavailableVersion = 0;
 	let reportedLossVersion = 0;
+	let connectionLossVersion = 0;
+	let reportedConnectionLossVersion = 0;
 	let disconnectPromise: Promise<void> | null = null;
 	let syncRequested = false;
 	let syncPromise: Promise<void> | null = null;
@@ -90,7 +92,7 @@ export function createEnvoyController(
 		const changed = identity(snapshot) !== identity(state.snapshot);
 		// A transient unavailable read must reach the backend even if a later
 		// read succeeds while an older sync is still in flight.
-		if (changed && snapshot === null && state.isOwner) controlsLossVersion++;
+		if (changed && snapshot === null && state.isOwner) unavailableVersion++;
 		if (changed) epoch++;
 		publish({ snapshot, conversationStatus });
 		if (changed && state.isOwner) requestSync();
@@ -125,8 +127,8 @@ export function createEnvoyController(
 				stopHeartbeat = null;
 				if (!ownerAvailable()) return;
 				// A lost port cannot prove the tab is still receiving changes.
-				// Force an unavailable report before a later reconnect.
-				controlsLossVersion++;
+				// Disconnect before any later read can resume the task automatically.
+				connectionLossVersion++;
 				observe(null, "Agent tab connection interrupted. Envoy is paused.");
 				requestSync();
 			});
@@ -224,9 +226,19 @@ export function createEnvoyController(
 			while (syncRequested && !stopped && !suspended && !actionInFlight) {
 				syncRequested = false;
 				const requestEpoch = epoch;
-				const lossVersion = controlsLossVersion;
+				const lossVersion = unavailableVersion;
 				const reportingLoss = state.isOwner && lossVersion !== reportedLossVersion;
+				const connectionVersion = connectionLossVersion;
 				try {
+					if (state.isOwner && connectionVersion !== reportedConnectionLossVersion) {
+						// Null snapshots allow recovery from read failures. Losing the
+						// controls or heartbeat must instead require an explicit resume.
+						// Do not send another snapshot until the disconnect is confirmed.
+						await transport({ type: "envoy:disconnect" });
+						reportedConnectionLossVersion = connectionVersion;
+						syncRequested = true;
+						continue;
+					}
 					// Other tabs and ended tasks only discover task status.
 					const result = await transport({
 						type: "envoy:sync",
@@ -392,7 +404,7 @@ export function createEnvoyController(
 		setControlsAvailable(available) {
 			if (controlsAvailable === available) return;
 			controlsAvailable = available;
-			if (!available && (state.isOwner || actionInFlight)) controlsLossVersion++;
+			if (!available && (state.isOwner || actionInFlight)) connectionLossVersion++;
 			epoch++;
 			reconcileHeartbeat();
 			if (state.isOwner) requestSync();

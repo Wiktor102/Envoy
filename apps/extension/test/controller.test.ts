@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ConnectorSyncResult, ConversationSnapshot, SendReplyCommand, TaskState } from "@envoy/contracts";
-import { TaskService } from "../../backend/src/tasks/service";
 import { createEnvoyController } from "../src/controller";
 import type { BackendRequest, callBackend } from "../src/messaging";
 import type { MessengerChatAdapter } from "../src/messenger/chat-adapter";
+import { TaskService } from "../../backend/src/tasks/service.js";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -56,7 +56,7 @@ function setup(handler: (request: BackendRequest) => unknown | Promise<unknown>)
 	let heartbeatDisconnected: (() => void) | null = null;
 	let heartbeatStarts = 0;
 	let heartbeatStops = 0;
-	let read = async () => observedSnapshot;
+	let read: () => Promise<ConversationSnapshot | null> = async () => observedSnapshot;
 	const adapter: MessengerChatAdapter = {
 		async readConversation() {
 			return read();
@@ -120,7 +120,7 @@ function setup(handler: (request: BackendRequest) => unknown | Promise<unknown>)
 			heartbeatDisconnected = null;
 			disconnected();
 		},
-		setRead(next: () => Promise<ConversationSnapshot>) {
+		setRead(next: () => Promise<ConversationSnapshot | null>) {
 			read = next;
 		},
 		setSnapshot(snapshot: ConversationSnapshot) {
@@ -132,6 +132,134 @@ function setup(handler: (request: BackendRequest) => unknown | Promise<unknown>)
 		},
 	};
 }
+
+function setupWithService(finishAfterRecovery = false) {
+	let time = 1_000;
+	let agentCalls = 0;
+	let task: TaskState | null = null;
+	const service = new TaskService(
+		{
+			async run() {
+				agentCalls++;
+				if (finishAfterRecovery && agentCalls > 1) return { action: "finish" as const, text: "Done" };
+				return { action: "reply", text: "Tuesday works." };
+			},
+		},
+		{ now: () => time, leaseMs: 100_000 },
+	);
+	const harness = setup((request) => {
+		switch (request.type) {
+			case "envoy:start":
+				return service.start("owner", request.goal, request.snapshot);
+			case "envoy:sync":
+				return service.sync("owner", request.snapshot);
+			case "envoy:control":
+				return service.control("owner", request.taskId, request.action, request.text);
+			case "envoy:authorize":
+				return service.authorize("owner", request.commandId, request.chatId, request.revision);
+			case "envoy:report":
+				return service.report("owner", request.commandId, request.result);
+			case "envoy:disconnect":
+				return service.disconnect("owner");
+			default:
+				throw new Error(`Unexpected request: ${request.type}`);
+		}
+	});
+	harness.controller.subscribe((state) => {
+		task = state.task;
+	});
+	return {
+		harness,
+		advance(amount: number) {
+			time += amount;
+		},
+		get agentCalls() {
+			return agentCalls;
+		},
+		get task() {
+			return task;
+		},
+	};
+}
+
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+for (const loss of ["controls", "heartbeat"] as const) {
+	test(`${loss} loss requires explicit resume even when the conversation becomes readable`, async (t) => {
+		for (const unreadableBeforeLoss of [false, true]) {
+			const fixture = setupWithService();
+			const { harness, advance } = fixture;
+			t.after(() => harness.controller.destroy());
+			await harness.controller.start(activeTask.goal);
+			await flush();
+			assert.equal(fixture.task?.status, "pending");
+			if (unreadableBeforeLoss) {
+				harness.setRead(async () => null);
+				harness.tick();
+				await flush();
+				assert.equal(fixture.task?.status, "paused");
+			}
+			if (loss === "controls") {
+				harness.controller.setControlsAvailable(false);
+				harness.controller.setControlsAvailable(true);
+			} else harness.disconnectHeartbeat();
+			await flush();
+			harness.setRead(async () => initialSnapshot);
+			harness.tick();
+			await flush();
+			assert.equal(fixture.task?.status, "paused");
+			advance(10_000);
+			harness.tick();
+			await flush();
+			assert.equal(fixture.agentCalls, 1);
+			assert.equal(harness.attempted, 0);
+			assert.equal(harness.sent, 0);
+			await harness.controller.control("resume");
+			await flush();
+			assert.equal(fixture.task?.status, "pending");
+			assert.equal(fixture.agentCalls, 2);
+			advance(9_999);
+			harness.tick();
+			await flush();
+			assert.equal(harness.sent, 0);
+			advance(1);
+			harness.tick();
+			await flush();
+			assert.equal(harness.sent, 1);
+		}
+	});
+}
+
+test("temporary read failures still recover automatically with a full countdown", async (t) => {
+	const fixture = setupWithService();
+	const { harness, advance } = fixture;
+	t.after(() => harness.controller.destroy());
+	await harness.controller.start(activeTask.goal);
+	await flush();
+	harness.setRead(async () => null);
+	for (let read = 0; read < 3; read++) {
+		harness.tick();
+		await flush();
+		assert.equal(fixture.task?.status, "paused");
+	}
+	harness.setRead(async () => initialSnapshot);
+	harness.tick();
+	await flush();
+	assert.equal(fixture.task?.status, "pending");
+	assert.equal(fixture.agentCalls, 2);
+	assert.equal(
+		harness.calls.some((request) => request.type === "envoy:disconnect"),
+		false,
+	);
+	advance(9_999);
+	harness.tick();
+	await flush();
+	assert.equal(harness.sent, 0);
+	advance(1);
+	harness.tick();
+	await flush();
+	assert.equal(harness.sent, 1);
+});
 
 test("a locally invalidated claimed command is rejected without authorization or sending", { timeout: 5000 }, async (t) => {
 	const heartbeat = deferred<ConnectorSyncResult>();
@@ -183,14 +311,17 @@ test("a locally invalidated claimed command is rejected without authorization or
 	assert.equal(harness.attempted, 0);
 });
 
-test("a transient loss of controls reaches the backend before a later heartbeat", { timeout: 5000 }, async (t) => {
+test("control loss must confirm a disconnect before a later heartbeat", { timeout: 5000 }, async (t) => {
 	const firstHeartbeat = deferred<ConnectorSyncResult>();
 	const firstHeartbeatRequested = deferred<void>();
-	const unavailableResponse = deferred<ConnectorSyncResult>();
-	const unavailableRequested = deferred<void>();
+	const disconnectResponse = deferred<void>();
+	const disconnectRequested = deferred<void>();
+	const retryResponse = deferred<void>();
+	const retryRequested = deferred<void>();
 	const laterHeartbeatRequested = deferred<void>();
 	let started = false;
 	let heldHeartbeat = false;
+	let disconnects = 0;
 	const harness = setup((request) => {
 		switch (request.type) {
 			case "envoy:start":
@@ -203,14 +334,15 @@ test("a transient loss of controls reaches the backend before a later heartbeat"
 					firstHeartbeatRequested.resolve();
 					return firstHeartbeat.promise;
 				}
-				if (!request.snapshot) {
-					unavailableRequested.resolve();
-					return unavailableResponse.promise;
-				}
-				if (request.snapshot.revision === "revision-2") laterHeartbeatRequested.resolve();
+				if (request.snapshot?.revision === "revision-2") laterHeartbeatRequested.resolve();
 				return syncResult({ ...activeTask, status: "paused" });
 			case "envoy:disconnect":
-				return undefined;
+				if (++disconnects === 1) {
+					disconnectRequested.resolve();
+					return disconnectResponse.promise;
+				}
+				retryRequested.resolve();
+				return retryResponse.promise;
 			default:
 				throw new Error(`Unexpected request: ${request.type}`);
 		}
@@ -221,19 +353,21 @@ test("a transient loss of controls reaches the backend before a later heartbeat"
 	harness.controller.setControlsAvailable(false);
 	harness.controller.setControlsAvailable(true);
 	firstHeartbeat.resolve(syncResult(activeTask));
-	await unavailableRequested.promise;
+	await disconnectRequested.promise;
+	disconnectResponse.reject(new Error("Connection unavailable"));
+	await flush();
 	harness.observe({ ...initialSnapshot, revision: "revision-2" });
-	await Promise.resolve();
+	await retryRequested.promise;
 	assert.equal(
 		harness.calls.some((request) => request.type === "envoy:sync" && request.snapshot?.revision === "revision-2"),
 		false,
 	);
-	unavailableResponse.resolve(syncResult({ ...activeTask, status: "paused" }));
+	retryResponse.resolve();
 	await laterHeartbeatRequested.promise;
-	const snapshots = harness.calls
-		.filter((request): request is Extract<BackendRequest, { type: "envoy:sync" }> => request.type === "envoy:sync")
-		.map((request) => request.snapshot?.revision ?? null);
-	assert.deepEqual(snapshots.slice(-3), ["revision-1", null, "revision-2"]);
+	assert.deepEqual(
+		harness.calls.slice(-4).map((request) => request.type),
+		["envoy:sync", "envoy:disconnect", "envoy:disconnect", "envoy:sync"],
+	);
 });
 
 test("pagehide waits for an in-flight start before disconnecting", { timeout: 5000 }, async (t) => {
@@ -523,7 +657,7 @@ for (const change of [
 	});
 }
 
-for (const cause of ["lease expiry", "disconnect"] as const) {
+for (const cause of ["lease expiry", "disconnect", "controls", "heartbeat"] as const) {
 	test(`a granted authorization cannot outlive a backend ${cause} pause`, { timeout: 5000 }, async (t) => {
 		let time = 1000;
 		const service = new TaskService(
@@ -567,7 +701,12 @@ for (const cause of ["lease expiry", "disconnect"] as const) {
 		await harness.controller.start(activeTask.goal);
 		await authorizing.promise;
 		if (cause === "lease expiry") time += 8001;
-		else service.disconnect("owner");
+		else if (cause === "disconnect") service.disconnect("owner");
+		else if (cause === "controls") {
+			harness.controller.setControlsAvailable(false);
+			harness.controller.setControlsAvailable(true);
+		} else harness.disconnectHeartbeat();
+		await flush();
 		harness.tick();
 		await paused.promise;
 		authorization.resolve(true);
@@ -634,5 +773,43 @@ for (const status of ["taken_over", "completed"] as const) {
 			harness.calls.some((request) => request.type === "envoy:start" && request.snapshot.revision === newer.revision),
 		);
 		assert.equal(harness.heartbeatStarts, 2);
+	});
+}
+
+for (const status of ["taken_over", "completed"] as const) {
+	test(`automatic read recovery preserves ${status} privacy with the real task service`, async (t) => {
+		t.mock.timers.enable({ apis: ["setInterval"] });
+		const fixture = setupWithService(status === "completed");
+		const { harness } = fixture;
+		t.after(() => harness.controller.destroy());
+		await harness.controller.start(activeTask.goal);
+		await flush();
+		harness.setRead(async () => null);
+		harness.tick();
+		await flush();
+		assert.equal(fixture.task?.status, "paused");
+		harness.setRead(async () => initialSnapshot);
+		harness.tick();
+		await flush();
+		assert.equal(fixture.agentCalls, 2);
+		if (status === "taken_over") await harness.controller.control("take-over");
+		assert.equal(fixture.task?.status, status);
+		const endedAt = harness.calls.length;
+		harness.observe({
+			...initialSnapshot,
+			revision: "private-after-recovery",
+			messages: [{ ...initialSnapshot.messages[0]!, text: "Private after task ended" }],
+		});
+		harness.controller.setControlsAvailable(false);
+		harness.controller.setControlsAvailable(true);
+		await flush();
+		t.mock.timers.tick(1000);
+		await flush();
+		const polls = harness.calls.slice(endedAt).filter((request) => request.type === "envoy:sync");
+		assert.ok(polls.length >= 2);
+		assert.ok(polls.every((request) => request.snapshot === null));
+		assert.equal(fixture.task?.status, status);
+		assert.equal(fixture.agentCalls, 2);
+		assert.equal(harness.sent, 0);
 	});
 }
