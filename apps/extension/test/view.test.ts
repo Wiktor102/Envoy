@@ -253,6 +253,26 @@ test("reply controls keep interruption actions available during thinking and sen
 	assert.deepEqual(ui.actions, ["cancel"]);
 });
 
+test("the reply text stays visible while it is being sent", (t) => {
+	const ui = setup(t);
+	const pendingReply = {
+		commandId: "reply-1",
+		chatId: snapshot.chatId,
+		expectedRevision: snapshot.revision,
+		text: "Tuesday works.",
+		sendAt: Date.now(),
+	};
+	ui.update({ task: { ...task, status: "pending", pendingReply }, isOwner: true });
+	ui.update({ task: { ...task, status: "sending", pendingReply: null }, isOwner: true });
+	assert.equal(ui.element("pending").hidden, false);
+	assert.equal(ui.element("pending-text").textContent, "Tuesday works.");
+	assert.equal(ui.element("countdown").textContent, "Sending...");
+	ui.update({ task: { ...task, status: "waiting", pendingReply: null }, isOwner: true });
+	assert.equal(ui.element("pending").hidden, true);
+	ui.update({ task: { ...task, status: "sending", pendingReply: null }, isOwner: true });
+	assert.equal(ui.element("pending").hidden, true);
+});
+
 test("paused, ended, and unowned tasks keep recovery controls without reply actions", (t) => {
 	const ui = setup(t);
 	for (const status of ["waiting", "paused", "needs_user", "completed", "taken_over"] satisfies TaskStatus[]) {

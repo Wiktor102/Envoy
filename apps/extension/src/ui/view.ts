@@ -103,6 +103,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	let displayedTaskOwner = false;
 	let goalDirty = false;
 	let editingCommandId: string | null = null;
+	// The backend clears the pending reply once it hands it to the tab.
+	let sendingReply: { taskId: string; text: string } | null = null;
 	let renderedConversation: string | null = null;
 	let developerMode = false;
 	let developerModeChanged = false;
@@ -198,12 +200,10 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 
 	function renderCountdown() {
 		const task = state.task;
-		if (!task?.pendingReply) {
-			countdown.textContent = "";
-			return;
-		}
-		if (task.status === "sending") {
+		if (task?.status === "sending") {
 			countdown.textContent = "Sending...";
+		} else if (!task?.pendingReply) {
+			countdown.textContent = "";
 		} else if (task.pendingReply.sendAt !== null && task.status === "pending") {
 			const seconds = Math.max(0, Math.ceil((task.pendingReply.sendAt - Date.now()) / 1000));
 			countdown.textContent = seconds > 0 ? `Sending in ${seconds}s.` : "Waiting to send...";
@@ -247,8 +247,11 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		taskDetail.textContent = owner ? (task?.detail ?? "") : "";
 		taskDetail.hidden = !owner || !task?.detail;
 		const pending = owner ? (task?.pendingReply ?? null) : null;
-		pendingSection.hidden = !pending;
-		pendingText.textContent = pending?.text ?? "";
+		if (task && pending) sendingReply = { taskId: task.id, text: pending.text };
+		else if (task?.status !== "sending" || task.id !== sendingReply?.taskId) sendingReply = null;
+		const shownText = pending?.text ?? (owner ? sendingReply?.text : undefined) ?? null;
+		pendingSection.hidden = shownText === null;
+		pendingText.textContent = shownText ?? "";
 		const editing = Boolean(task?.status === "editing" && pending && owner);
 		editor.hidden = !editing;
 		if (editing && pending && editingCommandId !== pending.commandId) {
