@@ -805,24 +805,42 @@ function newlyAppendedOutgoing(before: ConversationSnapshot, after: Conversation
 	return Boolean(last && last.direction === "outgoing" && last.text === text && last.attachments.length === 0);
 }
 
+function messengerMessageId(message: RenderedMessage | undefined): string {
+	return message?.boundary?.getAttribute("data-message-id") ?? "";
+}
+
 function hasSentStatus(capture: ConversationCapture): boolean {
-	const boundary = capture.rendered.at(-1)?.boundary;
-	if (!boundary) return false;
+	const message = capture.rendered.at(-1);
+	const boundary = message?.boundary;
+	if (!message || !boundary) return false;
 	// Machine status values are useful where a connector exposes them, but
 	// translated headings and labels are not delivery acknowledgements.
 	const statuses = [boundary, ...boundary.querySelectorAll<HTMLElement>("[data-message-status]")]
 		.filter((element) => isVisible(element as HTMLElement))
 		.map((element) => element.getAttribute("data-message-status"));
 	if (statuses.some((status) => status && /^(?:sending|pending|failed|not-sent)$/.test(status))) return false;
+	if (
+		boundary.matches('[aria-busy="true"], [role="progressbar"]') ||
+		boundary.querySelector('[aria-busy="true"], [role="progressbar"]')
+	)
+		return false;
 	if (statuses.some((status) => status && /^(?:sent|delivered|seen|read)$/.test(status))) return true;
+	// Reuse the reader's observed footer distinction. A visible sent footer
+	// attached to this bubble is evidence even when its numeric ID stays put.
+	// A translated heading or status-like message text alone is not enough.
+	if (
+		[...boundary.querySelectorAll<HTMLElement>('[dir="auto"]')].some(
+			(element) => isVisible(element) && isDeliveryStatus(element, [message.element, element]),
+		)
+	)
+		return true;
 	// The live encrypted UI replaces its optimistic numeric ID with a qualified
 	// @msgr ID when acknowledged. Regular threads use the server's mid.$ IDs.
-	// Never confirm a numeric optimistic bubble, even if its heading says Sent.
-	const id = boundary.getAttribute("data-message-id") ?? "";
+	// Without a status, never confirm a numeric bubble just from its heading.
+	const id = messengerMessageId(message);
 	return (
 		boundary.matches('[data-scope="messages_table"][aria-roledescription]') &&
-		/^(?:\d+@msgr\.\d+|mid\.\$[\w-]+)$/.test(id) &&
-		!boundary.querySelector('[aria-busy="true"], [role="progressbar"]')
+		/^(?:\d+@msgr\.\d+|mid\.\$[\w-]+)$/.test(id)
 	);
 }
 

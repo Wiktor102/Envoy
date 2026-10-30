@@ -202,6 +202,72 @@ test("waits for a server message ID instead of translated sent headings", async 
 	dom.window.close();
 });
 
+test("confirms the visible sent footer captured in PR #9 without requiring a server ID", async () => {
+	for (const [locale, sender, footerText] of [
+		["wiadomość", "O 14:03, Ty", "Wysłano"],
+		["message", "At 14:03, You", "Sent 1 minute ago"],
+	]) {
+		const { dom, editor, button } = setup();
+		let clicks = 0;
+		button.addEventListener("click", () => {
+			clicks++;
+			editor.textContent = "";
+			const scope = document.createElement("div");
+			scope.setAttribute("data-scope", "messages_table");
+			scope.setAttribute("data-message-id", "7520889721094971653");
+			scope.setAttribute("aria-roledescription", locale!);
+			scope.setAttribute("aria-label", `${sender}: Hi there`);
+			// Use the observed footer structure, not synthetic data-message-status.
+			scope.innerHTML = `<h4 dir="auto">Wysłano</h4><div><span dir="auto">Hi there</span></div>
+				<div><span role="presentation"><span dir="auto"><span>${footerText}</span></span></span></div>`;
+			document.querySelector("main")!.append(scope);
+		});
+		const send = await command();
+		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+		assert.equal(clicks, 1);
+		dom.window.close();
+	}
+});
+
+test("waits for a visible footer on the sent bubble with no pending or failed status", async () => {
+	for (const blocker of ["hidden", "transparent", "aria-hidden", "pending", "failed", "busy", "outside"]) {
+		const { dom, editor, button } = setup();
+		const scope = document.createElement("div");
+		scope.setAttribute("data-scope", "messages_table");
+		scope.setAttribute("data-message-id", "7520889721094971653");
+		scope.setAttribute("aria-roledescription", "wiadomość");
+		scope.setAttribute("aria-label", "O 14:03, Ty: Hi there");
+		scope.innerHTML = '<div><span dir="auto">Hi there</span></div>';
+		const footer = document.createElement("div");
+		footer.innerHTML = '<span role="presentation"><span dir="auto"><span>Wysłano</span></span></span>';
+		scope.append(footer);
+		if (blocker === "hidden") footer.style.visibility = "hidden";
+		if (blocker === "transparent") footer.style.opacity = "0";
+		if (blocker === "aria-hidden") footer.setAttribute("aria-hidden", "true");
+		if (blocker === "pending" || blocker === "failed") scope.setAttribute("data-message-status", blocker);
+		if (blocker === "busy") scope.setAttribute("aria-busy", "true");
+		button.addEventListener("click", () => {
+			editor.textContent = "";
+			document.querySelector("main")!.append(scope);
+			if (blocker === "outside") document.querySelector("main")!.append(footer);
+		});
+		let settled = false;
+		const pending = messengerChatAdapter.sendReply(await command(), async () => true);
+		void pending.then(() => (settled = true));
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		assert.equal(settled, false, blocker);
+		assert.equal(scope.isConnected, true);
+		footer.removeAttribute("style");
+		footer.removeAttribute("aria-hidden");
+		scope.removeAttribute("data-message-status");
+		scope.removeAttribute("aria-busy");
+		if (blocker === "outside") scope.append(footer);
+		assert.equal(await pending, "sent", blocker);
+		dom.window.close();
+	}
+});
+
 test("does not overwrite an existing draft or use an ambiguous composer", async () => {
 	const { dom, editor, button } = setup();
 	let clicks = 0;
