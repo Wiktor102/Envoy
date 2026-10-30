@@ -324,15 +324,45 @@ function isTypingStatus(scope: Element): boolean {
 	function avatarList(list: Element): boolean {
 		const items = [...list.childNodes].filter((node) => node.nodeType === 1);
 		if (items.length === 0) return false;
+		let seenItem = false;
 		for (const item of items) {
 			const element = item as Element;
-			if (!element.matches("div, span") || element.getAttribute("role") !== "listitem") return false;
+			if (element.getAttribute("role") !== "listitem") {
+				// Empty spacer between items. Anything with content stays unrecognized.
+				if (!element.matches("div, span")) return false;
+				if (![null, "presentation", "none"].includes(element.getAttribute("role"))) return false;
+				if (element.matches("[alt], [dir], [aria-label]")) return false;
+				if (
+					![...element.childNodes].every(
+						(node) => node.nodeType !== 1 && (node.nodeType !== 3 || !node.nodeValue?.trim()),
+					)
+				)
+					return false;
+				continue;
+			}
+			if (!element.matches("div, span")) return false;
 			if (element.matches("[alt], [dir], [aria-label]")) return false;
-			const inner = [...element.childNodes].filter((node) => node.nodeType === 1);
-			if (inner.length !== 1 || !avatarSvg(inner[0] as Element)) return false;
-			if (![...element.childNodes].every((node) => node.nodeType === 1 || !node.nodeValue?.trim())) return false;
+			// The avatar svg may sit inside plain wrapper divs. Anything beside
+			// the single nested svg stays unrecognized.
+			let current: Element = element;
+			for (;;) {
+				if (![...current.childNodes].every((node) => node.nodeType === 1 || !node.nodeValue?.trim())) return false;
+				const inner = [...current.childNodes].filter((node) => node.nodeType === 1);
+				if (inner.length !== 1) return false;
+				const only = inner[0] as Element;
+				if (only.matches("svg")) {
+					if (!avatarSvg(only)) return false;
+					break;
+				}
+				if (!only.matches("div, span")) return false;
+				if (![null, "presentation", "none"].includes(only.getAttribute("role"))) return false;
+				if (only.matches("[alt], [dir], [aria-label]")) return false;
+				current = only;
+			}
 			avatars[avatars.length - 1]! += 1;
+			seenItem = true;
 		}
+		if (!seenItem) return false;
 		return [...list.childNodes].every((node) => node.nodeType === 1 || !node.nodeValue?.trim());
 	}
 
