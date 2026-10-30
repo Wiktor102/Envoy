@@ -1564,3 +1564,72 @@ test("reads a recognized video as unavailable media without blocking later text"
 	assert.deepEqual(latest.messages[0]!.attachments, [{ type: "video", url: null, description: null }]);
 	dom.window.close();
 });
+
+test("reads recognized stickers as unavailable media without blocking later text", async () => {
+	const dom = setup();
+	// Observed signed-in rendering (redacted): each sticker is a bare div
+	// with role="img", a label ending in "sticker", and a CSS background
+	// image. Avatar, toolbar, and sender headings are not the sticker.
+	const incomingSticker = `<div data-scope="messages_table" data-message-id="s1" aria-roledescription="wiadomość" aria-label="O 21:29, Alex"><h4 dir="auto"><span dir="auto">Alex</span></h4><div aria-hidden="true"><img alt="Alex"></div><div><div role="img" tabindex="-1" aria-label="Animated banana with googly eyes, bouncing happily. sticker" style="background-image: url(blob:https://example.test/banana); height: 96px; width: 96px;"></div></div><div role="toolbar"><div role="presentation"></div></div></div>`;
+	const outgoingSticker = `<div data-scope="messages_table" data-message-id="s2" aria-roledescription="wiadomość" aria-label="O 22:33, Ty"><div><div role="img" tabindex="-1" aria-label="Mollusk waving a pearl with one hand sticker" style="background-image: url(blob:https://example.test/mollusk); height: 96px; width: 96px;"></div></div></div>`;
+	const followup = `<div data-scope="messages_table" data-message-id="t1" aria-roledescription="wiadomość" aria-label="O 22:34, Alex: Sounds good"><span><div><div dir="auto">Sounds good</div></div></span></div>`;
+	setMessages(`${incomingSticker}${outgoingSticker}${followup}`);
+	const snapshot = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		snapshot.messages.map(({ text, direction, attachments }) => ({ text, direction, attachments })),
+		[
+			{ text: "", direction: "incoming", attachments: [{ type: "sticker", url: null, description: null }] },
+			{ text: "", direction: "outgoing", attachments: [{ type: "sticker", url: null, description: null }] },
+			{ text: "Sounds good", direction: "incoming", attachments: [] },
+		],
+	);
+	// A CSS URL can rotate across reloads, so only the sticker label feeds
+	// the revision. A replaced sticker still invalidates pending sends.
+	document
+		.querySelector('[role="img"]')!
+		.setAttribute("style", "background-image: url(blob:https://example.test/rotated);");
+	assert.equal((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
+	document.querySelector('[role="img"]')!.setAttribute("aria-label", "Mollusk waving a pearl with one hand sticker");
+	assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
+	// A latest sticker stays readable but carries an attachment.
+	setMessages(incomingSticker);
+	const latest = await messengerChatAdapter.readConversation();
+	assert.equal(latest.messages.length, 1);
+	assert.deepEqual(latest.messages[0]!.attachments, [{ type: "sticker", url: null, description: null }]);
+	dom.window.close();
+});
+
+test("keeps sticker detection narrow and fail-closed", async () => {
+	const dom = setup();
+	const sticker = `<div role="img" tabindex="-1" aria-label="Animated banana with googly eyes, bouncing happily. sticker" style="background-image: url(blob:https://example.test/banana);"></div>`;
+	// The word "sticker" in message text is not a sticker attachment.
+	setMessages(
+		`<div data-scope="messages_table" data-message-id="t1" aria-roledescription="wiadomość" aria-label="O 21:30, Alex: Send a sticker tomorrow"><span><div><div dir="auto">Send a sticker tomorrow</div></div></span></div>` +
+			`<div data-scope="messages_table" data-message-id="s1" aria-roledescription="wiadomość" aria-label="O 21:29, Alex"><div>${sticker}</div></div>`,
+	);
+	const snapshot = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		snapshot.messages.map(({ text, attachments }) => ({ text, attachments })),
+		[
+			{ text: "Send a sticker tomorrow", attachments: [] },
+			{ text: "", attachments: [{ type: "sticker", url: null, description: null }] },
+		],
+	);
+	for (const scope of [
+		// Sticker label without a CSS background image.
+		`<div data-scope="messages_table" data-message-id="s1" aria-roledescription="wiadomość" aria-label="O 21:29, Alex"><div><div role="img" tabindex="-1" aria-label="Animated banana sticker"></div></div></div>`,
+		// Background image without a sticker label.
+		`<div data-scope="messages_table" data-message-id="s1" aria-roledescription="wiadomość" aria-label="O 21:29, Alex"><div><div role="img" tabindex="-1" aria-label="Animated banana" style="background-image: url(blob:https://example.test/banana);"></div></div></div>`,
+		// A recognized sticker beside unrecognized bare media.
+		`<div data-scope="messages_table" data-message-id="s1" aria-roledescription="wiadomość" aria-label="O 21:29, Alex"><div>${sticker}</div></div><div data-scope="messages_table"><span dir="auto"><video></video></span></div>`,
+		// A quoted sticker stays out of message attachments and fails closed.
+		`<div data-scope="messages_table" data-message-id="q1" aria-roledescription="wiadomość" aria-label="O 21:31, Alex: Thanks"><div role="button" aria-label="Przejdź do wiadomości, na którą odpowiadasz"><div>${sticker}</div></div><span><div><div dir="auto">Thanks</div></div></span></div>`,
+	]) {
+		setMessages(scope);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	dom.window.close();
+});

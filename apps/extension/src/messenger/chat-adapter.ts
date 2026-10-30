@@ -91,6 +91,7 @@ interface RenderedMessage {
 	boundary: Element | null;
 	images: HTMLElement[];
 	videos: HTMLElement[];
+	stickers: HTMLElement[];
 	unsent: boolean;
 	standaloneLike?: boolean;
 }
@@ -193,6 +194,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		boundary: messageBoundary(element),
 		images: [],
 		videos: [],
+		stickers: [],
 		unsent: unsentPlaceholder.test(normalizedText(element.textContent)),
 	}));
 
@@ -235,7 +237,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 				? messages.find((message) => message.boundary === boundary && !textElements.includes(message.element))
 				: undefined;
 		if (imageMessage) imageMessage.images.push(image);
-		else messages.push({ element: image, boundary, images: [image], videos: [], unsent: false });
+		else messages.push({ element: image, boundary, images: [image], videos: [], stickers: [], unsent: false });
 	}
 	// An uploaded clip renders as a real <video> inside an expand button with
 	// Video player UI. Neither data-message-type nor data-attachment-type was
@@ -255,7 +257,27 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 				? messages.find((message) => message.boundary === boundary && !textElements.includes(message.element))
 				: undefined;
 		if (videoMessage) videoMessage.videos.push(viewer);
-		else messages.push({ element: viewer, boundary, images: [], videos: [viewer], unsent: false });
+		else messages.push({ element: viewer, boundary, images: [], videos: [viewer], stickers: [], unsent: false });
+	}
+	// A built-in sticker is a bare div with role="img", a label ending in the
+	// standalone word "sticker", and a CSS background image. No attachment
+	// metadata was observed. Keep the shape narrow: unknown, quoted, toolbar,
+	// or hidden graphics stay unsupported, and dimensions alone never qualify.
+	for (const sticker of collectStickerViewers(main)) {
+		const boundary = messageBoundary(sticker);
+		const textMatches = messages.filter(
+			(message) => message.boundary === boundary && textElements.includes(message.element),
+		);
+		if (boundary && textMatches.length === 1) {
+			textMatches[0]!.stickers.push(sticker);
+			continue;
+		}
+		const stickerMessage =
+			boundary && textMatches.length === 0
+				? messages.find((message) => message.boundary === boundary && !textElements.includes(message.element))
+				: undefined;
+		if (stickerMessage) stickerMessage.stickers.push(sticker);
+		else messages.push({ element: sticker, boundary, images: [], videos: [], stickers: [sticker], unsent: false });
 	}
 	// The placeholder may be plain text outside a directional text element.
 	for (const element of main.querySelectorAll<HTMLElement>(
@@ -274,7 +296,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 			.map((node) => node.nodeValue)
 			.join("");
 		if (!unsentPlaceholder.test(normalizedText(ownText)) || !isVisible(element)) continue;
-		messages.push({ element, boundary: messageBoundary(element), images: [], videos: [], unsent: true });
+		messages.push({ element, boundary: messageBoundary(element), images: [], videos: [], stickers: [], unsent: true });
 	}
 	// Messenger renders its large Like as an accessible SVG rather than text.
 	// Require the enclosing message label to identify the same emoji, and do not
@@ -293,7 +315,15 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		)
 			continue;
 		if (messages.some((message) => message.boundary === boundary)) throw new ConversationUnavailableError("unsupported");
-		messages.push({ element: like, boundary, images: [], videos: [], unsent: false, standaloneLike: true });
+		messages.push({
+			element: like,
+			boundary,
+			images: [],
+			videos: [],
+			stickers: [],
+			unsent: false,
+			standaloneLike: true,
+		});
 	}
 	const ordered = messages.sort((a, b) => {
 		if (a.element === b.element) return 0;
@@ -464,10 +494,11 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 	for (const scope of scopes) {
 		// A text caption does not make an adjacent voice, video, sticker, or file
 		// readable by this text-only connector. Recognized video viewers carry
-		// their player UI with them, so exempt that subtree.
-		const videoViewers = rendered.flatMap(({ videos }) => videos);
-		const inVideoViewer = (element: Element) =>
-			videoViewers.some((viewer) => viewer === element || viewer.contains(element));
+		// their player UI with them, so exempt that subtree, as are recognized
+		// sticker graphics.
+		const recognizedMedia = rendered.flatMap(({ videos, stickers }) => [...videos, ...stickers]);
+		const inRecognizedMedia = (element: Element) =>
+			recognizedMedia.some((viewer) => viewer === element || viewer.contains(element));
 		const media = [
 			scope,
 			...scope.querySelectorAll<HTMLElement>(
@@ -476,7 +507,7 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 		].filter((element) => isVisible(element) && !element.closest('[role="toolbar"]'));
 		if (
 			media.some((element) => {
-				if (inVideoViewer(element)) return false;
+				if (inRecognizedMedia(element)) return false;
 				if (element.matches("video, audio, object, embed, iframe, a[download]")) return true;
 				const preview = rendered
 					.flatMap(({ images }) => images)
@@ -576,6 +607,30 @@ function collectVideoViewers(main: HTMLElement): HTMLElement[] {
 			viewers.push(viewer);
 	}
 	return viewers;
+}
+
+function collectStickerViewers(main: HTMLElement): HTMLElement[] {
+	const stickers: HTMLElement[] = [];
+	for (const graphic of main.querySelectorAll<HTMLElement>('[data-scope="messages_table"] div[role="img"]')) {
+		if (!isVisible(graphic) || graphic.closest('[role="toolbar"], [aria-hidden="true"]')) continue;
+		if (graphic.closest('button, [role="button"], [contenteditable="true"], h1, h2, h3, h4, h5, h6, [role="heading"]'))
+			continue;
+		const scope = graphic.closest('[data-scope="messages_table"]');
+		if (!scope || isGroupIntro(scope) || isTypingStatus(scope)) continue;
+		if (isMessageDecoration(scope as HTMLElement)) continue;
+		const boundary = messageBoundary(graphic);
+		if (!boundary?.matches('[data-scope="messages_table"][data-message-id]')) continue;
+		if (!/^(?:message|wiadomość)$/i.test(boundary.getAttribute("aria-roledescription") ?? "")) continue;
+		if (findReplyButton(boundary)?.contains(graphic)) continue;
+		// The graphic carries no message identity of its own. Only the
+		// observed narrow shape qualifies: a nonempty label ending in the
+		// standalone word "sticker" plus a CSS background image.
+		const label = (graphic.getAttribute("aria-label") ?? "").trim();
+		if (!/(?:^|\s)sticker\.?\s*$/i.test(label)) continue;
+		if (!/background-image\s*:/i.test(graphic.getAttribute("style") ?? "")) continue;
+		if (!stickers.some((existing) => existing === graphic || existing.contains(graphic))) stickers.push(graphic);
+	}
+	return stickers;
 }
 
 function messageId(element: Element): string {
@@ -721,6 +776,12 @@ function videoAttachment(): { type: "video"; url: null; description: null } {
 	return { type: "video", url: null, description: null };
 }
 
+function stickerAttachment(): { type: "sticker"; url: null; description: null } {
+	// The CSS background URL is transient and may be sensitive. The model
+	// only learns that an uninterpreted sticker is present.
+	return { type: "sticker", url: null, description: null };
+}
+
 function imageAttachment(image: HTMLImageElement | null): { type: "image"; url: string | null; description: null } {
 	const sources = image ? [image.currentSrc, image.getAttribute("src")] : [];
 	for (const source of sources) {
@@ -803,14 +864,17 @@ function readDirection(boundary: Element): ConversationMessage["direction"] {
 
 function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messages"] {
 	const boundaries = rendered.map((message) => message.boundary);
-	const texts = rendered.map(({ element, images, videos, unsent, standaloneLike }) =>
-		unsent || images.some((image) => image === element) || videos.some((video) => video === element)
+	const texts = rendered.map(({ element, images, videos, stickers, unsent, standaloneLike }) =>
+		unsent ||
+		images.some((image) => image === element) ||
+		videos.some((video) => video === element) ||
+		stickers.some((sticker) => sticker === element)
 			? ""
 			: standaloneLike
 				? "👍"
 				: readInlineText(element),
 	);
-	return rendered.map(({ element, boundary, images, videos, unsent }, index) => {
+	return rendered.map(({ element, boundary, images, videos, stickers, unsent }, index) => {
 		// A shared boundary cannot safely assign metadata to one message.
 		const unique = boundary && boundaries.indexOf(boundary) === boundaries.lastIndexOf(boundary);
 		// A fresh bubble can share its container with a rendered delivery status.
@@ -829,6 +893,7 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 			attachments: [
 				...images.map((image) => imageAttachment(image.querySelector<HTMLImageElement>("img"))),
 				...videos.map(() => videoAttachment()),
+				...stickers.map(() => stickerAttachment()),
 			],
 			reactions: unique ? readReactions(boundary) : [],
 			unsent,
@@ -839,8 +904,10 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 // Encrypted photo buttons have no viewer URL, and data/blob sources are not
 // uploaded as attachments. They must still invalidate a reply when replaced.
 // Video blobs are likewise local-only, but a replaced clip must invalidate.
+// A sticker's CSS URL can rotate across reloads and may be sensitive, so the
+// stable graphic label feeds the revision instead. It is hashed, never sent.
 function imageFingerprint(rendered: RenderedMessage[]): string[][] {
-	return rendered.map(({ images, videos, boundary }) => {
+	return rendered.map(({ images, videos, stickers, boundary }) => {
 		const reply = boundary && findReplyButton(boundary);
 		return [
 			...images.flatMap((viewer) => {
@@ -851,6 +918,7 @@ function imageFingerprint(rendered: RenderedMessage[]): string[][] {
 				const video = viewer.matches("video") ? viewer : viewer.querySelector<HTMLVideoElement>("video");
 				return [video?.currentSrc || video?.getAttribute("src") || ""];
 			}),
+			...stickers.map((sticker) => sticker.getAttribute("aria-label") ?? ""),
 			...(reply ? getQuotedImages(reply).map((image) => image.getAttribute("src") ?? "") : []),
 		];
 	});
