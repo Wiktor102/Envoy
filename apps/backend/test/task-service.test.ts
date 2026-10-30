@@ -47,6 +47,45 @@ async function resolveReply(agent: ControlledAgent, index = 0, text = "Tuesday w
 	await Promise.resolve();
 }
 
+test("Dev mode prefixes the pending preview and send command", async () => {
+	const { agent, service, advance } = setup();
+	service.start("owner", "Arrange a meeting", snapshot(), true);
+	await resolveReply(agent);
+	assert.equal(service.sync("owner", snapshot()).task?.pendingReply?.text, "> Tuesday works.");
+	advance(10_000);
+	assert.equal(service.sync("owner", snapshot()).command?.text, "> Tuesday works.");
+});
+
+test("only the owner can change Dev mode for future generated replies", async () => {
+	const { agent, service } = setup();
+	service.start("owner", "Arrange a meeting", snapshot(), true);
+	service.sync("other", snapshot(), false);
+	await resolveReply(agent);
+	assert.equal(service.sync("owner", snapshot()).task?.pendingReply?.text, "> Tuesday works.");
+	// Switching off leaves a pending reply intact, then affects the next generation.
+	assert.equal(service.sync("owner", snapshot(), false).task?.pendingReply?.text, "> Tuesday works.");
+	service.sync("owner", snapshot("r2", "Thursday instead?"), false);
+	await resolveReply(agent, 1, "Thursday works.");
+	assert.equal(service.sync("owner", snapshot("r2", "Thursday instead?")).task?.pendingReply?.text, "Thursday works.");
+	service.sync("owner", snapshot("r3", "Friday instead?"), true);
+	await resolveReply(agent, 2, "Friday works.");
+	assert.equal(service.sync("owner", snapshot("r3", "Friday instead?")).task?.pendingReply?.text, "> Friday works.");
+});
+
+test("the Dev mode prefix counts toward the reply length limit", async () => {
+	for (const length of [3998, 3999]) {
+		const { agent, service } = setup();
+		service.start("owner", "Arrange a meeting", snapshot(), true);
+		await resolveReply(agent, 0, "a".repeat(length));
+		const { task } = service.sync("owner", snapshot());
+		if (length === 3998) assert.equal(task?.pendingReply?.text.length, 4000);
+		else {
+			assert.equal(task?.status, "needs_user");
+			assert.equal(task?.pendingReply, null);
+		}
+	}
+});
+
 test("changed messages invalidate old generation and late results", async () => {
 	const { agent, service, advance } = setup();
 	const start = service.start("owner", "Arrange a meeting", snapshot());

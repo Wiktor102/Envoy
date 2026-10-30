@@ -46,6 +46,7 @@ type Options = {
 export class TaskService {
 	private task: TaskState | null = null;
 	private owner: string | null = null;
+	private developerMode = false;
 	private connector: BrowserConnector;
 	private leaseUntil = 0;
 	private leaseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -78,7 +79,7 @@ export class TaskService {
 		this.connector = this.newConnector();
 	}
 
-	start(connectorId: string, goal: string, snapshot: ConversationSnapshot): TaskState {
+	start(connectorId: string, goal: string, snapshot: ConversationSnapshot, developerMode = false): TaskState {
 		this.expireLease();
 		if (this.task && this.task.status !== "completed" && this.task.status !== "taken_over") {
 			throw new Error("A task is already active. Take over the existing task first.");
@@ -105,6 +106,7 @@ export class TaskService {
 		this.inFlight = null;
 		this.resumeWhenReadable = false;
 		this.owner = connectorId;
+		this.developerMode = developerMode;
 		this.task = {
 			id: randomUUID(),
 			chatId: snapshot.chatId,
@@ -284,7 +286,7 @@ export class TaskService {
 		return this.state()!;
 	}
 
-	sync(connectorId: string, snapshot: ConversationSnapshot | null): ConnectorSyncResult {
+	sync(connectorId: string, snapshot: ConversationSnapshot | null, developerMode?: boolean): ConnectorSyncResult {
 		this.expireLease();
 		if (!this.task) return { task: null, isOwner: false, command: null };
 		if (connectorId !== this.owner) {
@@ -323,6 +325,7 @@ export class TaskService {
 			return { task: this.state(), isOwner: true, command: null };
 		}
 		this.touch();
+		if (developerMode !== undefined) this.developerMode = developerMode;
 		const copy = structuredClone(snapshot);
 		if (previous && previous.revision === copy.revision && semanticMessages(previous) !== semanticMessages(copy)) {
 			this.pauseForDisconnect("The conversation could not be verified. Reopen it and resume.");
@@ -743,6 +746,7 @@ export class TaskService {
 				let text: string;
 				try {
 					text = checkedReply(decision.text);
+					if (this.developerMode) text = checkedReply(`> ${text}`);
 				} catch {
 					task.status = "needs_user";
 					task.detail = "The model returned an invalid reply. Check the conversation.";

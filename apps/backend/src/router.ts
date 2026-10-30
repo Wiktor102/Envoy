@@ -95,9 +95,19 @@ const actions: readonly TaskControlAction[] = [
 ];
 const results: readonly SendResult[] = ["sent", "rejected", "uncertain"];
 
+function optionalBoolean(value: unknown): boolean | undefined {
+	if (value !== undefined && typeof value !== "boolean") return invalid();
+	return value;
+}
+
 function startInput(value: unknown) {
 	const item = object(value);
-	return { connectorId: string(item.connectorId), goal: string(item.goal, 4000), snapshot: snapshot(item.snapshot) };
+	return {
+		connectorId: string(item.connectorId),
+		goal: string(item.goal, 4000),
+		snapshot: snapshot(item.snapshot),
+		developerMode: optionalBoolean(item.developerMode),
+	};
 }
 
 function controlInput(value: unknown): { connectorId: string; taskId: string; action: TaskControlAction; text?: string } {
@@ -119,7 +129,11 @@ function attachInput(value: unknown) {
 
 function syncInput(value: unknown) {
 	const item = object(value);
-	return { connectorId: string(item.connectorId), snapshot: item.snapshot === null ? null : snapshot(item.snapshot) };
+	return {
+		connectorId: string(item.connectorId),
+		snapshot: item.snapshot === null ? null : snapshot(item.snapshot),
+		developerMode: optionalBoolean(item.developerMode),
+	};
 }
 
 function authorizeInput(value: unknown) {
@@ -152,7 +166,7 @@ export const appRouter = t.router({
 	task: t.router({
 		start: t.procedure
 			.input(startInput)
-			.mutation(({ input }) => service.start(input.connectorId, input.goal, input.snapshot)),
+			.mutation(({ input }) => service.start(input.connectorId, input.goal, input.snapshot, input.developerMode)),
 		attach: t.procedure
 			.input(attachInput)
 			.mutation(({ input }) => service.attach(input.connectorId, input.taskId, input.snapshot)),
@@ -162,7 +176,9 @@ export const appRouter = t.router({
 			.mutation(({ input }) => service.control(input.connectorId, input.taskId, input.action, input.text)),
 	}),
 	connector: t.router({
-		sync: t.procedure.input(syncInput).mutation(({ input }) => service.sync(input.connectorId, input.snapshot)),
+		sync: t.procedure
+			.input(syncInput)
+			.mutation(({ input }) => service.sync(input.connectorId, input.snapshot, input.developerMode)),
 		authorize: t.procedure
 			.input(authorizeInput)
 			.mutation(({ input }) => service.authorize(input.connectorId, input.commandId, input.chatId, input.revision)),

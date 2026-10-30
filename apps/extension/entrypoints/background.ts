@@ -60,11 +60,18 @@ export default defineBackground(() => {
 			switch (request.type) {
 				case "envoy:health":
 					return (await backend.health.query(undefined, options)).status === "ok";
-				case "envoy:start":
+				case "envoy:start": {
+					const { envoyDeveloperMode } = await chrome.storage.local.get("envoyDeveloperMode");
 					return backend.task.start.mutate(
-						{ connectorId, goal: request.goal, snapshot: request.snapshot },
+						{
+							connectorId,
+							goal: request.goal,
+							snapshot: request.snapshot,
+							developerMode: envoyDeveloperMode === true,
+						},
 						options,
 					);
+				}
 				case "envoy:attach":
 					return backend.task.attach.mutate(
 						{ connectorId, taskId: request.taskId, snapshot: request.snapshot },
@@ -82,8 +89,13 @@ export default defineBackground(() => {
 						},
 						options,
 					);
-				case "envoy:sync":
-					return backend.connector.sync.mutate({ connectorId, snapshot: request.snapshot }, options);
+				case "envoy:sync": {
+					const { envoyDeveloperMode } = await chrome.storage.local.get("envoyDeveloperMode");
+					return backend.connector.sync.mutate(
+						{ connectorId, snapshot: request.snapshot, developerMode: envoyDeveloperMode === true },
+						options,
+					);
+				}
 				case "envoy:authorize":
 					return backend.connector.authorize.mutate(
 						{ connectorId, commandId: request.commandId, chatId: request.chatId, revision: request.revision },

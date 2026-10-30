@@ -37,7 +37,7 @@ In `chrome://extensions`, enable Developer mode and load `apps/extension/.output
 
 Only the messages rendered by Messenger are visible to Envoy. It cannot infer missing history. It stops if the latest message has an unknown sender or unreadable content, or if it cannot establish the latest messages or an empty composer. Earlier messages with unknown senders or recognized attachments are labeled for the model; it cannot inspect the attachments and should ask when missing context matters. Entirely unrecognized media still pauses the reader. Message attribution and send controls depend on Messenger's rendered markup and may need adjustment for a particular account, language, or UI version. A visible outgoing bubble is evidence that Messenger displayed the send, not proof of final delivery.
 
-Use **Dev mode** beside the sidebar tabs to show message history, chat and task IDs, and backend connection controls. It is off by default. Envoy remembers this setting in the extension on this browser.
+Use **Dev mode** beside the sidebar tabs to show message history, chat and task IDs, and backend connection controls. Generated replies begin with `> ` while this switch is on, including the pending preview and the text sent to Messenger. Changes to the switch apply to future replies after the next connector sync; existing pending replies and manual edits keep their text. It is off by default. Envoy remembers this setting in the extension on this browser.
 
 ## Privacy and storage
 
