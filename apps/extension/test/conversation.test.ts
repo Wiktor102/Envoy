@@ -1482,3 +1482,60 @@ test("does not hide message content in the typing bubble visual subtree", async 
 	);
 	dom.window.close();
 });
+
+test("reads a blockquote reply with its quote markers, attribution, and delivery footer", async () => {
+	const dom = setup();
+	// Observed rendering: a "> "-prefixed message becomes a blockquote whose
+	// visible text omits the markers, while the per-message label keeps them.
+	setMessages(`
+		<div role="article"><div data-scope="messages_table" data-message-id="1" aria-roledescription="message" aria-label="At 14:48, Alex: Hello"><span dir="auto">Hello</span></div></div>
+		<div role="article"><div data-scope="messages_table" data-message-id="2" aria-roledescription="message" aria-label="At 14:49, You: > Hi there">
+			<div><span dir="auto"><div dir="auto"><blockquote>Hi there</blockquote></div></span></div>
+			<div><span role="presentation"><span dir="auto"><span>Sent 1 minute ago</span></span></span></div>
+		</div></div>`);
+	const snapshot = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		snapshot.messages.map(({ text, direction }) => [text, direction]),
+		[
+			["Hello", "incoming"],
+			["> Hi there", "outgoing"],
+		],
+	);
+	// The delivery footer is still a footer, and its elapsed wording does not
+	// affect the revision.
+	document.querySelector('span[role="presentation"] span span')!.textContent = "Sent 2 minutes ago";
+	assert.equal((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
+	// Quote text changes the revision like any other message text.
+	document.querySelector("blockquote")!.textContent = "Changed";
+	document.querySelector('[data-message-id="2"]')!.setAttribute("aria-label", "At 14:49, You: > Changed");
+	const changed = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		changed.messages.map(({ text, direction }) => [text, direction]),
+		[
+			["Hello", "incoming"],
+			["> Changed", "outgoing"],
+		],
+	);
+	assert.notEqual(changed.revision, snapshot.revision);
+	dom.window.close();
+});
+
+test("restores quote markers for nested, multi-line, and mixed blockquotes", async () => {
+	const dom = setup();
+	for (const [content, expected] of [
+		["<blockquote>Hello</blockquote>", "> Hello"],
+		["<blockquote>Hello<br>again</blockquote>", "> Hello\n> again"],
+		["<blockquote>Hello<br><br>again</blockquote>", "> Hello\n>\n> again"],
+		["Before<blockquote>Quoted</blockquote>After", "Before\n> Quoted\nAfter"],
+		["<blockquote>outer<blockquote>inner</blockquote></blockquote>", "> outer\n> > inner"],
+		["<blockquote><div>one</div><div>two</div></blockquote>", "> one\n> two"],
+	] as const) {
+		setMessages(
+			`<div data-scope="messages_table"><div role="row" data-message-direction="incoming"><span dir="auto">${content}</span></div></div>`,
+		);
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.equal(snapshot.messages[0]!.text, expected, content);
+		assert.equal(snapshot.messages[0]!.direction, "incoming", content);
+	}
+	dom.window.close();
+});

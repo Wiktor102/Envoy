@@ -615,6 +615,23 @@ function readInlineText(element: Element): string {
 		if (child.matches("svg, canvas, video, audio, object, embed, iframe")) {
 			throw new ConversationUnavailableError("unsupported");
 		}
+		if (child.matches("blockquote")) {
+			// Messenger renders a line starting with "> " as a blockquote and
+			// omits the markers from the visible text, while the per-message
+			// accessibility label keeps the original text. Restore the
+			// markers so the text matches the sent message; a nested quote
+			// gains one marker level per ancestor from the recursion.
+			blockBreakPending = true;
+			const quoted = readInlineText(child);
+			appendText(
+				quoted
+					.split("\n")
+					.map((line) => (line ? `> ${line}` : ">"))
+					.join("\n"),
+			);
+			blockBreakPending = true;
+			return;
+		}
 		const display = window.getComputedStyle(child).display;
 		// Atomic inline boxes keep their descendants' block boundaries local.
 		// Preserve interior breaks without adding breaks around the box.
