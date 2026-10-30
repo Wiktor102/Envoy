@@ -18,7 +18,13 @@ export interface VideoAttachment {
 	description: null;
 }
 
-export type MessageAttachment = ImageAttachment | VideoAttachment;
+export interface StickerAttachment {
+	type: "sticker";
+	url: null;
+	description: null;
+}
+
+export type MessageAttachment = ImageAttachment | VideoAttachment | StickerAttachment;
 
 export interface ConversationMessage {
 	// Temporary identifier for a rendered node; it can change on reload or remount.
