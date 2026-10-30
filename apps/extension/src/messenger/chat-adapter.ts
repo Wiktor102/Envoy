@@ -90,6 +90,7 @@ interface RenderedMessage {
 	element: HTMLElement;
 	boundary: Element | null;
 	images: HTMLElement[];
+	videos: HTMLElement[];
 	unsent: boolean;
 	standaloneLike?: boolean;
 }
@@ -191,6 +192,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		element,
 		boundary: messageBoundary(element),
 		images: [],
+		videos: [],
 		unsent: unsentPlaceholder.test(normalizedText(element.textContent)),
 	}));
 
@@ -233,7 +235,27 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 				? messages.find((message) => message.boundary === boundary && !textElements.includes(message.element))
 				: undefined;
 		if (imageMessage) imageMessage.images.push(image);
-		else messages.push({ element: image, boundary, images: [image], unsent: false });
+		else messages.push({ element: image, boundary, images: [image], videos: [], unsent: false });
+	}
+	// An uploaded clip renders as a real <video> inside an expand button with
+	// Video player UI. Neither data-message-type nor data-attachment-type was
+	// observed. Require a video signal beyond a bare tag so unknown media
+	// stays unsupported: playsinline, a src, or player UI in the viewer.
+	for (const viewer of collectVideoViewers(main)) {
+		const boundary = messageBoundary(viewer);
+		const textMatches = messages.filter(
+			(message) => message.boundary === boundary && textElements.includes(message.element),
+		);
+		if (boundary && textMatches.length === 1) {
+			textMatches[0]!.videos.push(viewer);
+			continue;
+		}
+		const videoMessage =
+			boundary && textMatches.length === 0
+				? messages.find((message) => message.boundary === boundary && !textElements.includes(message.element))
+				: undefined;
+		if (videoMessage) videoMessage.videos.push(viewer);
+		else messages.push({ element: viewer, boundary, images: [], videos: [viewer], unsent: false });
 	}
 	// The placeholder may be plain text outside a directional text element.
 	for (const element of main.querySelectorAll<HTMLElement>(
@@ -252,7 +274,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 			.map((node) => node.nodeValue)
 			.join("");
 		if (!unsentPlaceholder.test(normalizedText(ownText)) || !isVisible(element)) continue;
-		messages.push({ element, boundary: messageBoundary(element), images: [], unsent: true });
+		messages.push({ element, boundary: messageBoundary(element), images: [], videos: [], unsent: true });
 	}
 	// Messenger renders its large Like as an accessible SVG rather than text.
 	// Require the enclosing message label to identify the same emoji, and do not
@@ -271,7 +293,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		)
 			continue;
 		if (messages.some((message) => message.boundary === boundary)) throw new ConversationUnavailableError("unsupported");
-		messages.push({ element: like, boundary, images: [], unsent: false, standaloneLike: true });
+		messages.push({ element: like, boundary, images: [], videos: [], unsent: false, standaloneLike: true });
 	}
 	const ordered = messages.sort((a, b) => {
 		if (a.element === b.element) return 0;
@@ -441,7 +463,11 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 	if (leafRows.some((row) => !rendered.some(({ element }) => row.contains(element)))) return true;
 	for (const scope of scopes) {
 		// A text caption does not make an adjacent voice, video, sticker, or file
-		// readable by this text-only connector.
+		// readable by this text-only connector. Recognized video viewers carry
+		// their player UI with them, so exempt that subtree.
+		const videoViewers = rendered.flatMap(({ videos }) => videos);
+		const inVideoViewer = (element: Element) =>
+			videoViewers.some((viewer) => viewer === element || viewer.contains(element));
 		const media = [
 			scope,
 			...scope.querySelectorAll<HTMLElement>(
@@ -450,6 +476,7 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 		].filter((element) => isVisible(element) && !element.closest('[role="toolbar"]'));
 		if (
 			media.some((element) => {
+				if (inVideoViewer(element)) return false;
 				if (element.matches("video, audio, object, embed, iframe, a[download]")) return true;
 				const preview = rendered
 					.flatMap(({ images }) => images)
@@ -522,6 +549,33 @@ function isMessengerPhotoLink(anchor: HTMLAnchorElement): boolean {
 	} catch {
 		return false;
 	}
+}
+
+function collectVideoViewers(main: HTMLElement): HTMLElement[] {
+	const viewers: HTMLElement[] = [];
+	for (const video of main.querySelectorAll<HTMLVideoElement>('[data-scope="messages_table"] video')) {
+		const element = video as HTMLElement;
+		if (!isVisible(element) || element.closest('[role="toolbar"], [aria-hidden="true"]')) continue;
+		const scope = element.closest('[data-scope="messages_table"]');
+		if (!scope || isGroupIntro(scope) || isTypingStatus(scope)) continue;
+		if (isMessageDecoration(scope as HTMLElement)) continue;
+		const viewer = (video.closest('[role="button"], a[href]') as HTMLElement | null) ?? element;
+		if (!viewer.isConnected || !isVisible(viewer) || viewer.closest('[role="toolbar"], [aria-hidden="true"]')) continue;
+		const boundary = messageBoundary(viewer);
+		if (!boundary?.matches('[data-scope="messages_table"][data-message-id]')) continue;
+		if (findReplyButton(boundary)?.contains(viewer)) continue;
+		// A bare <video> tag alone stays unsupported. Observed clips carry at
+		// least one player signal: playsinline, a src, or player UI.
+		const src = video.getAttribute("src") ?? video.currentSrc ?? "";
+		const hasSignal =
+			video.hasAttribute("playsinline") ||
+			src.trim() !== "" ||
+			viewer.querySelector("[data-instancekey], [role='group'], [role='button']") !== null;
+		if (!hasSignal) continue;
+		if (!viewers.some((existing) => existing === viewer || existing.contains(viewer) || viewer.contains(existing)))
+			viewers.push(viewer);
+	}
+	return viewers;
 }
 
 function messageId(element: Element): string {
@@ -661,6 +715,12 @@ function getQuotedImages(button: Element): HTMLImageElement[] {
 
 // A viewer link identifies the attachment; the image element supplies the
 // direct URL when one is rendered. No network request is needed to read it.
+function videoAttachment(): { type: "video"; url: null; description: null } {
+	// Blob sources are transient and never leave the extension. The model
+	// only learns that an unreadable clip is present.
+	return { type: "video", url: null, description: null };
+}
+
 function imageAttachment(image: HTMLImageElement | null): { type: "image"; url: string | null; description: null } {
 	const sources = image ? [image.currentSrc, image.getAttribute("src")] : [];
 	for (const source of sources) {
@@ -743,10 +803,14 @@ function readDirection(boundary: Element): ConversationMessage["direction"] {
 
 function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messages"] {
 	const boundaries = rendered.map((message) => message.boundary);
-	const texts = rendered.map(({ element, images, unsent, standaloneLike }) =>
-		unsent || images.some((image) => image === element) ? "" : standaloneLike ? "👍" : readInlineText(element),
+	const texts = rendered.map(({ element, images, videos, unsent, standaloneLike }) =>
+		unsent || images.some((image) => image === element) || videos.some((video) => video === element)
+			? ""
+			: standaloneLike
+				? "👍"
+				: readInlineText(element),
 	);
-	return rendered.map(({ element, boundary, images, unsent }, index) => {
+	return rendered.map(({ element, boundary, images, videos, unsent }, index) => {
 		// A shared boundary cannot safely assign metadata to one message.
 		const unique = boundary && boundaries.indexOf(boundary) === boundaries.lastIndexOf(boundary);
 		// A fresh bubble can share its container with a rendered delivery status.
@@ -762,7 +826,10 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 			text: texts[index]!,
 			direction: boundary && (unique || matchesLabel) ? readDirection(boundary) : "unknown",
 			replyTo: unique ? readReply(boundary) : null,
-			attachments: images.map((image) => imageAttachment(image.querySelector<HTMLImageElement>("img"))),
+			attachments: [
+				...images.map((image) => imageAttachment(image.querySelector<HTMLImageElement>("img"))),
+				...videos.map(() => videoAttachment()),
+			],
 			reactions: unique ? readReactions(boundary) : [],
 			unsent,
 		};
@@ -771,13 +838,18 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 
 // Encrypted photo buttons have no viewer URL, and data/blob sources are not
 // uploaded as attachments. They must still invalidate a reply when replaced.
+// Video blobs are likewise local-only, but a replaced clip must invalidate.
 function imageFingerprint(rendered: RenderedMessage[]): string[][] {
-	return rendered.map(({ images, boundary }) => {
+	return rendered.map(({ images, videos, boundary }) => {
 		const reply = boundary && findReplyButton(boundary);
 		return [
 			...images.flatMap((viewer) => {
 				const image = viewer.querySelector<HTMLImageElement>("img");
 				return [viewer.getAttribute("href") ?? "", image?.currentSrc || image?.getAttribute("src") || ""];
+			}),
+			...videos.flatMap((viewer) => {
+				const video = viewer.matches("video") ? viewer : viewer.querySelector<HTMLVideoElement>("video");
+				return [video?.currentSrc || video?.getAttribute("src") || ""];
 			}),
 			...(reply ? getQuotedImages(reply).map((image) => image.getAttribute("src") ?? "") : []),
 		];

@@ -1539,3 +1539,28 @@ test("restores quote markers for nested, multi-line, and mixed blockquotes", asy
 	}
 	dom.window.close();
 });
+
+test("reads a recognized video as unavailable media without blocking later text", async () => {
+	const dom = setup();
+	// Observed signed-in rendering (redacted): a standalone clip is a real
+	// <video> inside an expand button with Video player UI. A caption typed
+	// with the clip and a later follow-up each arrive as separate text scopes.
+	const videoMessage = `<div data-scope="messages_table" data-message-id="v1" aria-roledescription="wiadomość" aria-label="O 21:35, Wiktor testowy"><div role="presentation"><div aria-label="Rozwiń okno z filmem" role="button" tabindex="-1"><div><video playsinline src="blob:https://example.test/video"></video><div><div aria-label="Video player" role="group"><div aria-label="Odtwórz film" role="button" tabindex="-1"></div><div>0:02</div></div></div></div></div></div></div>`;
+	const followup = `<div data-scope="messages_table" data-message-id="t1" aria-roledescription="wiadomość" aria-label="O 21:36, Wiktor testowy: Video follow-up test"><span><div><div dir="auto">Video follow-up test</div></div></span></div>`;
+	setMessages(`${videoMessage}${followup}`);
+	const snapshot = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		snapshot.messages.map(({ text, direction, attachments }) => ({ text, direction, attachments })),
+		[
+			{ text: "", direction: "incoming", attachments: [{ type: "video", url: null, description: null }] },
+			{ text: "Video follow-up test", direction: "incoming", attachments: [] },
+		],
+	);
+	// A latest video stays readable but carries an attachment, so the task
+	// layer can pause or ask instead of treating it as text.
+	setMessages(videoMessage);
+	const latest = await messengerChatAdapter.readConversation();
+	assert.equal(latest.messages.length, 1);
+	assert.deepEqual(latest.messages[0]!.attachments, [{ type: "video", url: null, description: null }]);
+	dom.window.close();
+});
