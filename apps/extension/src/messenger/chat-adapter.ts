@@ -335,7 +335,9 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 					.flatMap(({ images }) => images)
 					.find((image) => isAnimatedPreview(image) && (image === element || image.contains(element)));
 				const metadata = [
-					element.getAttribute("aria-label"),
+					// A per-message label contains the sender and message body, not
+					// attachment metadata. Words such as "plik" can be ordinary text.
+					readLabeledMessage(element) ? null : element.getAttribute("aria-label"),
 					element.getAttribute("alt"),
 					element.getAttribute("data-message-type"),
 					element.getAttribute("data-attachment-type"),

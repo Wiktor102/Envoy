@@ -127,6 +127,27 @@ test("does not hide message metadata or unsupported content in an empty-looking 
 	dom.window.close();
 });
 
+test("does not classify message bodies in accessibility labels as attachment metadata", async () => {
+	const dom = setup();
+	for (const text of ["Po prostu zamknij plik", "A video call?", "Send a GIF", "A voice message", "sticker", "audio"]) {
+		setMessages(`<div role="article"><div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 19 października 2026 13:18, Ty: ${text}"><span dir="auto"><div dir="auto">${text}</div></span></div></div>
+			<div data-scope="messages_table"><div role="presentation"></div></div>`);
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(
+			snapshot.messages.map(({ text, direction }) => [text, direction]),
+			[[text, "outgoing"]],
+		);
+		const scope = document.querySelector("[data-message-id]")!;
+		// The per-message label doesn't override actual media metadata or controls.
+		scope.setAttribute("data-message-type", "voice");
+		await assert.rejects(messengerChatAdapter.readConversation(), ConversationUnavailableError);
+		scope.removeAttribute("data-message-type");
+		scope.insertAdjacentHTML("beforeend", '<div role="button" aria-label="Play voice message"></div>');
+		await assert.rejects(messengerChatAdapter.readConversation(), ConversationUnavailableError);
+	}
+	dom.window.close();
+});
+
 test("reads standalone Messenger Likes as messages with their sender and revision", async () => {
 	const dom = setup();
 	setMessages(`
