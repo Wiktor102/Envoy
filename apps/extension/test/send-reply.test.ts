@@ -89,6 +89,77 @@ test("sends once only after authorization and confirms an appended outgoing mess
 	dom.window.close();
 });
 
+test("confirms an acknowledged send when Messenger removes older rows from a full message window", async () => {
+	for (const acknowledgement of ["footer", "receipt"]) {
+		const { dom, editor, button } = setup();
+		for (let index = 1; index < 15; index++) appendMessage(`Earlier message ${index}`, "incoming");
+		const send = await command();
+		let clicks = 0;
+		button.addEventListener("click", () => {
+			clicks++;
+			editor.textContent = "";
+			document.querySelector('[data-scope="messages_table"] [role="row"]')!.remove();
+			const scope = document.createElement("div");
+			scope.setAttribute("data-scope", "messages_table");
+			scope.setAttribute(
+				"data-message-id",
+				acknowledgement === "footer" ? "7521931389265068106" : "100054118657081@msgr.7521931389265068106",
+			);
+			scope.setAttribute("aria-roledescription", "wiadomość");
+			scope.setAttribute("aria-label", "O 14:49, Ty: Hi there");
+			// Observed in Chrome: a nested directional bubble, followed by a
+			// direct footer. The footer can be replaced by a read-receipt avatar.
+			scope.innerHTML =
+				'<h4 dir="auto">Wysłano</h4><div><span dir="auto"><div dir="auto">Hi there</div></span></div>' +
+				(acknowledgement === "footer"
+					? '<div><span role="presentation"><span dir="auto">Wysłano</span></span></div>'
+					: '<div><span><img alt="Wyświetlona przez Alex"></span></div>');
+			document.querySelector("main")!.append(scope);
+		});
+		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent", acknowledgement);
+		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent", acknowledgement);
+		assert.equal(clicks, 1);
+		assert.equal((await messengerChatAdapter.readConversation()).messages.length, 15);
+		dom.window.close();
+	}
+});
+
+test("waits when a trimmed window has edits, reordered history, intervening messages, or no overlap", async () => {
+	for (const change of ["edit", "reorder", "incoming", "extra-outgoing", "no-overlap", "pending"]) {
+		const { dom, editor, button } = setup();
+		for (let index = 1; index < 4; index++) appendMessage(`Earlier message ${index}`, "incoming");
+		const scope = document.querySelector('[data-scope="messages_table"]')!;
+		const original = [...scope.children];
+		let outgoing: Element;
+		let intervening: Element | undefined;
+		button.addEventListener("click", () => {
+			editor.textContent = "";
+			original[0]!.remove();
+			if (change === "edit") original[1]!.querySelector('[dir="auto"]')!.textContent = "Edited history";
+			if (change === "reorder") scope.prepend(original[2]!);
+			if (change === "incoming" || change === "extra-outgoing") {
+				appendMessage("Another message", change === "incoming" ? "incoming" : "outgoing", "sent");
+				intervening = scope.lastElementChild!;
+			}
+			if (change === "no-overlap") scope.replaceChildren();
+			appendMessage("Hi there", "outgoing", change === "pending" ? "pending" : "sent");
+			outgoing = scope.lastElementChild!;
+		});
+		let settled = false;
+		const pending = messengerChatAdapter.sendReply(await command(), async () => true);
+		void pending.then(() => (settled = true));
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		assert.equal(settled, false, change);
+		// Restore a provable suffix without issuing another click.
+		original[1]!.querySelector('[dir="auto"]')!.textContent = "Earlier message 1";
+		intervening?.remove();
+		scope.replaceChildren(...original.slice(1), outgoing!);
+		outgoing!.setAttribute("data-message-status", "seen");
+		assert.equal(await pending, "sent", change);
+		dom.window.close();
+	}
+});
+
 test("prepares a send without relying on a zero-delay background timer", async () => {
 	const { dom, editor, button } = setup();
 	button.addEventListener("click", () => {

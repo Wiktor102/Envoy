@@ -799,10 +799,21 @@ function selectContents(editor: HTMLElement, collapse: boolean): boolean {
 
 function newlyAppendedOutgoing(before: ConversationSnapshot, after: ConversationSnapshot, text: string): boolean {
 	if (before.chatId !== after.chatId || before.revision === after.revision) return false;
-	if (after.messages.length !== before.messages.length + 1) return false;
-	if (JSON.stringify(contentOf(after.messages.slice(0, -1))) !== JSON.stringify(contentOf(before.messages))) return false;
+	// Messenger keeps a bounded rendered window. Appending a bubble can remove
+	// its oldest rows; the remaining history must still be an unchanged suffix,
+	// including the previous newest message. Never accept a wholly replaced view.
+	const retained = after.messages.slice(0, -1);
+	const removed = before.messages.length - retained.length;
+	if (removed < 0 || (removed > 0 && retained.length === 0)) return false;
+	if (JSON.stringify(contentOf(retained)) !== JSON.stringify(contentOf(before.messages.slice(removed)))) return false;
 	const last = after.messages.at(-1);
-	return Boolean(last && last.direction === "outgoing" && last.text === text && last.attachments.length === 0);
+	return Boolean(
+		last &&
+		last.direction === "outgoing" &&
+		last.text === text &&
+		last.attachments.length === 0 &&
+		!before.messages.some((message) => message.id === last.id),
+	);
 }
 
 function messengerMessageId(message: RenderedMessage | undefined): string {
