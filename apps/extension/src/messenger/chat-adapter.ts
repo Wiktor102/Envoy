@@ -855,7 +855,11 @@ function hasSentStatus(capture: ConversationCapture): boolean {
 	);
 }
 
-function confirmSend(before: ConversationSnapshot, text: string): Promise<SendResult> {
+function confirmSend(
+	before: ConversationSnapshot,
+	text: string,
+	previousMessageIds: ReadonlySet<string>,
+): Promise<SendResult> {
 	return new Promise((resolve) => {
 		let done = false;
 		let checking = false;
@@ -873,7 +877,14 @@ function confirmSend(before: ConversationSnapshot, text: string): Promise<SendRe
 			checking = true;
 			try {
 				const { capture, snapshot } = await readCapturedConversation();
-				if (!done && newlyAppendedOutgoing(before, snapshot, text) && hasSentStatus(capture)) finish("sent");
+				const id = messengerMessageId(capture.rendered.at(-1));
+				if (
+					!done &&
+					!previousMessageIds.has(id) &&
+					newlyAppendedOutgoing(before, snapshot, text) &&
+					hasSentStatus(capture)
+				)
+					finish("sent");
 			} catch {
 				// A changing or incomplete view is not evidence that Messenger sent the message.
 			} finally {
@@ -1025,6 +1036,9 @@ async function performSend(
 			return stopBeforeDispatch();
 		}
 		removeListener();
+		// Save values before the click: Messenger can remount bubbles or replace
+		// optimistic IDs while confirming. An old server ID is never a new send.
+		const previousMessageIds = new Set(capture.rendered.map(messengerMessageId).filter(Boolean));
 		// A thrown click handler does not prove the message was not dispatched.
 		try {
 			button.click();
@@ -1032,7 +1046,7 @@ async function performSend(
 			return "uncertain";
 		}
 		try {
-			return await confirmSend(before, command.text);
+			return await confirmSend(before, command.text, previousMessageIds);
 		} catch {
 			return "uncertain";
 		}

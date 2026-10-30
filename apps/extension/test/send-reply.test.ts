@@ -160,6 +160,38 @@ test("waits when a trimmed window has edits, reordered history, intervening mess
 	}
 });
 
+test("does not confirm an old repeated reply after trimming or remounting its server ID", async () => {
+	for (const remount of [false, true]) {
+		const { dom, editor, button } = setup();
+		const scope = document.querySelector('[data-scope="messages_table"]')!;
+		scope.replaceChildren();
+		for (let index = 0; index < 3; index++) {
+			appendMessage("Hi there", "outgoing", "seen");
+			if (remount) scope.lastElementChild!.setAttribute("data-message-id", `100054118657081@msgr.${index}`);
+		}
+		let clicks = 0;
+		button.addEventListener("click", () => {
+			clicks++;
+			editor.textContent = "";
+			scope.firstElementChild!.remove();
+			if (remount) scope.replaceChildren(...[...scope.children].map((row) => row.cloneNode(true)));
+		});
+		let settled = false;
+		const send = await command();
+		const pending = messengerChatAdapter.sendReply(send, async () => true);
+		void pending.then(() => (settled = true));
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		assert.equal(settled, false, String(remount));
+		scope.firstElementChild!.remove();
+		appendMessage("Hi there", "outgoing", "seen");
+		if (remount) scope.lastElementChild!.setAttribute("data-message-id", "100054118657081@msgr.3");
+		assert.equal(await pending, "sent");
+		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+		assert.equal(clicks, 1);
+		dom.window.close();
+	}
+});
+
 test("prepares a send without relying on a zero-delay background timer", async () => {
 	const { dom, editor, button } = setup();
 	button.addEventListener("click", () => {
