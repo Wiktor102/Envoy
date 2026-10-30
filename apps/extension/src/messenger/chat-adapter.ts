@@ -281,12 +281,20 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	return ordered;
 }
 
-// Messenger also gives date separators a messages_table scope. Only ignore a
-// container made entirely of hidden date metadata and presentation wrappers.
-function isDateSeparator(element: HTMLElement): boolean {
-	if (!element.querySelector('[data-scope="date_break"][aria-hidden="true"]')) return false;
-	if (element.matches("[data-message-id], [aria-roledescription]") || element.querySelector("[data-message-id]"))
-		return false;
+// Messenger gives date separators and a zero-height empty presentation wrapper
+// beside the newest article a messages_table scope. Neither is a message.
+function isMessageDecoration(element: HTMLElement): boolean {
+	const date = element.querySelector('[data-scope="date_break"][aria-hidden="true"]');
+	const empty =
+		element.matches('[data-scope="messages_table"]') &&
+		element.getBoundingClientRect().height === 0 &&
+		element.children.length === 1 &&
+		element.firstElementChild?.matches('div[role="presentation"]');
+	if (!date && !empty) return false;
+	const metadata =
+		"[data-message-id], [aria-roledescription], [data-message-direction], [data-message-type], [data-attachment-type]";
+	if (element.matches(metadata) || element.querySelector(metadata)) return false;
+	if (!date && (element.matches("[aria-label], [dir]") || element.querySelector("[aria-label], [dir]"))) return false;
 	function decoration(node: Node): boolean {
 		if (node.nodeType === 3) return !node.nodeValue?.trim();
 		if (node.nodeType !== 1) return true;
@@ -301,13 +309,13 @@ function isDateSeparator(element: HTMLElement): boolean {
 
 function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]): boolean {
 	const scopes = [...main.querySelectorAll<HTMLElement>('[data-scope="messages_table"]')].filter(
-		(scope) => isVisible(scope) && !isDateSeparator(scope) && !isGroupIntro(scope),
+		(scope) => isVisible(scope) && !isMessageDecoration(scope) && !isGroupIntro(scope),
 	);
 	if (scopes.length === 0) return true;
 	// A message row may be adjacent to, rather than inside, a recognized scope.
 	// With no stable thread DOM contract, an unmapped visible row is unsafe.
 	const allRows = [...main.querySelectorAll<HTMLElement>('[role="row"], [role="article"]')].filter(
-		(row) => isVisible(row) && !isDateSeparator(row) && !row.closest('button, [role="button"], [role="toolbar"]'),
+		(row) => isVisible(row) && !isMessageDecoration(row) && !row.closest('button, [role="button"], [role="toolbar"]'),
 	);
 	const leafRows = allRows.filter((row) => !allRows.some((other) => other !== row && row.contains(other)));
 	if (leafRows.some((row) => !rendered.some(({ element }) => row.contains(element)))) return true;

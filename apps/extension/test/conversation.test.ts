@@ -77,6 +77,56 @@ test("ignores Messenger date scopes before, between, and after messages", async 
 	dom.window.close();
 });
 
+test("ignores the zero-height empty message scope beside Messenger's newest article", async () => {
+	const dom = setup();
+	// Observed in signed-in Chrome: the final MWMessageRow contains an article
+	// and a sibling scope with one empty presentation div. It has a client rect
+	// even though its height is zero.
+	const article =
+		'<div role="article"><div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 14:34, Alex: Hello"><span dir="auto">Hello</span></div></div>';
+	const empty =
+		'<div data-scope="messages_table" data-release-focus-from="CLICK" tabindex="0"><div role="presentation"></div></div>';
+	setMessages(`<div role="none">${article}<div role="none">${empty}</div></div>`);
+	const before = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		before.messages.map(({ text, direction }) => [text, direction]),
+		[["Hello", "incoming"]],
+	);
+	document.querySelector("[data-message-id]")!.closest('[role="article"]')!.nextElementSibling!.remove();
+	assert.equal((await messengerChatAdapter.readConversation()).revision, before.revision);
+
+	// An empty scope alone is not a readable conversation.
+	setMessages(empty);
+	await assert.rejects(messengerChatAdapter.readConversation(), ConversationUnavailableError);
+	dom.window.close();
+});
+
+test("does not hide message metadata or unsupported content in an empty-looking scope", async () => {
+	const dom = setup();
+	for (const extra of [
+		'<div data-message-id="loading"></div>',
+		'<div aria-roledescription="wiadomość"></div>',
+		'<div data-message-type="voice"></div>',
+		'<div data-attachment-type="file"></div>',
+		'<div aria-label="Voice message"></div>',
+		'<span dir="auto"></span>',
+		"<video></video>",
+		'<div role="button"></div>',
+		"<span>Unreadable message</span>",
+	]) {
+		setMessages(`${fixture}<div data-scope="messages_table"><div role="presentation">${extra}</div></div>`);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	setMessages(`${fixture}<div data-scope="messages_table"><div role="presentation"></div></div>`);
+	const scope = document.querySelector<HTMLElement>('[data-scope="messages_table"]:last-child')!;
+	scope.getBoundingClientRect = () => ({ height: 20 }) as DOMRect;
+	await assert.rejects(messengerChatAdapter.readConversation(), ConversationUnavailableError);
+	dom.window.close();
+});
+
 test("reads standalone Messenger Likes as messages with their sender and revision", async () => {
 	const dom = setup();
 	setMessages(`
