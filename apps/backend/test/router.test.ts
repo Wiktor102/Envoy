@@ -47,3 +47,48 @@ test("task and connector procedures reject invalid or oversized inputs without l
 		});
 	}
 });
+
+test("connector sync accepts video attachments as unavailable media", async () => {
+	const videoSnapshot = {
+		...snapshot,
+		messages: [{ ...message, attachments: [{ type: "video", url: null, description: null }] }],
+	};
+	const result = await caller.connector.sync({ connectorId: "owner", snapshot: videoSnapshot });
+	assert.equal(result.task, null);
+	await assert.rejects(
+		caller.connector.sync({
+			connectorId: "owner",
+			snapshot: {
+				...snapshot,
+				messages: [
+					{ ...message, attachments: [{ type: "video", url: "https://example.test/v", description: null }] },
+				],
+			},
+		} as never),
+		(error: unknown) => (error as { code: string }).code === "BAD_REQUEST",
+	);
+});
+
+test("connector sync accepts sticker attachments as unavailable media", async () => {
+	const stickerSnapshot = {
+		...snapshot,
+		messages: [{ ...message, attachments: [{ type: "sticker", url: null, description: null }] }],
+	};
+	const result = await caller.connector.sync({ connectorId: "owner", snapshot: stickerSnapshot });
+	assert.equal(result.task, null);
+	await assert.rejects(
+		caller.connector.sync({
+			connectorId: "owner",
+			snapshot: {
+				...snapshot,
+				messages: [
+					{
+						...message,
+						attachments: [{ type: "sticker", url: "https://example.test/s", description: null }],
+					},
+				],
+			},
+		} as never),
+		(error: unknown) => (error as { code: string }).code === "BAD_REQUEST",
+	);
+});

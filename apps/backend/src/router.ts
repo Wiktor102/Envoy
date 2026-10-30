@@ -3,7 +3,7 @@ import type {
 	ConversationMessage,
 	ConversationSnapshot,
 	HealthResponse,
-	ImageAttachment,
+	MessageAttachment,
 	SendResult,
 	TaskControlAction,
 } from "@envoy/contracts";
@@ -38,8 +38,12 @@ function array(value: unknown, max: number): unknown[] {
 	return value;
 }
 
-function attachment(value: unknown): ImageAttachment {
+function attachment(value: unknown): MessageAttachment {
 	const item = object(value);
+	if (item.type === "video" || item.type === "sticker") {
+		if (item.url !== null || item.description !== null) return invalid();
+		return { type: item.type, url: null, description: null };
+	}
 	if (item.type !== "image") return invalid();
 	return { type: "image", url: optionalText(item.url, 8192), description: optionalText(item.description, 4000) };
 }

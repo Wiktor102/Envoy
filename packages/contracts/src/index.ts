@@ -12,6 +12,20 @@ export interface ImageAttachment {
 	description: string | null;
 }
 
+export interface VideoAttachment {
+	type: "video";
+	url: null;
+	description: null;
+}
+
+export interface StickerAttachment {
+	type: "sticker";
+	url: null;
+	description: null;
+}
+
+export type MessageAttachment = ImageAttachment | VideoAttachment | StickerAttachment;
+
 export interface ConversationMessage {
 	// Temporary identifier for a rendered node; it can change on reload or remount.
 	id: string;
@@ -19,8 +33,8 @@ export interface ConversationMessage {
 	// Unknown must never be treated as an incoming message.
 	direction: "incoming" | "outgoing" | "unknown" | "system";
 	// The quoted text is a preview, not a stable reference to another message.
-	replyTo: { text: string | null; context: string | null; attachments: readonly ImageAttachment[] } | null;
-	attachments: readonly ImageAttachment[];
+	replyTo: { text: string | null; context: string | null; attachments: readonly MessageAttachment[] } | null;
+	attachments: readonly MessageAttachment[];
 	reactions: readonly { label: string; emojis: readonly string[]; count: number | null }[];
 	// The sender withdrew this message. Its placeholder is not message text.
 	unsent: boolean;
