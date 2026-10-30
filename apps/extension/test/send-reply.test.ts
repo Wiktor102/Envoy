@@ -89,6 +89,109 @@ test("sends once only after authorization and confirms an appended outgoing mess
 	dom.window.close();
 });
 
+test("confirms an acknowledged send when Messenger removes older rows from a full message window", async () => {
+	for (const acknowledgement of ["footer", "receipt"]) {
+		const { dom, editor, button } = setup();
+		for (let index = 1; index < 15; index++) appendMessage(`Earlier message ${index}`, "incoming");
+		const send = await command();
+		let clicks = 0;
+		button.addEventListener("click", () => {
+			clicks++;
+			editor.textContent = "";
+			document.querySelector('[data-scope="messages_table"] [role="row"]')!.remove();
+			const scope = document.createElement("div");
+			scope.setAttribute("data-scope", "messages_table");
+			scope.setAttribute(
+				"data-message-id",
+				acknowledgement === "footer" ? "7521931389265068106" : "100054118657081@msgr.7521931389265068106",
+			);
+			scope.setAttribute("aria-roledescription", "wiadomość");
+			scope.setAttribute("aria-label", "O 14:49, Ty: Hi there");
+			// Observed in Chrome: a nested directional bubble, followed by a
+			// direct footer. The footer can be replaced by a read-receipt avatar.
+			scope.innerHTML =
+				'<h4 dir="auto">Wysłano</h4><div><span dir="auto"><div dir="auto">Hi there</div></span></div>' +
+				(acknowledgement === "footer"
+					? '<div><span role="presentation"><span dir="auto">Wysłano</span></span></div>'
+					: '<div><span><img alt="Wyświetlona przez Alex"></span></div>');
+			document.querySelector("main")!.append(scope);
+		});
+		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent", acknowledgement);
+		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent", acknowledgement);
+		assert.equal(clicks, 1);
+		assert.equal((await messengerChatAdapter.readConversation()).messages.length, 15);
+		dom.window.close();
+	}
+});
+
+test("waits when a trimmed window has edits, reordered history, intervening messages, or no overlap", async () => {
+	for (const change of ["edit", "reorder", "incoming", "extra-outgoing", "no-overlap", "pending"]) {
+		const { dom, editor, button } = setup();
+		for (let index = 1; index < 4; index++) appendMessage(`Earlier message ${index}`, "incoming");
+		const scope = document.querySelector('[data-scope="messages_table"]')!;
+		const original = [...scope.children];
+		let outgoing: Element;
+		let intervening: Element | undefined;
+		button.addEventListener("click", () => {
+			editor.textContent = "";
+			original[0]!.remove();
+			if (change === "edit") original[1]!.querySelector('[dir="auto"]')!.textContent = "Edited history";
+			if (change === "reorder") scope.prepend(original[2]!);
+			if (change === "incoming" || change === "extra-outgoing") {
+				appendMessage("Another message", change === "incoming" ? "incoming" : "outgoing", "sent");
+				intervening = scope.lastElementChild!;
+			}
+			if (change === "no-overlap") scope.replaceChildren();
+			appendMessage("Hi there", "outgoing", change === "pending" ? "pending" : "sent");
+			outgoing = scope.lastElementChild!;
+		});
+		let settled = false;
+		const pending = messengerChatAdapter.sendReply(await command(), async () => true);
+		void pending.then(() => (settled = true));
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		assert.equal(settled, false, change);
+		// Restore a provable suffix without issuing another click.
+		original[1]!.querySelector('[dir="auto"]')!.textContent = "Earlier message 1";
+		intervening?.remove();
+		scope.replaceChildren(...original.slice(1), outgoing!);
+		outgoing!.setAttribute("data-message-status", "seen");
+		assert.equal(await pending, "sent", change);
+		dom.window.close();
+	}
+});
+
+test("does not confirm an old repeated reply after trimming or remounting its server ID", async () => {
+	for (const remount of [false, true]) {
+		const { dom, editor, button } = setup();
+		const scope = document.querySelector('[data-scope="messages_table"]')!;
+		scope.replaceChildren();
+		for (let index = 0; index < 3; index++) {
+			appendMessage("Hi there", "outgoing", "seen");
+			if (remount) scope.lastElementChild!.setAttribute("data-message-id", `100054118657081@msgr.${index}`);
+		}
+		let clicks = 0;
+		button.addEventListener("click", () => {
+			clicks++;
+			editor.textContent = "";
+			scope.firstElementChild!.remove();
+			if (remount) scope.replaceChildren(...[...scope.children].map((row) => row.cloneNode(true)));
+		});
+		let settled = false;
+		const send = await command();
+		const pending = messengerChatAdapter.sendReply(send, async () => true);
+		void pending.then(() => (settled = true));
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		assert.equal(settled, false, String(remount));
+		scope.firstElementChild!.remove();
+		appendMessage("Hi there", "outgoing", "seen");
+		if (remount) scope.lastElementChild!.setAttribute("data-message-id", "100054118657081@msgr.3");
+		assert.equal(await pending, "sent");
+		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+		assert.equal(clicks, 1);
+		dom.window.close();
+	}
+});
+
 test("prepares a send without relying on a zero-delay background timer", async () => {
 	const { dom, editor, button } = setup();
 	button.addEventListener("click", () => {
@@ -200,6 +303,72 @@ test("waits for a server message ID instead of translated sent headings", async 
 	message.removeAttribute("data-message-status");
 	assert.equal(await pending, "sent");
 	dom.window.close();
+});
+
+test("confirms the visible sent footer captured in PR #9 without requiring a server ID", async () => {
+	for (const [locale, sender, footerText] of [
+		["wiadomość", "O 14:03, Ty", "Wysłano"],
+		["message", "At 14:03, You", "Sent 1 minute ago"],
+	]) {
+		const { dom, editor, button } = setup();
+		let clicks = 0;
+		button.addEventListener("click", () => {
+			clicks++;
+			editor.textContent = "";
+			const scope = document.createElement("div");
+			scope.setAttribute("data-scope", "messages_table");
+			scope.setAttribute("data-message-id", "7520889721094971653");
+			scope.setAttribute("aria-roledescription", locale!);
+			scope.setAttribute("aria-label", `${sender}: Hi there`);
+			// Use the observed footer structure, not synthetic data-message-status.
+			scope.innerHTML = `<h4 dir="auto">Wysłano</h4><div><span dir="auto">Hi there</span></div>
+				<div><span role="presentation"><span dir="auto"><span>${footerText}</span></span></span></div>`;
+			document.querySelector("main")!.append(scope);
+		});
+		const send = await command();
+		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+		assert.equal(clicks, 1);
+		dom.window.close();
+	}
+});
+
+test("waits for a visible footer on the sent bubble with no pending or failed status", async () => {
+	for (const blocker of ["hidden", "transparent", "aria-hidden", "pending", "failed", "busy", "outside"]) {
+		const { dom, editor, button } = setup();
+		const scope = document.createElement("div");
+		scope.setAttribute("data-scope", "messages_table");
+		scope.setAttribute("data-message-id", "7520889721094971653");
+		scope.setAttribute("aria-roledescription", "wiadomość");
+		scope.setAttribute("aria-label", "O 14:03, Ty: Hi there");
+		scope.innerHTML = '<div><span dir="auto">Hi there</span></div>';
+		const footer = document.createElement("div");
+		footer.innerHTML = '<span role="presentation"><span dir="auto"><span>Wysłano</span></span></span>';
+		scope.append(footer);
+		if (blocker === "hidden") footer.style.visibility = "hidden";
+		if (blocker === "transparent") footer.style.opacity = "0";
+		if (blocker === "aria-hidden") footer.setAttribute("aria-hidden", "true");
+		if (blocker === "pending" || blocker === "failed") scope.setAttribute("data-message-status", blocker);
+		if (blocker === "busy") scope.setAttribute("aria-busy", "true");
+		button.addEventListener("click", () => {
+			editor.textContent = "";
+			document.querySelector("main")!.append(scope);
+			if (blocker === "outside") document.querySelector("main")!.append(footer);
+		});
+		let settled = false;
+		const pending = messengerChatAdapter.sendReply(await command(), async () => true);
+		void pending.then(() => (settled = true));
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		assert.equal(settled, false, blocker);
+		assert.equal(scope.isConnected, true);
+		footer.removeAttribute("style");
+		footer.removeAttribute("aria-hidden");
+		scope.removeAttribute("data-message-status");
+		scope.removeAttribute("aria-busy");
+		if (blocker === "outside") scope.append(footer);
+		assert.equal(await pending, "sent", blocker);
+		dom.window.close();
+	}
 });
 
 test("does not overwrite an existing draft or use an ambiguous composer", async () => {

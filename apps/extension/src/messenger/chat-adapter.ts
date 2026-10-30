@@ -799,34 +799,67 @@ function selectContents(editor: HTMLElement, collapse: boolean): boolean {
 
 function newlyAppendedOutgoing(before: ConversationSnapshot, after: ConversationSnapshot, text: string): boolean {
 	if (before.chatId !== after.chatId || before.revision === after.revision) return false;
-	if (after.messages.length !== before.messages.length + 1) return false;
-	if (JSON.stringify(contentOf(after.messages.slice(0, -1))) !== JSON.stringify(contentOf(before.messages))) return false;
+	// Messenger keeps a bounded rendered window. Appending a bubble can remove
+	// its oldest rows; the remaining history must still be an unchanged suffix,
+	// including the previous newest message. Never accept a wholly replaced view.
+	const retained = after.messages.slice(0, -1);
+	const removed = before.messages.length - retained.length;
+	if (removed < 0 || (removed > 0 && retained.length === 0)) return false;
+	if (JSON.stringify(contentOf(retained)) !== JSON.stringify(contentOf(before.messages.slice(removed)))) return false;
 	const last = after.messages.at(-1);
-	return Boolean(last && last.direction === "outgoing" && last.text === text && last.attachments.length === 0);
+	return Boolean(
+		last &&
+		last.direction === "outgoing" &&
+		last.text === text &&
+		last.attachments.length === 0 &&
+		!before.messages.some((message) => message.id === last.id),
+	);
+}
+
+function messengerMessageId(message: RenderedMessage | undefined): string {
+	return message?.boundary?.getAttribute("data-message-id") ?? "";
 }
 
 function hasSentStatus(capture: ConversationCapture): boolean {
-	const boundary = capture.rendered.at(-1)?.boundary;
-	if (!boundary) return false;
+	const message = capture.rendered.at(-1);
+	const boundary = message?.boundary;
+	if (!message || !boundary) return false;
 	// Machine status values are useful where a connector exposes them, but
 	// translated headings and labels are not delivery acknowledgements.
 	const statuses = [boundary, ...boundary.querySelectorAll<HTMLElement>("[data-message-status]")]
 		.filter((element) => isVisible(element as HTMLElement))
 		.map((element) => element.getAttribute("data-message-status"));
 	if (statuses.some((status) => status && /^(?:sending|pending|failed|not-sent)$/.test(status))) return false;
+	if (
+		boundary.matches('[aria-busy="true"], [role="progressbar"]') ||
+		boundary.querySelector('[aria-busy="true"], [role="progressbar"]')
+	)
+		return false;
 	if (statuses.some((status) => status && /^(?:sent|delivered|seen|read)$/.test(status))) return true;
+	// Reuse the reader's observed footer distinction. A visible sent footer
+	// attached to this bubble is evidence even when its numeric ID stays put.
+	// A translated heading or status-like message text alone is not enough.
+	if (
+		[...boundary.querySelectorAll<HTMLElement>('[dir="auto"]')].some(
+			(element) => isVisible(element) && isDeliveryStatus(element, [message.element, element]),
+		)
+	)
+		return true;
 	// The live encrypted UI replaces its optimistic numeric ID with a qualified
 	// @msgr ID when acknowledged. Regular threads use the server's mid.$ IDs.
-	// Never confirm a numeric optimistic bubble, even if its heading says Sent.
-	const id = boundary.getAttribute("data-message-id") ?? "";
+	// Without a status, never confirm a numeric bubble just from its heading.
+	const id = messengerMessageId(message);
 	return (
 		boundary.matches('[data-scope="messages_table"][aria-roledescription]') &&
-		/^(?:\d+@msgr\.\d+|mid\.\$[\w-]+)$/.test(id) &&
-		!boundary.querySelector('[aria-busy="true"], [role="progressbar"]')
+		/^(?:\d+@msgr\.\d+|mid\.\$[\w-]+)$/.test(id)
 	);
 }
 
-function confirmSend(before: ConversationSnapshot, text: string): Promise<SendResult> {
+function confirmSend(
+	before: ConversationSnapshot,
+	text: string,
+	previousMessageIds: ReadonlySet<string>,
+): Promise<SendResult> {
 	return new Promise((resolve) => {
 		let done = false;
 		let checking = false;
@@ -844,7 +877,14 @@ function confirmSend(before: ConversationSnapshot, text: string): Promise<SendRe
 			checking = true;
 			try {
 				const { capture, snapshot } = await readCapturedConversation();
-				if (!done && newlyAppendedOutgoing(before, snapshot, text) && hasSentStatus(capture)) finish("sent");
+				const id = messengerMessageId(capture.rendered.at(-1));
+				if (
+					!done &&
+					!previousMessageIds.has(id) &&
+					newlyAppendedOutgoing(before, snapshot, text) &&
+					hasSentStatus(capture)
+				)
+					finish("sent");
 			} catch {
 				// A changing or incomplete view is not evidence that Messenger sent the message.
 			} finally {
@@ -996,6 +1036,9 @@ async function performSend(
 			return stopBeforeDispatch();
 		}
 		removeListener();
+		// Save values before the click: Messenger can remount bubbles or replace
+		// optimistic IDs while confirming. An old server ID is never a new send.
+		const previousMessageIds = new Set(capture.rendered.map(messengerMessageId).filter(Boolean));
 		// A thrown click handler does not prove the message was not dispatched.
 		try {
 			button.click();
@@ -1003,7 +1046,7 @@ async function performSend(
 			return "uncertain";
 		}
 		try {
-			return await confirmSend(before, command.text);
+			return await confirmSend(before, command.text, previousMessageIds);
 		} catch {
 			return "uncertain";
 		}
