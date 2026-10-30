@@ -107,8 +107,19 @@ test("the Meta request marks unverified history and attachments without sending 
 			id: "older",
 			direction: "unknown" as const,
 			text: "What about this?",
-			attachments: [{ type: "image" as const, url: "https://private.example/photo", description: null }],
-			replyTo: { text: null, context: null, attachments: [{ type: "image" as const, url: null, description: null }] },
+			attachments: [
+				{ type: "image" as const, url: "https://private.example/photo", description: null },
+				{ type: "video" as const, url: null, description: null },
+				{ type: "sticker" as const, url: null, description: null },
+			],
+			replyTo: {
+				text: null,
+				context: null,
+				attachments: [
+					{ type: "image" as const, url: null, description: null },
+					{ type: "sticker" as const, url: null, description: null },
+				],
+			},
 			reactions: [],
 			unsent: false,
 		};
@@ -118,8 +129,8 @@ test("the Meta request marks unverified history and attachments without sending 
 			direction: "unknown",
 			text: "What about this?",
 			unsent: false,
-			attachments: [{ type: "image" }],
-			replyTo: { text: null, context: null, attachments: [{ type: "image" }] },
+			attachments: [{ type: "image" }, { type: "video" }, { type: "sticker" }],
+			replyTo: { text: null, context: null, attachments: [{ type: "image" }, { type: "sticker" }] },
 		});
 		assert.doesNotMatch(body.messages[2].content, /private\.example/);
 		assert.match(body.messages[0].content, /Do not guess their authors or missing contents/);

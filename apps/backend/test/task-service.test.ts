@@ -474,6 +474,14 @@ test("unknown direction, unsupported content and an outgoing last message do not
 		assert.equal(result.status, "needs_user");
 		assert.equal(agent.calls.length, 0);
 	}
+	for (const type of ["video", "sticker"] as const) {
+		const { agent, service } = setup();
+		const content = snapshot();
+		content.messages[0]!.attachments = [{ type, url: null, description: null }];
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "needs_user");
+		assert.equal(agent.calls.length, 0);
+	}
 	{
 		const { agent, service } = setup();
 		const result = service.start("owner", "Arrange a meeting", snapshot("r1", "Hello", "outgoing"));

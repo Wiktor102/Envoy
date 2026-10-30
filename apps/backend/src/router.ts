@@ -40,9 +40,9 @@ function array(value: unknown, max: number): unknown[] {
 
 function attachment(value: unknown): MessageAttachment {
 	const item = object(value);
-	if (item.type === "video") {
+	if (item.type === "video" || item.type === "sticker") {
 		if (item.url !== null || item.description !== null) return invalid();
-		return { type: "video", url: null, description: null };
+		return { type: item.type, url: null, description: null };
 	}
 	if (item.type !== "image") return invalid();
 	return { type: "image", url: optionalText(item.url, 8192), description: optionalText(item.description, 4000) };
