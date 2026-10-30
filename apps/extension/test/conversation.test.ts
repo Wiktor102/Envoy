@@ -1384,3 +1384,81 @@ test("does not hide message metadata or unsupported content in a typing-like sco
 	);
 	dom.window.close();
 });
+
+// Observed visible typing bubble: a live announcement plus an aria-hidden
+// visual subtree with the sender avatar and animated dots. Synthetic text.
+const typingBubble = `<div data-scope="messages_table"><div role="presentation">
+	<div aria-live="polite"><div>Wiktor testowy pisze</div></div>
+	<div aria-hidden="true">
+		<div role="presentation"><div role="list"><div role="listitem"><svg aria-label="Wiktor testowy" role="img"><mask><circle></circle></mask><g><image></image><circle></circle></g></svg></div></div></div>
+		<div role="presentation"><div><div><div></div><div></div><div></div></div></div></div>
+	</div>
+</div></div>`;
+
+test("ignores the visible typing bubble through its announcement-only residue", async () => {
+	const dom = setup();
+	const base =
+		'<div data-scope="messages_table" data-message-id="1" aria-roledescription="message" aria-label="At 11:12, Alex: Hello"><span dir="auto">Hello</span></div>';
+	setMessages(base);
+	const before = await messengerChatAdapter.readConversation();
+	// The bubble appears without remounting the messages.
+	document.querySelector("main")!.insertAdjacentHTML("beforeend", typingBubble);
+	const visible = await messengerChatAdapter.readConversation();
+	assert.deepEqual(visible.messages, before.messages);
+	assert.equal(visible.revision, before.revision);
+	// The visual bubble disappears, leaving the residual announcement.
+	document.querySelector('[aria-hidden="true"]')!.remove();
+	const residual = await messengerChatAdapter.readConversation();
+	assert.deepEqual(residual.messages, before.messages);
+	assert.equal(residual.revision, before.revision);
+	// The announcement disappears too.
+	document.querySelector("[aria-live]")!.closest('[data-scope="messages_table"]')!.remove();
+	const gone = await messengerChatAdapter.readConversation();
+	assert.deepEqual(gone.messages, before.messages);
+	assert.equal(gone.revision, before.revision);
+	dom.window.close();
+});
+
+test("does not hide message content in the typing bubble visual subtree", async () => {
+	const dom = setup();
+	const base = '<div data-scope="messages_table"><div role="row"><span dir="auto">Hello</span></div></div>';
+	const dots = () => [...document.querySelectorAll('[aria-hidden="true"] div[role="presentation"]')].at(-1)!;
+	for (const extra of [
+		'<div data-message-id="9"></div>',
+		'<div role="row"><span>Row</span></div>',
+		'<img alt="photo">',
+		'<a href="https://example.test">link</a>',
+		"<span>Extra text</span>",
+	]) {
+		setMessages(base + typingBubble);
+		dots().insertAdjacentHTML("beforeend", extra);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	// The avatar label and static shapes are part of the recognized indicator.
+	for (const mutate of [
+		(svg: Element) => svg.removeAttribute("aria-label"),
+		(svg: Element) => svg.insertAdjacentHTML("beforeend", "<text>hi</text>"),
+	]) {
+		setMessages(base + typingBubble);
+		mutate(document.querySelector('[aria-hidden="true"] svg')!);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	// Directional text alongside the bubble is message content, not status.
+	setMessages(base + typingBubble);
+	document
+		.querySelector("[aria-live]")!
+		.closest('[data-scope="messages_table"]')!
+		.querySelector(":scope > div")!
+		.insertAdjacentHTML("beforeend", '<span dir="auto">Real message</span>');
+	assert.deepEqual(
+		(await messengerChatAdapter.readConversation()).messages.map(({ text }) => text),
+		["Hello", "Real message"],
+	);
+	dom.window.close();
+});
