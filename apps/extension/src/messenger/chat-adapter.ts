@@ -522,7 +522,19 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 				]
 					.filter(Boolean)
 					.join(" ");
-				const checkedMetadata = preview ? metadata.replace(/(?:^|\s)gif(?=$|[\s:.,])/gi, " ") : metadata;
+				const giphyImage = rendered
+					.flatMap(({ images }) => images)
+					.some((viewer) => {
+						if (!viewer.matches("a[href]") || !isMessengerPhotoLink(viewer as HTMLAnchorElement)) return false;
+						return (
+							element.matches("img[alt]") &&
+							viewer.contains(element) &&
+							/(?:^|\s)gif(?=$|[\s:.,])/i.test(element.getAttribute("alt") ?? "") &&
+							[...viewer.querySelectorAll("span")].some((span) => span.textContent?.trim() === "GIPHY")
+						);
+					});
+				const checkedMetadata =
+					preview || giphyImage ? metadata.replace(/(?:^|\s)gif(?=$|[\s:.,])/gi, " ") : metadata;
 				return /(?:^|\s)(?:sticker|voice(?: message)?|audio(?: message)?|video|gif|file attachment|naklejka|wiadomość głosowa|plik)(?:$|[\s:.,])/i.test(
 					checkedMetadata,
 				);
