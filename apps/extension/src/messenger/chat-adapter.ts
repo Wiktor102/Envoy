@@ -166,7 +166,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	);
 	const textCandidates = [...candidates].filter((element) => {
 		const scope = element.closest('[data-scope="messages_table"]');
-		if (scope && isGroupIntro(scope)) return false;
+		if (scope && (isGroupIntro(scope) || isTypingStatus(scope))) return false;
 		if (
 			element.closest(
 				'button, [role="button"], [contenteditable="true"], [aria-hidden="true"], h1, h2, h3, h4, h5, h6, [role="heading"]',
@@ -241,7 +241,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	)) {
 		const scope = element.closest('[data-scope="messages_table"]');
 		if (
-			(scope && isGroupIntro(scope)) ||
+			(scope && (isGroupIntro(scope) || isTypingStatus(scope))) ||
 			element.closest(
 				'[dir="auto"], button, [role="button"], [contenteditable="true"], [aria-hidden="true"], h1, h2, h3, h4, h5, h6, [role="heading"]',
 			)
@@ -281,6 +281,62 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	return ordered;
 }
 
+// A live typing announcement is status UI, not a message. It arrives in a
+// messages_table scope without message metadata and must never hide real
+// messages, attachments, or ambiguous content. Match structure (a live region
+// with only announcement text), never height alone or translated words.
+function isLiveAnnouncement(element: Element): boolean {
+	const value = element.getAttribute("aria-live")?.trim().toLowerCase();
+	return value === "polite" || value === "assertive";
+}
+
+function isInsideScopeLive(element: Element, scope: Element): boolean {
+	for (let current: Element | null = element; current; current = current.parentElement) {
+		if (isLiveAnnouncement(current)) return true;
+		if (current === scope) break;
+	}
+	return false;
+}
+
+function isTypingStatus(scope: Element): boolean {
+	if (!scope.matches('[data-scope="messages_table"]')) return false;
+	const metadata =
+		"[data-message-id], [aria-roledescription], [data-message-direction], [data-message-type], [data-attachment-type]";
+	if (scope.matches(metadata) || scope.querySelector(metadata)) return false;
+	if (!isLiveAnnouncement(scope) && ![...scope.querySelectorAll("[aria-live]")].some(isLiveAnnouncement)) return false;
+	if (
+		scope.querySelector(
+			'[role="row"], [role="article"], button, [role="button"], [role="toolbar"], a[href], img, svg, canvas, video, audio, object, embed, iframe, input, [contenteditable], h1, h2, h3, h4, h5, h6, [role="heading"], [role="img"], [aria-label], [alt]',
+		)
+	)
+		return false;
+	if (scope.matches("[aria-label], [alt]")) return false;
+	for (const dir of scope.querySelectorAll("[dir]")) {
+		if (!isInsideScopeLive(dir, scope)) return false;
+	}
+	if (scope.matches("[dir]") && !isLiveAnnouncement(scope)) return false;
+	const stack: Node[] = [...scope.childNodes];
+	while (stack.length > 0) {
+		const node = stack.pop()!;
+		if (node.nodeType === 3) {
+			if (!node.nodeValue?.trim()) continue;
+			const parent = node.parentNode as Element | null;
+			if (!parent || !isInsideScopeLive(parent, scope)) return false;
+			continue;
+		}
+		if (node.nodeType === 1) stack.push(...node.childNodes);
+	}
+	function statusOnly(node: Node): boolean {
+		if (node.nodeType === 3) return true;
+		if (node.nodeType !== 1) return true;
+		const child = node as Element;
+		if (!child.matches("div, span")) return false;
+		if (![null, "presentation", "none", "status", "log"].includes(child.getAttribute("role"))) return false;
+		return [...child.childNodes].every(statusOnly);
+	}
+	return [...scope.childNodes].every(statusOnly);
+}
+
 // Messenger gives date separators and a zero-height empty presentation wrapper
 // beside the newest article a messages_table scope. Neither is a message.
 function isMessageDecoration(element: HTMLElement): boolean {
@@ -309,7 +365,7 @@ function isMessageDecoration(element: HTMLElement): boolean {
 
 function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]): boolean {
 	const scopes = [...main.querySelectorAll<HTMLElement>('[data-scope="messages_table"]')].filter(
-		(scope) => isVisible(scope) && !isMessageDecoration(scope) && !isGroupIntro(scope),
+		(scope) => isVisible(scope) && !isMessageDecoration(scope) && !isGroupIntro(scope) && !isTypingStatus(scope),
 	);
 	if (scopes.length === 0) return true;
 	// A message row may be adjacent to, rather than inside, a recognized scope.
