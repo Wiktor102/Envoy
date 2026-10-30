@@ -64,6 +64,20 @@ function appendMessage(text: string, direction: "incoming" | "outgoing", status?
 	document.querySelector('[data-scope="messages_table"]')!.append(row);
 }
 
+function appendQuoteMessage(text: string, status?: string) {
+	const row = document.createElement("div");
+	row.setAttribute("role", "row");
+	row.setAttribute("data-message-direction", "outgoing");
+	if (status) row.setAttribute("data-message-status", status);
+	const message = document.createElement("span");
+	message.setAttribute("dir", "auto");
+	const quote = document.createElement("blockquote");
+	quote.textContent = text;
+	message.append(quote);
+	row.append(message);
+	document.querySelector('[data-scope="messages_table"]')!.append(row);
+}
+
 test("sends once only after authorization and confirms an appended outgoing message", async () => {
 	const { dom, editor, button } = setup();
 	let clicks = 0;
@@ -620,5 +634,73 @@ test("waits for Messenger to render the send control after the draft", async () 
 	});
 	assert.equal(await messengerChatAdapter.sendReply(await command(), async () => true), "sent");
 	assert.equal(clicks, 1);
+	dom.window.close();
+});
+
+test("confirms an acknowledged Dev-mode reply rendered as a blockquote", async () => {
+	const { dom, editor, button } = setup();
+	let clicks = 0;
+	button.addEventListener("click", () => {
+		clicks++;
+		editor.textContent = "";
+		const scope = document.createElement("div");
+		scope.setAttribute("data-scope", "messages_table");
+		scope.setAttribute("data-message-id", "7520889721094971653");
+		scope.setAttribute("aria-roledescription", "message");
+		scope.setAttribute("aria-label", "At 14:49, You: > Hi there");
+		// Observed rendering: the "> " prefix becomes a blockquote whose
+		// visible text omits the markers; the label keeps the original.
+		scope.innerHTML = `<div><span dir="auto"><div dir="auto"><blockquote>Hi there</blockquote></div></span></div>
+			<div><span role="presentation"><span dir="auto"><span>Sent 1 minute ago</span></span></span></div>`;
+		document.querySelector("main")!.append(scope);
+	});
+	const send = await command("> Hi there");
+	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+	assert.equal(clicks, 1);
+	dom.window.close();
+});
+
+test("does not confirm a blockquote reply whose quoted text differs", async () => {
+	const { dom, editor, button } = setup();
+	let quote: HTMLElement | undefined;
+	button.addEventListener("click", () => {
+		editor.textContent = "";
+		appendQuoteMessage("Something else", "sent");
+		quote = document.querySelector("blockquote")!;
+	});
+	const send = await command("> Hi there");
+	let settled = false;
+	const pending = messengerChatAdapter.sendReply(send, async () => true);
+	void pending.then(() => (settled = true));
+	await new Promise((resolve) => setTimeout(resolve, 200));
+	assert.equal(settled, false);
+	assert.ok(quote);
+	quote.textContent = "Hi there";
+	assert.equal(await pending, "sent");
+	dom.window.close();
+});
+
+test("does not confirm a blockquote reply that reuses a stale message ID", async () => {
+	const { dom, editor, button } = setup();
+	const scope = document.querySelector('[data-scope="messages_table"]')!;
+	scope.replaceChildren();
+	appendQuoteMessage("Hi there", "seen");
+	scope.lastElementChild!.setAttribute("data-message-id", "100054118657081@msgr.0");
+	button.addEventListener("click", () => {
+		editor.textContent = "";
+		appendQuoteMessage("Hi there", "seen");
+		// A remounted old bubble keeps its server ID: not a new send.
+		scope.lastElementChild!.setAttribute("data-message-id", "100054118657081@msgr.0");
+	});
+	const send = await command("> Hi there");
+	let settled = false;
+	const pending = messengerChatAdapter.sendReply(send, async () => true);
+	void pending.then(() => (settled = true));
+	await new Promise((resolve) => setTimeout(resolve, 200));
+	assert.equal(settled, false);
+	// The acknowledged send arrives with its own server ID.
+	scope.lastElementChild!.setAttribute("data-message-id", "100054118657081@msgr.1");
+	assert.equal(await pending, "sent");
 	dom.window.close();
 });
