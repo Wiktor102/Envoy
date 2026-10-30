@@ -934,31 +934,52 @@ function selectContents(editor: HTMLElement, collapse: boolean): boolean {
 	return true;
 }
 
-function newlyAppendedOutgoing(before: ConversationSnapshot, after: ConversationSnapshot, text: string): boolean {
-	if (before.chatId !== after.chatId || before.revision === after.revision) return false;
-	// Messenger keeps a bounded rendered window. Appending a bubble can remove
-	// its oldest rows; the remaining history must still be an unchanged suffix,
-	// including the previous newest message. Never accept a wholly replaced view.
-	const retained = after.messages.slice(0, -1);
-	const removed = before.messages.length - retained.length;
-	if (removed < 0 || (removed > 0 && retained.length === 0)) return false;
-	if (JSON.stringify(contentOf(retained)) !== JSON.stringify(contentOf(before.messages.slice(removed)))) return false;
-	const last = after.messages.at(-1);
-	return Boolean(
-		last &&
-		last.direction === "outgoing" &&
-		last.text === text &&
-		last.attachments.length === 0 &&
-		!before.messages.some((message) => message.id === last.id),
-	);
+function findOutgoingCandidateIndex(
+	before: ConversationSnapshot,
+	after: ConversationSnapshot,
+	renderedAfter: RenderedMessage[],
+	text: string,
+	previousMessageIds: ReadonlySet<string>,
+): number | null {
+	if (before.chatId !== after.chatId || before.revision === after.revision) return null;
+	const beforeIds = new Set(before.messages.map((message) => message.id));
+	const candidates: number[] = [];
+	for (let index = 0; index < after.messages.length; index++) {
+		const candidate = after.messages[index]!;
+		if (candidate.direction !== "outgoing" || candidate.text !== text || candidate.attachments.length !== 0) continue;
+		if (beforeIds.has(candidate.id)) continue;
+		if (previousMessageIds.has(messengerMessageId(renderedAfter[index]))) continue;
+		// Messenger keeps a bounded rendered window. Appending a bubble can remove
+		// its oldest rows; the history before the candidate must still be an
+		// unchanged suffix, including the previous newest message when nothing was
+		// trimmed. Never accept a wholly replaced view. Any readable trailing
+		// suffix after the candidate (for example a newer incoming message) is allowed.
+		const retained = after.messages.slice(0, index);
+		const removed = before.messages.length - retained.length;
+		if (removed < 0 || (removed > 0 && retained.length === 0)) continue;
+		if (JSON.stringify(contentOf(retained)) !== JSON.stringify(contentOf(before.messages.slice(removed)))) continue;
+		candidates.push(index);
+	}
+	// Never confirm on text alone. Zero or ambiguous matches stay uncertain.
+	return candidates.length === 1 ? candidates[0]! : null;
+}
+
+function newlyAppendedOutgoing(
+	before: ConversationSnapshot,
+	after: ConversationSnapshot,
+	text: string,
+	previousMessageIds: ReadonlySet<string>,
+	renderedAfter: RenderedMessage[],
+): boolean {
+	return findOutgoingCandidateIndex(before, after, renderedAfter, text, previousMessageIds) !== null;
 }
 
 function messengerMessageId(message: RenderedMessage | undefined): string {
 	return message?.boundary?.getAttribute("data-message-id") ?? "";
 }
 
-function hasSentStatus(capture: ConversationCapture): boolean {
-	const message = capture.rendered.at(-1);
+function hasSentStatusAt(capture: ConversationCapture, index: number): boolean {
+	const message = capture.rendered[index];
 	const boundary = message?.boundary;
 	if (!message || !boundary) return false;
 	// Machine status values are useful where a connector exposes them, but
@@ -992,6 +1013,11 @@ function hasSentStatus(capture: ConversationCapture): boolean {
 	);
 }
 
+function hasSentStatus(capture: ConversationCapture): boolean {
+	if (capture.rendered.length === 0) return false;
+	return hasSentStatusAt(capture, capture.rendered.length - 1);
+}
+
 function confirmSend(
 	before: ConversationSnapshot,
 	text: string,
@@ -1014,14 +1040,8 @@ function confirmSend(
 			checking = true;
 			try {
 				const { capture, snapshot } = await readCapturedConversation();
-				const id = messengerMessageId(capture.rendered.at(-1));
-				if (
-					!done &&
-					!previousMessageIds.has(id) &&
-					newlyAppendedOutgoing(before, snapshot, text) &&
-					hasSentStatus(capture)
-				)
-					finish("sent");
+				const candidate = findOutgoingCandidateIndex(before, snapshot, capture.rendered, text, previousMessageIds);
+				if (!done && candidate !== null && hasSentStatusAt(capture, candidate)) finish("sent");
 			} catch {
 				// A changing or incomplete view is not evidence that Messenger sent the message.
 			} finally {

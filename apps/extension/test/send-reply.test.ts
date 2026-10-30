@@ -704,3 +704,101 @@ test("does not confirm a blockquote reply that reuses a stale message ID", async
 	assert.equal(await pending, "sent");
 	dom.window.close();
 });
+
+test("confirms an outgoing reply followed by an incoming message before acknowledgement", async () => {
+	const { dom, editor, button } = setup();
+	const send = await command();
+	let clicks = 0;
+	button.addEventListener("click", () => {
+		clicks++;
+		editor.textContent = "";
+		appendMessage("Hi there", "outgoing", "sent");
+		const outgoing = document.querySelector('[data-scope="messages_table"]')!.lastElementChild as HTMLElement;
+		outgoing.setAttribute("data-message-id", "mid.$gAAoTrailingIncoming1");
+		appendMessage("Thanks, got it", "incoming");
+	});
+	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+	assert.equal(clicks, 1);
+	dom.window.close();
+});
+
+test("confirms a trailing-incoming send when the message window trims an older row", async () => {
+	const { dom, editor, button } = setup();
+	for (let index = 1; index < 4; index++) appendMessage(`Earlier message ${index}`, "incoming");
+	const send = await command();
+	let clicks = 0;
+	button.addEventListener("click", () => {
+		clicks++;
+		editor.textContent = "";
+		document.querySelector('[data-scope="messages_table"] [role="row"]')!.remove();
+		appendMessage("Hi there", "outgoing", "sent");
+		const outgoing = document.querySelector('[data-scope="messages_table"]')!.lastElementChild as HTMLElement;
+		outgoing.setAttribute("data-message-id", "mid.$gAAoTrailingTrimmed1");
+		appendMessage("Thanks, got it", "incoming");
+	});
+	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+	assert.equal(clicks, 1);
+	dom.window.close();
+});
+
+test("does not confirm a stale repeated reply when a trailing incoming message is present", async () => {
+	for (const remount of [false, true]) {
+		const { dom, editor, button } = setup();
+		const scope = document.querySelector('[data-scope="messages_table"]')!;
+		scope.replaceChildren();
+		for (let index = 0; index < 3; index++) {
+			appendMessage("Hi there", "outgoing", "seen");
+			if (remount) scope.lastElementChild!.setAttribute("data-message-id", `100054118657081@msgr.${index}`);
+		}
+		let clicks = 0;
+		let trailing: Element | undefined;
+		button.addEventListener("click", () => {
+			clicks++;
+			editor.textContent = "";
+			scope.firstElementChild!.remove();
+			if (remount) scope.replaceChildren(...[...scope.children].map((row) => row.cloneNode(true)));
+			appendMessage("New here", "incoming");
+			trailing = scope.lastElementChild!;
+		});
+		const send = await command();
+		let settled = false;
+		const pending = messengerChatAdapter.sendReply(send, async () => true);
+		void pending.then(() => (settled = true));
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		assert.equal(settled, false, String(remount));
+		trailing?.remove();
+		scope.firstElementChild!.remove();
+		appendMessage("Hi there", "outgoing", "seen");
+		if (remount) scope.lastElementChild!.setAttribute("data-message-id", "100054118657081@msgr.3");
+		assert.equal(await pending, "sent");
+		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
+		assert.equal(clicks, 1);
+		dom.window.close();
+	}
+});
+
+test("waits when history is edited and a trailing incoming message follows the candidate", async () => {
+	const { dom, editor, button } = setup();
+	for (let index = 1; index < 4; index++) appendMessage(`Earlier message ${index}`, "incoming");
+	const scope = document.querySelector('[data-scope="messages_table"]')!;
+	const historyRow = scope.children[1]!.querySelector('[dir="auto"]')!;
+	button.addEventListener("click", () => {
+		editor.textContent = "";
+		scope.firstElementChild!.remove();
+		historyRow.textContent = "Edited history";
+		appendMessage("Hi there", "outgoing", "sent");
+		const outgoing = scope.lastElementChild as HTMLElement;
+		outgoing.setAttribute("data-message-id", "mid.$gAAoTrailingEdited1");
+		appendMessage("New here", "incoming");
+	});
+	let settled = false;
+	const pending = messengerChatAdapter.sendReply(await command(), async () => true);
+	void pending.then(() => (settled = true));
+	await new Promise((resolve) => setTimeout(resolve, 200));
+	assert.equal(settled, false);
+	historyRow.textContent = "Earlier message 1";
+	assert.equal(await pending, "sent");
+	dom.window.close();
+});
