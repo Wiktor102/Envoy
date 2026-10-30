@@ -1302,3 +1302,183 @@ test("omits Messenger delivery footers without changing real text, emoji, or rev
 	}
 	dom.window.close();
 });
+
+test("ignores typing-status announcements without changing messages or revision", async () => {
+	const dom = setup();
+	const base =
+		'<div data-scope="messages_table" data-message-id="1" aria-roledescription="message" aria-label="At 11:12, Alex: Hello"><span dir="auto">Hello</span></div>';
+	setMessages(base);
+	const before = await messengerChatAdapter.readConversation();
+	const content = (messages: typeof before.messages) =>
+		messages.map(({ text, direction, replyTo, attachments, reactions, unsent }) => ({
+			text,
+			direction,
+			replyTo,
+			attachments,
+			reactions,
+			unsent,
+		}));
+	// Observed live structure: a one-pixel scope with an aria-live announcement,
+	// no message ID or role description. Synthetic announcement text.
+	for (const typing of [
+		'<div data-scope="messages_table"><div><span aria-live="polite">Wiktor testowy pisze</span></div></div>',
+		'<div data-scope="messages_table"><span aria-live="polite"><span dir="auto">Wiktor testowy pisze</span></span></div>',
+		'<div data-scope="messages_table" aria-live="polite">Wiktor testowy pisze</div>',
+		'<div data-scope="messages_table"><span aria-live="polite"></span></div>',
+	]) {
+		setMessages(base + typing);
+		const withTyping = await messengerChatAdapter.readConversation();
+		assert.deepEqual(content(withTyping.messages), content(before.messages));
+		assert.equal(withTyping.revision, before.revision);
+		const live = document.querySelector("[aria-live]");
+		if (live?.textContent?.trim()) {
+			live.textContent = "Someone else is typing";
+			const changed = await messengerChatAdapter.readConversation();
+			assert.deepEqual(content(changed.messages), content(before.messages));
+			assert.equal(changed.revision, before.revision);
+		}
+		setMessages(base);
+		const recovered = await messengerChatAdapter.readConversation();
+		assert.deepEqual(content(recovered.messages), content(before.messages));
+		assert.equal(recovered.revision, before.revision);
+	}
+	dom.window.close();
+});
+
+test("does not hide message metadata or unsupported content in a typing-like scope", async () => {
+	const dom = setup();
+	const base = '<div data-scope="messages_table"><div role="row"><span dir="auto">Hello</span></div></div>';
+	const wrap = (inner: string) =>
+		`${base}<div data-scope="messages_table"><span aria-live="polite">Wiktor testowy pisze</span>${inner}</div>`;
+	for (const extra of [
+		'<div data-message-id="1"></div>',
+		'<div aria-roledescription="message"></div>',
+		'<div data-message-direction="incoming"></div>',
+		'<div data-message-type="voice"></div>',
+		'<div data-attachment-type="file"></div>',
+		'<div aria-label="Voice message"></div>',
+		"<video></video>",
+		'<img alt="photo">',
+		'<a href="https://example.test">link</a>',
+		'<div role="button">Play</div>',
+		'<div role="row"><span>Unreadable row</span></div>',
+		"<span>Text outside the live region</span>",
+	]) {
+		setMessages(wrap(extra));
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	// aria-live=off is not a live announcement.
+	setMessages(`${base}<div data-scope="messages_table"><span aria-live="off">Wiktor testowy pisze</span></div>`);
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+	);
+	// Directional text outside the live region is message content, not status.
+	setMessages(wrap('<span dir="auto">Real message</span>'));
+	assert.deepEqual(
+		(await messengerChatAdapter.readConversation()).messages.map(({ text }) => text),
+		["Hello", "Real message"],
+	);
+	dom.window.close();
+});
+
+// Observed visible typing bubble: a live announcement plus an aria-hidden
+// visual subtree with the sender avatar and animated dots. Synthetic text.
+const typingAvatar = `<svg aria-label="Wiktor testowy" role="img"><mask><circle></circle></mask><g><image></image><circle></circle></g></svg>`;
+const typingBubbleFor = (list: string) => `<div data-scope="messages_table"><div role="presentation">
+	<div aria-live="polite"><div>Wiktor testowy pisze</div></div>
+	<div aria-hidden="true">
+		<div role="presentation"><div role="list">${list}</div></div>
+		<div role="presentation"><div><div><div></div><div></div><div></div></div></div></div>
+	</div>
+</div></div>`;
+// Live reload structure: an empty spacer plus a wrapped avatar svg.
+const typingBubble = typingBubbleFor(`<div></div><div role="listitem"><div>${typingAvatar}</div></div>`);
+const typingBubbleDirect = typingBubbleFor(`<div role="listitem">${typingAvatar}</div>`);
+
+test("ignores the visible typing bubble through its announcement-only residue", async () => {
+	const dom = setup();
+	const base =
+		'<div data-scope="messages_table" data-message-id="1" aria-roledescription="message" aria-label="At 11:12, Alex: Hello"><span dir="auto">Hello</span></div>';
+	for (const bubble of [typingBubble, typingBubbleDirect]) {
+		setMessages(base);
+		const before = await messengerChatAdapter.readConversation();
+		// The bubble appears without remounting the messages.
+		document.querySelector("main")!.insertAdjacentHTML("beforeend", bubble);
+		const visible = await messengerChatAdapter.readConversation();
+		assert.deepEqual(visible.messages, before.messages);
+		assert.equal(visible.revision, before.revision);
+		// The visual bubble disappears, leaving the residual announcement.
+		document.querySelector('[aria-hidden="true"]')!.remove();
+		const residual = await messengerChatAdapter.readConversation();
+		assert.deepEqual(residual.messages, before.messages);
+		assert.equal(residual.revision, before.revision);
+		// The announcement disappears too.
+		document.querySelector("[aria-live]")!.closest('[data-scope="messages_table"]')!.remove();
+		const gone = await messengerChatAdapter.readConversation();
+		assert.deepEqual(gone.messages, before.messages);
+		assert.equal(gone.revision, before.revision);
+	}
+	dom.window.close();
+});
+
+test("does not hide message content in the typing bubble visual subtree", async () => {
+	const dom = setup();
+	const base = '<div data-scope="messages_table"><div role="row"><span dir="auto">Hello</span></div></div>';
+	const dots = () => [...document.querySelectorAll('[aria-hidden="true"] div[role="presentation"]')].at(-1)!;
+	for (const extra of [
+		'<div data-message-id="9"></div>',
+		'<div role="row"><span>Row</span></div>',
+		'<img alt="photo">',
+		'<a href="https://example.test">link</a>',
+		"<span>Extra text</span>",
+	]) {
+		setMessages(base + typingBubble);
+		dots().insertAdjacentHTML("beforeend", extra);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	// The avatar label and static shapes are part of the recognized indicator.
+	for (const mutate of [
+		(svg: Element) => svg.removeAttribute("aria-label"),
+		(svg: Element) => svg.insertAdjacentHTML("beforeend", "<text>hi</text>"),
+	]) {
+		setMessages(base + typingBubble);
+		mutate(document.querySelector('[aria-hidden="true"] svg')!);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	// List shapes that do not match the observed typing avatar stay unrecognized.
+	for (const list of [
+		"<div></div>",
+		`<div>hello</div><div role="listitem"><div>${typingAvatar}</div></div>`,
+		`<div role="listitem"><div>${typingAvatar}</div>hello</div>`,
+		`<div role="listitem"><div>${typingAvatar}</div><div></div></div>`,
+		`<div role="listitem"><div dir="auto">${typingAvatar}</div></div>`,
+	]) {
+		setMessages(base + typingBubbleFor(list));
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	// Directional text alongside the bubble is message content, not status.
+	setMessages(base + typingBubble);
+	document
+		.querySelector("[aria-live]")!
+		.closest('[data-scope="messages_table"]')!
+		.querySelector(":scope > div")!
+		.insertAdjacentHTML("beforeend", '<span dir="auto">Real message</span>');
+	assert.deepEqual(
+		(await messengerChatAdapter.readConversation()).messages.map(({ text }) => text),
+		["Hello", "Real message"],
+	);
+	dom.window.close();
+});
