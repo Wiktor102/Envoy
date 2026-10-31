@@ -456,6 +456,36 @@ test("open tool calls stay open across re-renders but reset for a new task", (t)
 	assert.equal(ui.element("agent-messages").querySelector("details")!.open, false);
 });
 
+test("thinking shows a subtle cancel link while reply buttons live in the pending card", async (t) => {
+	const ui = setup(t);
+	ui.update({ task: { ...task, status: "thinking", detail: "Considering the conversation." }, isOwner: true });
+	assert.equal(ui.element("pending").hidden, true);
+	assert.equal(ui.element("cancel-thinking").hidden, false);
+	assert.equal(ui.element("reply-controls").parentElement?.id, "envoy-pending");
+	ui.element<HTMLButtonElement>("cancel-thinking").click();
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	assert.deepEqual(ui.actions, ["cancel"]);
+	ui.update({
+		task: {
+			...task,
+			status: "pending",
+			pendingReply: {
+				commandId: "reply-1",
+				chatId: snapshot.chatId,
+				expectedRevision: snapshot.revision,
+				text: "Hi",
+				sendAt: Date.now() + 10_000,
+			},
+		},
+		isOwner: true,
+	});
+	assert.equal(ui.element("cancel-thinking").hidden, true);
+	assert.equal(ui.element("pending").hidden, false);
+	assert.equal(ui.element("reply-controls").hidden, false);
+	ui.update({ task: { ...task, status: "thinking" }, isOwner: false });
+	assert.equal(ui.element("cancel-thinking").hidden, true);
+});
+
 test("unowned tasks explain who controls them and hide an empty header", (t) => {
 	const ui = setup(t);
 	ui.update({ task: { ...task, status: "paused" }, isOwner: false });

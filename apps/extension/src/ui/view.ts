@@ -85,6 +85,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	isolateTextInput(answerText);
 	const saveEditButton = element<HTMLButtonElement>("#envoy-save-edit");
 	const replyControls = element<HTMLElement>("#envoy-reply-controls");
+	const cancelThinking = element<HTMLButtonElement>("#envoy-cancel-thinking");
 	const sendButton = element<HTMLButtonElement>("#envoy-send-now");
 	const editButton = element<HTMLButtonElement>("#envoy-edit");
 	const cancelButton = element<HTMLButtonElement>("#envoy-cancel");
@@ -335,6 +336,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		}
 
 		replyControls.hidden = !owner || !task || !["thinking", "pending", "editing", "sending"].includes(task.status);
+		cancelThinking.hidden = !owner || task?.status !== "thinking";
+		cancelThinking.disabled = busy;
 		sendButton.disabled = busy || !owner || !currentChat || task?.status !== "pending" || !pending;
 		editButton.disabled =
 			busy || !owner || !currentChat || !(task?.status === "sending" || (task?.status === "pending" && pending));
@@ -432,6 +435,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	editButton.addEventListener("click", () => control("edit"));
 	saveEditButton.addEventListener("click", () => control("save-edit", editText.value.trim()));
 	cancelButton.addEventListener("click", () => control("cancel"));
+	cancelThinking.addEventListener("click", () => control("cancel"));
 	pauseButton.addEventListener("click", () => control("pause"));
 	resumeButton.addEventListener("click", () => control("resume"));
 	reconnectButton.addEventListener("click", () => void run(() => controller.attach()));

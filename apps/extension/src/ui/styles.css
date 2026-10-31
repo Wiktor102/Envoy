@@ -523,6 +523,22 @@ summary .hint {
 	background: var(--envoy-error);
 }
 
+.cancel-thinking {
+	display: block;
+	min-height: 0;
+	margin: 2px 0 0;
+	padding: 2px 0;
+	background: transparent;
+	color: var(--envoy-error);
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.cancel-thinking:not(:disabled):hover {
+	background: transparent;
+	text-decoration: underline;
+}
+
 .reconnect-btn {
 	width: 100%;
 	margin-top: 12px;
