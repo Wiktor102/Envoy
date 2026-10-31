@@ -19,7 +19,15 @@
 <div id="envoy-panel" role="tabpanel" aria-labelledby="envoy-tab" tabindex="0" hidden>
 	<header id="envoy-header">
 		<div class="header-main">
-			<button type="button" id="envoy-goal-toggle" class="goal-line" aria-expanded="false" hidden>
+			<button
+				type="button"
+				id="envoy-goal-toggle"
+				class="goal-line"
+				aria-expanded="false"
+				title="Edit instructions"
+				hidden
+			>
+				<span class="goal-label">Goal</span>
 				<span id="envoy-goal-text"></span>
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 					<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
@@ -88,7 +96,6 @@
 	</section>
 	<section id="envoy-thread" aria-label="Conversation with Envoy" hidden>
 		<p id="envoy-task-notice" class="hint" role="status" hidden></p>
-		<p id="envoy-agent-state" class="agent-state" role="status" hidden></p>
 		<p id="envoy-agent-empty" class="hint">Envoy's questions and your answers will appear here.</p>
 		<ol id="envoy-agent-messages" aria-label="Conversation with Envoy"></ol>
 		<div id="envoy-pending" class="pending-reply" hidden>
@@ -107,6 +114,7 @@
 			<button type="button" id="envoy-edit">Edit</button>
 			<button type="button" id="envoy-cancel">Cancel reply</button>
 		</div>
+		<p id="envoy-agent-state" class="agent-state" role="status" hidden></p>
 		<p id="envoy-delete-hint" class="hint" hidden></p>
 	</section>
 	<footer id="envoy-footer" hidden>

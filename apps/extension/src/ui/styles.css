@@ -200,7 +200,7 @@ summary:focus-visible,
 	top: 0;
 	z-index: 5;
 	display: flex;
-	align-items: flex-start;
+	align-items: center;
 	gap: 8px;
 	padding: 10px 12px;
 	background: var(--envoy-surface);
@@ -274,6 +274,12 @@ summary:focus-visible,
 	overflow: hidden;
 	white-space: nowrap;
 	text-overflow: ellipsis;
+}
+
+.goal-line .goal-label {
+	flex: none;
+	overflow: visible;
+	font-weight: 600;
 }
 
 .goal-line svg {
@@ -474,7 +480,7 @@ summary .hint {
 }
 
 .agent-state {
-	margin: 0 0 4px;
+	margin: 12px 0 0;
 	font-size: 13px;
 	font-weight: 600;
 	white-space: pre-wrap;

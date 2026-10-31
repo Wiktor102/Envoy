@@ -366,7 +366,10 @@ test("header shows the goal with icon actions for an active task", (t) => {
 	assert.equal(ui.element("header").hidden, false);
 	assert.equal(ui.element("agent-state").textContent, "Waiting for a new message.");
 	assert.equal(ui.element("agent-state").closest("#envoy-header"), null);
+	const threadChildren = [...ui.element("thread").children];
+	assert.ok(threadChildren.indexOf(ui.element("agent-state")) > threadChildren.indexOf(ui.element("agent-messages")));
 	assert.equal(ui.element("goal-toggle").hidden, false);
+	assert.equal(ui.element("goal-toggle").querySelector(".goal-label")?.textContent, "Goal");
 	assert.equal(ui.element("goal-text").textContent, "Arrange a meeting");
 	assert.equal(ui.element("goal-toggle").getAttribute("aria-expanded"), "false");
 	assert.equal(ui.element("instructions").hidden, true);
