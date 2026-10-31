@@ -49,14 +49,14 @@ const task: TaskState = {
 	agentChat: [],
 };
 
-function preferenceStorage(initialValue: unknown = false) {
-	let value = initialValue;
+function preferenceStorage(initial: Record<string, unknown> = { envoyDeveloperMode: false }) {
+	let values = structuredClone(initial);
 	return {
 		async get() {
-			return { envoyDeveloperMode: value };
+			return structuredClone(values);
 		},
-		async set(items: { envoyDeveloperMode: boolean }) {
-			value = items.envoyDeveloperMode;
+		async set(items: Record<string, unknown>) {
+			values = { ...values, ...structuredClone(items) };
 		},
 	};
 }
@@ -115,6 +115,11 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 			const field = (view.panel.getRootNode() as ShadowRoot).querySelector<HTMLTextAreaElement>(`#envoy-${id}`)!;
 			field.value = value;
 			field.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+		},
+		changeField(id: string, value: string) {
+			const field = (view.panel.getRootNode() as ShadowRoot).querySelector<HTMLInputElement>(`#envoy-${id}`)!;
+			field.value = value;
+			field.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 		},
 		setDetailsOpen(open: boolean) {
 			const details = (view.panel.getRootNode() as ShadowRoot).querySelector("#envoy-agent-messages details")!;
@@ -288,6 +293,101 @@ test("unavailable preference storage leaves the toggle usable", async (t) => {
 	ui.element<HTMLButtonElement>("developer-mode").click();
 	await new Promise<void>((resolve) => setImmediate(resolve));
 	assert.equal(ui.element("developer-details").hidden, false);
+});
+
+const flushPreferences = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test("reply sending defaults to auto-send after a 10-second countdown", async (t) => {
+	const ui = setup(t);
+	await flushPreferences();
+	const toggle = ui.element<HTMLButtonElement>("auto-send");
+	assert.equal(toggle.getAttribute("role"), "switch");
+	assert.equal(toggle.getAttribute("aria-checked"), "true");
+	assert.equal(ui.element<HTMLInputElement>("delay-min").value, "10");
+	assert.equal(ui.element<HTMLInputElement>("delay-max").value, "10");
+	assert.equal(ui.element<HTMLInputElement>("delay-min").disabled, false);
+	assert.equal(ui.element("delay-hint").textContent, "Replies send after a 10-second countdown.");
+	assert.equal(ui.element("goal-hint").hidden, true);
+});
+
+test("the auto-send switch and delay range are remembered across remounts", async (t) => {
+	const storage = preferenceStorage();
+	const ui = setup(t, storage);
+	await flushPreferences();
+	ui.changeField("delay-max", "25");
+	ui.changeField("delay-min", "5");
+	assert.equal(ui.element("delay-hint").textContent, "Replies send after a random 5–25-second countdown.");
+	ui.element<HTMLButtonElement>("auto-send").click();
+	assert.equal(ui.element<HTMLInputElement>("delay-min").disabled, true);
+	assert.equal(ui.element<HTMLInputElement>("delay-max").disabled, true);
+	assert.equal(ui.element("delay").getAttribute("aria-disabled"), "true");
+	assert.equal(ui.element("delay-hint").textContent, "Replies wait until you choose Send now.");
+	await flushPreferences();
+	assert.deepEqual((await storage.get()).envoyReplySettings, {
+		autoSend: false,
+		minDelaySeconds: 5,
+		maxDelaySeconds: 25,
+	});
+	ui.remount();
+	await flushPreferences();
+	assert.equal(ui.element("auto-send").getAttribute("aria-checked"), "false");
+	assert.equal(ui.element<HTMLInputElement>("delay-min").value, "5");
+	assert.equal(ui.element<HTMLInputElement>("delay-max").value, "25");
+});
+
+test("delay edits stay whole, bounded, and ordered", async (t) => {
+	const storage = preferenceStorage();
+	const ui = setup(t, storage);
+	await flushPreferences();
+	const range = () => [ui.element<HTMLInputElement>("delay-min").value, ui.element<HTMLInputElement>("delay-max").value];
+	ui.changeField("delay-min", "30");
+	assert.deepEqual(range(), ["30", "30"]);
+	ui.changeField("delay-max", "12.4");
+	assert.deepEqual(range(), ["12", "12"]);
+	ui.changeField("delay-max", "9000");
+	assert.deepEqual(range(), ["12", "600"]);
+	ui.changeField("delay-min", "0");
+	assert.deepEqual(range(), ["1", "600"]);
+	ui.changeField("delay-min", "");
+	assert.deepEqual(range(), ["1", "600"]);
+	await flushPreferences();
+	assert.deepEqual((await storage.get()).envoyReplySettings, {
+		autoSend: true,
+		minDelaySeconds: 1,
+		maxDelaySeconds: 600,
+	});
+});
+
+test("stored reply settings from older or broken data fall back to defaults", async (t) => {
+	const ui = setup(
+		t,
+		preferenceStorage({ envoyReplySettings: { autoSend: "yes", minDelaySeconds: 40, maxDelaySeconds: 20 } }),
+	);
+	await flushPreferences();
+	assert.equal(ui.element("auto-send").getAttribute("aria-checked"), "true");
+	assert.equal(ui.element<HTMLInputElement>("delay-min").value, "40");
+	assert.equal(ui.element<HTMLInputElement>("delay-max").value, "40");
+});
+
+test("an active task notes that reply settings apply right away", async (t) => {
+	const ui = setup(t);
+	await flushPreferences();
+	ui.update({ task, isOwner: true });
+	ui.element<HTMLButtonElement>("goal-toggle").click();
+	assert.equal(ui.element("goal-hint").hidden, false);
+	assert.equal(
+		ui.element("delay-hint").textContent,
+		"Replies send after a 10-second countdown. Changes apply right away.",
+	);
+	ui.element<HTMLButtonElement>("auto-send").click();
+	ui.update({
+		task: {
+			...task,
+			status: "pending",
+			pendingReply: { commandId: "c1", chatId: task.chatId, expectedRevision: "revision-1", text: "Hi", sendAt: null },
+		},
+	});
+	assert.equal(ui.element("countdown").textContent, "Waiting for Send now.");
 });
 
 test("reply controls keep interruption actions available during thinking and sending", async (t) => {
