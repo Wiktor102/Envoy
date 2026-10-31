@@ -105,6 +105,11 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 			field.value = value;
 			field.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 		},
+		setDetailsOpen(open: boolean) {
+			const details = (view.panel.getRootNode() as ShadowRoot).querySelector("#envoy-agent-messages details")!;
+			details.open = open;
+			details.dispatchEvent(new dom.window.Event("toggle"));
+		},
 		selectTab(showEnvoy: boolean) {
 			view.selectTab(showEnvoy);
 		},
@@ -425,6 +430,30 @@ test("agent state shows once and hides when it repeats the last Envoy message", 
 	ui.update({ task: { ...task, status: "paused", detail: null }, isOwner: false });
 	assert.equal(ui.element("agent-state").hidden, false);
 	assert.equal(ui.element("agent-state").textContent, "Paused. (Not connected to this tab.)");
+});
+
+test("open tool calls stay open across re-renders but reset for a new task", (t) => {
+	const ui = setup(t);
+	const chatting: TaskState = {
+		...task,
+		status: "waiting",
+		detail: null,
+		agentChat: [{ id: "e1", role: "event", text: "Reply sent.", body: "It's okay!", createdAt: 1 }],
+	};
+	ui.update({ task: chatting, isOwner: true });
+	ui.setDetailsOpen(true);
+	ui.update({ task: { ...chatting }, isOwner: true });
+	assert.equal(ui.element("agent-messages").querySelector("details")!.open, true);
+	ui.update({
+		task: {
+			...chatting,
+			agentChat: [...chatting.agentChat, { id: "a1", role: "user", text: "Thanks.", body: null, createdAt: 2 }],
+		},
+		isOwner: true,
+	});
+	assert.equal(ui.element("agent-messages").querySelector("details")!.open, true);
+	ui.update({ task: { ...chatting, id: "task-2" }, isOwner: true });
+	assert.equal(ui.element("agent-messages").querySelector("details")!.open, false);
 });
 
 test("unowned tasks explain who controls them and hide an empty header", (t) => {

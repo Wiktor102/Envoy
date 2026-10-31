@@ -119,6 +119,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	// The backend clears the pending reply once it hands it to the tab.
 	let sendingReply: { taskId: string; text: string } | null = null;
 	let renderedConversation: string | null = null;
+	let renderedAgentChat: string | null = null;
+	const openToolCalls = new Set<string>();
 	let developerMode = false;
 	let developerModeChanged = false;
 	let preferenceWrite = Promise.resolve();
@@ -235,6 +237,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		if ((task?.id ?? null) !== displayedTaskId || (owner && !displayedTaskOwner)) {
 			displayedTaskId = task?.id ?? null;
 			goalEditorOpen = false;
+			renderedAgentChat = null;
+			openToolCalls.clear();
 			if (task && owner && !goalDirty) goal.value = task.goal;
 		}
 		displayedTaskOwner = owner;
@@ -268,34 +272,43 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		agentState.hidden = !task || baseState === lastAgent?.text;
 		agentState.dataset.status = task?.status ?? "idle";
 		agentEmpty.hidden = chat.length !== 0 || !active || !owner;
-		agentMessages.replaceChildren();
-		for (const message of chat) {
-			const item = document.createElement("li");
-			item.dataset.role = message.role;
-			if (message.role === "event" && message.body) {
-				item.classList.add("tool-call");
-				const details = document.createElement("details");
-				const summary = document.createElement("summary");
-				summary.textContent = message.text;
-				const body = document.createElement("p");
-				body.className = "message-text";
-				body.dir = "auto";
-				body.textContent = message.body;
-				details.append(summary, body);
-				item.append(details);
-			} else {
-				if (message.role !== "event") {
-					const sender = document.createElement("strong");
-					sender.textContent = message.role === "agent" ? "Envoy" : "You";
-					item.append(sender);
+		const chatKey = JSON.stringify(chat.map(({ id, role, text, body }) => [id, role, text, body]));
+		if (chatKey !== renderedAgentChat) {
+			renderedAgentChat = chatKey;
+			agentMessages.replaceChildren();
+			for (const message of chat) {
+				const item = document.createElement("li");
+				item.dataset.role = message.role;
+				if (message.role === "event" && message.body) {
+					item.classList.add("tool-call");
+					const details = document.createElement("details");
+					details.open = openToolCalls.has(message.id);
+					details.addEventListener("toggle", () => {
+						if (details.open) openToolCalls.add(message.id);
+						else openToolCalls.delete(message.id);
+					});
+					const summary = document.createElement("summary");
+					summary.textContent = message.text;
+					const body = document.createElement("p");
+					body.className = "message-text";
+					body.dir = "auto";
+					body.textContent = message.body;
+					details.append(summary, body);
+					item.append(details);
+				} else {
+					if (message.role !== "event") {
+						const sender = document.createElement("strong");
+						sender.textContent = message.role === "agent" ? "Envoy" : "You";
+						item.append(sender);
+					}
+					const text = document.createElement("span");
+					text.className = "message-text";
+					text.dir = "auto";
+					text.textContent = message.text;
+					item.append(text);
 				}
-				const text = document.createElement("span");
-				text.className = "message-text";
-				text.dir = "auto";
-				text.textContent = message.text;
-				item.append(text);
+				agentMessages.append(item);
 			}
-			agentMessages.append(item);
 		}
 		footer.hidden = !owner || !active;
 		answerText.disabled = busy;
