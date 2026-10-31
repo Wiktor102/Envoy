@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ConversationMessage, MessageAttachment } from "../src/index.js";
-import { attachmentIdentity, forwardableImageSlots, MAX_SNAPSHOT_IMAGES } from "../src/index.js";
+import { attachmentIdentity, forwardableImageSlots, MAX_SNAPSHOT_IMAGES, messageContent } from "../src/index.js";
 
 const media = { mime: "image/jpeg" as const, data: "AAAA", width: 4, height: 4 };
 
@@ -61,5 +61,18 @@ test("attachment identity strips inline bytes but keeps the source", () => {
 		type: "sticker",
 		url: null,
 		description: null,
+	});
+});
+
+test("message content drops the node ID, sender label, and inline bytes", () => {
+	const content = messageContent({ ...message([local()]), id: "other-node", sender: "Alex", text: "Hi" });
+	assert.deepEqual(content, messageContent({ ...message([local()]), text: "Hi" }));
+	assert.deepEqual(content, {
+		text: "Hi",
+		direction: "incoming",
+		replyTo: null,
+		attachments: [{ type: "image", url: null, description: null, media: null }],
+		reactions: [],
+		unsent: false,
 	});
 });

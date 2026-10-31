@@ -51,7 +51,8 @@ export const MAX_SNAPSHOT_IMAGES = 4;
 export const MAX_INLINE_MEDIA_CHARS = 1_000_000;
 export const MAX_SNAPSHOT_MEDIA_CHARS = 3_000_000;
 
-export type InlineImageMime = "image/jpeg" | "image/png" | "image/webp";
+export const INLINE_IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp"] as const;
+export type InlineImageMime = (typeof INLINE_IMAGE_MIMES)[number];
 
 export interface InlineImageMedia {
 	mime: InlineImageMime;
@@ -121,6 +122,14 @@ export interface ConversationSnapshot {
 	participants: readonly string[];
 }
 
+// Upper bound for a reply, the user's instructions, or an answer to the agent.
+export const MAX_TASK_TEXT_LENGTH = 4000;
+
+// Replies must be a single line without control characters.
+export function hasControlCharacters(text: string): boolean {
+	return /[\u0000-\u001f\u007f\u2028\u2029]/u.test(text);
+}
+
 export interface SendReplyCommand {
 	commandId: string;
 	chatId: string;
@@ -135,6 +144,10 @@ export interface PendingReply extends SendReplyCommand {
 
 export type TaskStatus =
 	"thinking" | "waiting" | "pending" | "editing" | "sending" | "paused" | "needs_user" | "completed" | "taken_over";
+
+export function isTaskEnded(status: TaskStatus): boolean {
+	return status === "completed" || status === "taken_over";
+}
 
 export type AgentChatRole = "agent" | "user" | "event";
 
@@ -193,6 +206,12 @@ export type HealthReply = { ok: true; health: HealthResponse } | { ok: false; er
 // the revision through the fingerprint; hashing base64 would only churn.
 export function attachmentIdentity(attachment: MessageAttachment): MessageAttachment {
 	return attachment.type === "image" && attachment.media ? { ...attachment, media: null } : attachment;
+}
+
+// The content a revision covers. Node IDs are temporary, sender labels are
+// attribution-only, and inline bytes are transport.
+export function messageContent({ text, direction, replyTo, attachments, reactions, unsent }: ConversationMessage) {
+	return { text, direction, replyTo, attachments: attachments.map(attachmentIdentity), reactions, unsent };
 }
 
 function fetchableImageUrl(url: string | null): boolean {
