@@ -128,15 +128,19 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 	};
 }
 
-test("setup shows the chat name next to goal setup and hides it when unknown", (t) => {
+test("diagnostics show the chat name and use it for incoming preview senders", (t) => {
 	const ui = setup(t);
+	const senders = () => [...ui.element("conversation").querySelectorAll("li strong")].map((sender) => sender.textContent);
 	assert.equal(ui.element("chat-name").hidden, true);
+	assert.deepEqual(senders(), ["Other person"]);
 	ui.update({ snapshot: { ...snapshot, participants: ["Wiktor Golicz"] } });
 	assert.equal(ui.element("chat-name").hidden, false);
 	assert.equal(ui.element("chat-name").textContent, "Chat name: Wiktor Golicz");
+	assert.deepEqual(senders(), ["Wiktor Golicz"]);
 	ui.update({ snapshot: { ...snapshot, participants: [] } });
 	assert.equal(ui.element("chat-name").hidden, true);
 	assert.equal(ui.element("chat-name").textContent, "");
+	assert.deepEqual(senders(), ["Other person"]);
 	ui.update({ snapshot: null });
 	assert.equal(ui.element("chat-name").hidden, true);
 });
