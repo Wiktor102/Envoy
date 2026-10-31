@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { AgentDecision, ConversationSnapshot, TaskState } from "@envoy/contracts";
+import type { AgentChatMessage, AgentDecision, ConversationSnapshot, TaskState } from "@envoy/contracts";
 import type { Agent, EvaluationReason } from "./agent.js";
 
 const MODEL_API_BASE_URL = "https://api.meta.ai/v1";
@@ -41,6 +41,7 @@ export class MetaModelAdapter implements Agent {
 							"The evaluation reason tells you why you are considering the conversation now. On task_started, instructions_updated, or user_resumed, " +
 							"you may initiate a message toward the goal even if the chat is empty or the user spoke last. " +
 							"If the relevant question has already been asked and an answer is pending, wait rather than repeat it or send a follow-up. " +
+							"Your earlier questions, the user's answers, and reply outcomes arrive with the instructions; use them and do not repeat answered questions. " +
 							"A wait decision stays idle until a new message or an explicit user action; there are no timed reminders. " +
 							"Only the currently visible portion of the chat is available; do not assume unseen history. " +
 							"Some earlier messages may have unknown authors, unreadable attachments, empty text, or incomplete reply previews. " +
@@ -53,7 +54,9 @@ export class MetaModelAdapter implements Agent {
 					},
 					{
 						role: "developer",
-						content: `User's instructions: ${JSON.stringify(task.goal)}\nEvaluation reason: ${reason}`,
+						content:
+							`User's instructions: ${JSON.stringify(task.goal)}\nEvaluation reason: ${reason}` +
+							formatAgentChat(task.agentChat),
 					},
 					{
 						role: "user",
@@ -87,6 +90,12 @@ export class MetaModelAdapter implements Agent {
 		}
 		return parseDecision(parsed);
 	}
+}
+
+function formatAgentChat(chat: readonly AgentChatMessage[]): string {
+	if (!chat.length) return "";
+	const lines = chat.map(({ role, text, body }) => (body ? { role, text, body } : { role, text }));
+	return `\nConversation with the user: ${JSON.stringify(lines)}`;
 }
 
 function parseDecision(value: unknown): AgentDecision {

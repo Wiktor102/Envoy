@@ -57,15 +57,24 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const conversationNotice = element<HTMLElement>("#envoy-conversation-notice");
 	const conversation = element<HTMLOListElement>("#envoy-conversation");
 	const conversationEmpty = element<HTMLElement>("#envoy-conversation-empty");
+	const header = element<HTMLElement>("#envoy-header");
+	const goalToggle = element<HTMLButtonElement>("#envoy-goal-toggle");
+	const goalText = element<HTMLElement>("#envoy-goal-text");
+	const instructions = element<HTMLElement>("#envoy-instructions");
+	const thread = element<HTMLElement>("#envoy-thread");
+	const footer = element<HTMLElement>("#envoy-footer");
 	const goal = element<HTMLTextAreaElement>("#envoy-goal");
 	const goalHint = element<HTMLElement>("#envoy-goal-hint");
 	const startButton = element<HTMLButtonElement>("#envoy-start");
 	const updateGoalButton = element<HTMLButtonElement>("#envoy-update-goal");
-	const taskStatus = element<HTMLElement>("#envoy-task-status");
 	const taskId = element<HTMLElement>("#envoy-task-id");
 	const taskChat = element<HTMLElement>("#envoy-task-chat");
 	const taskNotice = element<HTMLElement>("#envoy-task-notice");
-	const taskDetail = element<HTMLElement>("#envoy-task-detail");
+	const agentState = element<HTMLElement>("#envoy-agent-state");
+	const agentEmpty = element<HTMLElement>("#envoy-agent-empty");
+	const agentMessages = element<HTMLOListElement>("#envoy-agent-messages");
+	const answerText = element<HTMLTextAreaElement>("#envoy-answer-text");
+	const answerSend = element<HTMLButtonElement>("#envoy-answer-send");
 	const pendingSection = element<HTMLElement>("#envoy-pending");
 	const pendingText = element<HTMLElement>("#envoy-pending-text");
 	const countdown = element<HTMLElement>("#envoy-countdown");
@@ -73,9 +82,10 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const editText = element<HTMLTextAreaElement>("#envoy-reply-edit");
 	isolateTextInput(goal);
 	isolateTextInput(editText);
+	isolateTextInput(answerText);
 	const saveEditButton = element<HTMLButtonElement>("#envoy-save-edit");
 	const replyControls = element<HTMLElement>("#envoy-reply-controls");
-	const taskControls = element<HTMLElement>("#envoy-task-controls");
+	const cancelThinking = element<HTMLButtonElement>("#envoy-cancel-thinking");
 	const sendButton = element<HTMLButtonElement>("#envoy-send-now");
 	const editButton = element<HTMLButtonElement>("#envoy-edit");
 	const cancelButton = element<HTMLButtonElement>("#envoy-cancel");
@@ -84,6 +94,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const reconnectButton = element<HTMLButtonElement>("#envoy-reconnect");
 	const takeoverButton = element<HTMLButtonElement>("#envoy-take-over");
 	const deleteButton = element<HTMLButtonElement>("#envoy-delete");
+	const ownerHint = element<HTMLElement>("#envoy-owner-hint");
 	const deleteHint = element<HTMLElement>("#envoy-delete-hint");
 	const error = element<HTMLElement>("#envoy-error");
 	const healthButton = element<HTMLButtonElement>("#envoy-health");
@@ -102,10 +113,15 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	let displayedTaskId: string | null = null;
 	let displayedTaskOwner = false;
 	let goalDirty = false;
+	let goalEditorOpen = false;
+	let lastChatCount = 0;
+	let lastPendingKey: string | null = null;
 	let editingCommandId: string | null = null;
 	// The backend clears the pending reply once it hands it to the tab.
 	let sendingReply: { taskId: string; text: string } | null = null;
 	let renderedConversation: string | null = null;
+	let renderedAgentChat: string | null = null;
+	const openToolCalls = new Set<string>();
 	let developerMode = false;
 	let developerModeChanged = false;
 	let preferenceWrite = Promise.resolve();
@@ -221,6 +237,9 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		const currentChat = Boolean(task && state.snapshot?.chatId === task.chatId);
 		if ((task?.id ?? null) !== displayedTaskId || (owner && !displayedTaskOwner)) {
 			displayedTaskId = task?.id ?? null;
+			goalEditorOpen = false;
+			renderedAgentChat = null;
+			openToolCalls.clear();
 			if (task && owner && !goalDirty) goal.value = task.goal;
 		}
 		displayedTaskOwner = owner;
@@ -233,24 +252,79 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		startButton.disabled = busy || !state.snapshot || !goal.value.trim();
 		updateGoalButton.hidden = !active;
 		updateGoalButton.disabled = busy || !owner || !goal.value.trim() || goal.value.trim() === task?.goal;
+		instructions.hidden = Boolean(task) && (!active || !goalEditorOpen);
+		goalToggle.hidden = !task || !owner;
+		goalToggle.disabled = busy || !active;
+		goalToggle.setAttribute("aria-expanded", String(goalEditorOpen));
+		goalText.textContent = task?.goal ?? "";
+		thread.hidden = !task;
+		thread.dataset.status = task?.status ?? "idle";
 
-		taskStatus.textContent = task
-			? `${statusLabels[task.status]}${active && !owner ? " (not connected to this tab)" : ""}.`
-			: "No active task.";
-		taskStatus.dataset.status = task?.status ?? "idle";
 		taskId.textContent = task ? `Task ID: ${task.id}` : "";
 		taskId.hidden = !task;
 		taskChat.textContent = task ? `Task chat: ${task.chatId}` : "";
 		taskChat.hidden = !task || currentChat;
 		taskNotice.textContent = "This task belongs to another conversation. Reopen its dedicated tab to continue.";
 		taskNotice.hidden = !task || !state.snapshot || currentChat;
-		taskDetail.textContent = owner ? (task?.detail ?? "") : "";
-		taskDetail.hidden = !owner || !task?.detail;
+		const chat = owner && task ? task.agentChat : [];
+		const baseState = task ? (task.detail ?? `${statusLabels[task.status]}.`) : "";
+		const lastAgent = [...chat].reverse().find((message) => message.role === "agent");
+		agentState.textContent = baseState + (task && active && !owner ? " (Not connected to this tab.)" : "");
+		agentState.hidden = !task || baseState === lastAgent?.text;
+		agentState.dataset.status = task?.status ?? "idle";
+		agentEmpty.hidden = chat.length !== 0 || !active || !owner;
+		const chatKey = JSON.stringify(chat.map(({ id, role, text, body }) => [id, role, text, body]));
+		if (chatKey !== renderedAgentChat) {
+			renderedAgentChat = chatKey;
+			agentMessages.replaceChildren();
+			for (const message of chat) {
+				const item = document.createElement("li");
+				item.dataset.role = message.role;
+				if (message.role === "event" && message.body) {
+					item.classList.add("tool-call");
+					const details = document.createElement("details");
+					details.open = openToolCalls.has(message.id);
+					details.addEventListener("toggle", () => {
+						if (details.open) openToolCalls.add(message.id);
+						else openToolCalls.delete(message.id);
+					});
+					const summary = document.createElement("summary");
+					summary.textContent = message.text;
+					const body = document.createElement("p");
+					body.className = "message-text";
+					body.dir = "auto";
+					body.textContent = message.body;
+					details.append(summary, body);
+					item.append(details);
+				} else {
+					if (message.role !== "event") {
+						const sender = document.createElement("strong");
+						sender.textContent = message.role === "agent" ? "Envoy" : "You";
+						item.append(sender);
+					}
+					const text = document.createElement("span");
+					text.className = "message-text";
+					text.dir = "auto";
+					text.textContent = message.text;
+					item.append(text);
+				}
+				agentMessages.append(item);
+			}
+		}
+		footer.hidden = !owner || !active;
+		answerText.disabled = busy;
+		answerSend.disabled = busy || !answerText.value.trim();
 		const pending = owner ? (task?.pendingReply ?? null) : null;
 		if (task && pending) sendingReply = { taskId: task.id, text: pending.text };
 		else if (task?.status !== "sending" || task.id !== sendingReply?.taskId) sendingReply = null;
 		const shownText = pending?.text ?? (owner ? sendingReply?.text : undefined) ?? null;
 		pendingSection.hidden = shownText === null;
+		const pendingKey = pending ? pending.commandId : sendingReply ? `sending:${task?.id}` : null;
+		if (chat.length > lastChatCount || (pendingKey && pendingKey !== lastPendingKey)) {
+			panel.scrollTop = panel.scrollHeight;
+		}
+		lastChatCount = chat.length;
+		lastPendingKey = pendingKey;
 		pendingText.textContent = shownText ?? "";
 		const editing = Boolean(task?.status === "editing" && pending && owner);
 		editor.hidden = !editing;
@@ -262,7 +336,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		}
 
 		replyControls.hidden = !owner || !task || !["thinking", "pending", "editing", "sending"].includes(task.status);
-		taskControls.hidden = !task;
+		cancelThinking.hidden = !owner || task?.status !== "thinking";
+		cancelThinking.disabled = busy;
 		sendButton.disabled = busy || !owner || !currentChat || task?.status !== "pending" || !pending;
 		editButton.disabled =
 			busy || !owner || !currentChat || !(task?.status === "sending" || (task?.status === "pending" && pending));
@@ -270,14 +345,24 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			busy || !owner || !task || !["thinking", "pending", "editing", "sending"].includes(task.status);
 		saveEditButton.disabled = busy || !editing || !editText.value.trim();
 		editText.disabled = busy;
-		pauseButton.disabled = busy || !owner || !active || task?.status === "paused";
-		resumeButton.disabled =
-			busy || !owner || !currentChat || (task?.status !== "paused" && task?.status !== "needs_user");
-		reconnectButton.hidden = !(task?.status === "paused" && !owner && currentChat);
+		pauseButton.hidden = !owner || !active || task?.status === "paused";
+		pauseButton.disabled = busy || task?.status === "paused";
+		resumeButton.hidden = !owner || (task?.status !== "paused" && task?.status !== "needs_user");
+		resumeButton.disabled = busy || !currentChat || (task?.status !== "paused" && task?.status !== "needs_user");
+		const showReconnect = task?.status === "paused" && !owner && currentChat;
+		reconnectButton.hidden = !showReconnect;
 		reconnectButton.disabled = busy;
-		takeoverButton.disabled = busy || !owner || !active;
+		takeoverButton.hidden = !owner || !active;
+		takeoverButton.disabled = busy || !active;
 		deleteButton.hidden = !task || active;
 		deleteButton.disabled = busy;
+		header.hidden =
+			!task ||
+			(goalToggle.hidden && pauseButton.hidden && resumeButton.hidden && takeoverButton.hidden && deleteButton.hidden);
+		ownerHint.hidden = !(task && !owner && active);
+		ownerHint.textContent = showReconnect
+			? "This task is paused. Reconnect to control it from this tab."
+			: "This task is controlled by another tab.";
 		deleteHint.hidden = deleteButton.hidden;
 		deleteHint.textContent =
 			"Check the conversation for any unconfirmed send before deleting this task." +
@@ -312,10 +397,22 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		render();
 	});
 	editText.addEventListener("input", render);
+	answerText.addEventListener("input", render);
+	goalToggle.addEventListener("click", () => {
+		if (!state.task || !state.isOwner) return;
+		goalEditorOpen = !goalEditorOpen;
+		if (goalEditorOpen) {
+			goal.value = state.task.goal;
+			goalDirty = false;
+		}
+		render();
+		if (goalEditorOpen) goal.focus();
+	});
 	startButton.addEventListener("click", () => {
 		const value = goal.value.trim();
 		void run(async () => {
 			await controller.start(value);
+			goalEditorOpen = false;
 			if (goal.value.trim() === value) goalDirty = false;
 		});
 	});
@@ -323,13 +420,22 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		const value = goal.value.trim();
 		void run(async () => {
 			await controller.control("update-goal", value);
+			goalEditorOpen = false;
 			if (goal.value.trim() === value) goalDirty = false;
+		});
+	});
+	answerSend.addEventListener("click", () => {
+		const value = answerText.value.trim();
+		void run(async () => {
+			await controller.control("answer-agent", value);
+			if (answerText.value.trim() === value) answerText.value = "";
 		});
 	});
 	sendButton.addEventListener("click", () => control("send-now"));
 	editButton.addEventListener("click", () => control("edit"));
 	saveEditButton.addEventListener("click", () => control("save-edit", editText.value.trim()));
 	cancelButton.addEventListener("click", () => control("cancel"));
+	cancelThinking.addEventListener("click", () => control("cancel"));
 	pauseButton.addEventListener("click", () => control("pause"));
 	resumeButton.addEventListener("click", () => control("resume"));
 	reconnectButton.addEventListener("click", () => void run(() => controller.attach()));
@@ -339,6 +445,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			await controller.clear();
 			goal.value = "";
 			goalDirty = false;
+			goalEditorOpen = false;
 			editText.value = "";
 		});
 	});

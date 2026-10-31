@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { AgentDecision, ConversationMessage, ConversationSnapshot } from "@envoy/contracts";
+import type { AgentDecision, ConversationMessage, ConversationSnapshot, TaskState } from "@envoy/contracts";
 import type { Agent, EvaluationReason } from "../src/agent/agent.js";
 import { ExtensionConnector } from "../src/connectors/extension-connector.js";
 import { TaskService } from "../src/tasks/service.js";
@@ -20,18 +20,19 @@ function snapshot(
 
 class ControlledAgent implements Agent {
 	calls: {
+		task: TaskState;
 		snapshot: ConversationSnapshot;
 		reason: EvaluationReason;
 		signal: AbortSignal | undefined;
 		resolve: (decision: AgentDecision) => void;
 	}[] = [];
 	run(
-		_task: unknown,
+		task: TaskState,
 		conversation: ConversationSnapshot,
 		reason: EvaluationReason,
 		signal?: AbortSignal,
 	): Promise<AgentDecision> {
-		return new Promise((resolve) => this.calls.push({ snapshot: conversation, reason, signal, resolve }));
+		return new Promise((resolve) => this.calls.push({ task, snapshot: conversation, reason, signal, resolve }));
 	}
 }
 
@@ -924,4 +925,109 @@ test("instruction updates leave an uncertain paused send paused", async () => {
 	assert.equal(updated.status, "paused");
 	assert.match(updated.detail!, /may have completed/);
 	assert.equal(agent.calls.length, 1);
+});
+
+test("agent questions and user answers accumulate as task-local history", async () => {
+	const { agent, service } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	agent.calls[0]!.resolve({ action: "ask", text: "Is Friday allowed?" });
+	await Promise.resolve();
+	const asked = service.sync("owner", snapshot()).task!;
+	assert.equal(asked.status, "needs_user");
+	assert.equal(asked.agentChat.length, 1);
+	assert.equal(asked.agentChat[0]!.role, "agent");
+	assert.equal(asked.agentChat[0]!.text, "Is Friday allowed?");
+	assert.ok(asked.agentChat[0]!.id);
+
+	const answered = service.control("owner", task.id, "answer-agent", "Yes, after 3.");
+	assert.equal(answered.status, "thinking");
+	assert.equal(answered.goal, "Arrange a meeting");
+	assert.equal(answered.agentChat.length, 2);
+	assert.equal(answered.agentChat[1]!.role, "user");
+	assert.equal(answered.agentChat[1]!.text, "Yes, after 3.");
+	assert.equal(agent.calls.length, 2);
+	assert.deepEqual(
+		agent.calls[1]!.task.agentChat.map(({ role, text }) => ({ role, text })),
+		[
+			{ role: "agent", text: "Is Friday allowed?" },
+			{ role: "user", text: "Yes, after 3." },
+		],
+	);
+});
+
+test("answering the agent cancels a pending reply and re-evaluates", async () => {
+	const { agent, service } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	assert.equal(service.sync("owner", snapshot()).task?.status, "pending");
+	const answered = service.control("owner", task.id, "answer-agent", "Mention Thursday instead.");
+	assert.equal(answered.pendingReply, null);
+	assert.equal(answered.status, "thinking");
+	assert.equal(agent.calls.length, 2);
+	assert.equal(agent.calls[1]!.reason, "instructions_updated");
+});
+
+test("reply sends, edits, and cancellations are recorded for the model", async () => {
+	const { agent, service } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	service.control("owner", task.id, "edit");
+	service.control("owner", task.id, "save-edit", "Thursday works.");
+	service.control("owner", task.id, "send-now");
+	const claim = service.sync("owner", snapshot()).command!;
+	assert.equal(service.authorize("owner", claim.commandId, claim.chatId, claim.expectedRevision), true);
+	const sent = service.report("owner", claim.commandId, "sent")!;
+	assert.deepEqual(
+		sent.agentChat.map(({ role, text }) => ({ role, text })),
+		[
+			{ role: "event", text: "Reply edited to: Thursday works." },
+			{ role: "event", text: "Reply sent." },
+		],
+	);
+	assert.equal(sent.agentChat.find((entry) => entry.text === "Reply sent.")?.body, "Thursday works.");
+	service.sync("owner", snapshot("r2", "What time?"));
+	await resolveReply(agent, 1, "After 3.");
+	assert.equal(service.control("owner", task.id, "cancel").agentChat.at(-1)?.text, "Reply cancelled.");
+	service.sync("owner", snapshot("r3", "Friday instead?"));
+	assert.ok(agent.calls[2]!.task.agentChat.some((entry) => entry.text === "Reply sent."));
+	assert.ok(agent.calls[2]!.task.agentChat.some((entry) => entry.text === "Reply cancelled."));
+});
+
+test("other tabs receive no agent chat history", async () => {
+	const { agent, service } = setup();
+	const task = service.start("owner", "Private goal", snapshot());
+	agent.calls[0]!.resolve({ action: "ask", text: "Is Friday allowed?" });
+	await Promise.resolve();
+	service.control("owner", task.id, "answer-agent", "Yes.");
+	const other = service.sync("other", null);
+	assert.equal(other.isOwner, false);
+	assert.equal(other.task?.goal, "");
+	assert.deepEqual(other.task?.agentChat, []);
+	assert.equal(service.sync("owner", snapshot()).task?.agentChat.length, 2);
+});
+
+test("agent chat history keeps only recent entries", () => {
+	const { agent, service } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	for (let i = 0; i < 60; i++) {
+		service.control("owner", task.id, "answer-agent", `Guidance ${i}.`);
+	}
+	const state = service.sync("owner", snapshot()).task!;
+	assert.equal(state.agentChat.length, 50);
+	assert.equal(state.agentChat[0]!.text, "Guidance 10.");
+	assert.equal(agent.calls.length, 61);
+});
+
+test("answering an ended task is rejected", async () => {
+	const { agent, service } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	agent.calls[0]!.resolve({ action: "finish", text: "Meeting agreed." });
+	await Promise.resolve();
+	const completed = service.sync("owner", snapshot()).task!;
+	assert.equal(completed.status, "completed");
+	assert.deepEqual(
+		completed.agentChat.map(({ role, text }) => ({ role, text })),
+		[{ role: "agent", text: "Meeting agreed." }],
+	);
+	assert.throws(() => service.control("owner", task.id, "answer-agent", "Thanks."), /has ended/);
 });

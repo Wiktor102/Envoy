@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
+	AgentChatRole,
 	AgentDecision,
 	ConnectorSyncResult,
 	ConversationSnapshot,
@@ -18,6 +19,7 @@ const LEASE_MS = 8_000;
 const SEND_RESULT_TIMEOUT_MS = 30_000;
 const TERMINAL_RETENTION_MS = 60 * 60 * 1000;
 const MAX_REPLY_LENGTH = 4000;
+const MAX_AGENT_CHAT = 50;
 
 type Attempt = {
 	command: SendReplyCommand;
@@ -118,6 +120,7 @@ export class TaskService {
 			detail: this.requiresVerification
 				? "The previous send may have completed. Check the conversation before resuming."
 				: null,
+			agentChat: [],
 		};
 		this.touch();
 		this.evaluationReason = "task_started";
@@ -190,6 +193,7 @@ export class TaskService {
 				task.pendingReply.sendAt = null;
 				task.status = "pending";
 				task.detail = "Edited reply saved. Choose Send now when it is ready.";
+				this.appendAgentChat("event", `Reply edited to: ${updated}`);
 				break;
 			}
 			case "send-now": {
@@ -220,6 +224,10 @@ export class TaskService {
 				task.detail = uncertain
 					? "The send may have completed. Check the conversation before resuming."
 					: "Reply cancelled. Waiting for a new message.";
+				this.appendAgentChat(
+					"event",
+					uncertain ? "Cancel requested; the send may have completed." : "Reply cancelled.",
+				);
 				break;
 			}
 			case "pause": {
@@ -275,6 +283,28 @@ export class TaskService {
 				const uncertain = this.invalidate(true);
 				task.goal = goal;
 				task.pendingReply = null;
+				this.appendAgentChat("event", "Instructions updated.");
+				if (uncertain || this.requiresVerification) {
+					task.status = wasPaused ? "paused" : "needs_user";
+					task.detail = "The send may have completed. Check the conversation before resuming.";
+				} else {
+					this.processedRevisions.clear();
+					this.evaluationReason = "instructions_updated";
+					if (task.status !== "paused") {
+						task.status = "waiting";
+						task.detail = null;
+						this.maybeGenerate();
+					}
+				}
+				break;
+			}
+			case "answer-agent": {
+				if (task.status === "completed" || task.status === "taken_over") throw new Error("This task has ended.");
+				const answer = checkedText(text);
+				const wasPaused = task.status === "paused";
+				const uncertain = this.invalidate(true);
+				this.appendAgentChat("user", answer);
+				task.pendingReply = null;
 				if (uncertain || this.requiresVerification) {
 					task.status = wasPaused ? "paused" : "needs_user";
 					task.detail = "The send may have completed. Check the conversation before resuming.";
@@ -297,7 +327,11 @@ export class TaskService {
 		this.expireLease();
 		if (!this.task) return { task: null, isOwner: false, command: null };
 		if (connectorId !== this.owner) {
-			return { task: { ...this.state()!, goal: "", pendingReply: null, detail: null }, isOwner: false, command: null };
+			return {
+				task: { ...this.state()!, goal: "", pendingReply: null, detail: null, agentChat: [] },
+				isOwner: false,
+				command: null,
+			};
 		}
 		const task = this.task;
 		// Ended tasks can still be viewed and deleted, but no longer accept
@@ -350,6 +384,7 @@ export class TaskService {
 				if (uncertain) {
 					task.status = "needs_user";
 					task.detail = "The send may have completed. Check the conversation before resuming.";
+					this.appendAgentChat("event", "The send may have completed.");
 				} else if (!["paused", "needs_user", "completed", "taken_over"].includes(task.status)) {
 					task.status = "waiting";
 					task.detail = null;
@@ -479,6 +514,7 @@ export class TaskService {
 			this.task.detail = attempt.sendNowRequested
 				? "Sending when the agent tab checks in."
 				: "The reply was not sent. Choose Send now to try again, or cancel it.";
+			this.appendAgentChat("event", "The reply was not sent.");
 			return returnState();
 		}
 		this.suppressedRevisions.add(attempt.command.expectedRevision);
@@ -487,6 +523,7 @@ export class TaskService {
 		if (result === "sent" && attempt.authorized) {
 			this.task.status = "waiting";
 			this.task.detail = "Reply sent. Waiting for a new message.";
+			this.appendAgentChat("event", "Reply sent.", attempt.command.text);
 		} else {
 			if (result !== "rejected") this.requiresVerification = true;
 			this.task.status = "needs_user";
@@ -494,6 +531,10 @@ export class TaskService {
 				result === "rejected"
 					? "The reply was not sent. Check the conversation before resuming."
 					: "The send could not be confirmed. Check the conversation before resuming.";
+			this.appendAgentChat(
+				"event",
+				result === "rejected" ? "The reply was not sent." : "The send could not be confirmed.",
+			);
 		}
 		return returnState();
 	}
@@ -508,6 +549,14 @@ export class TaskService {
 
 	private state(): TaskState | null {
 		return this.task ? structuredClone(this.task) : null;
+	}
+
+	private appendAgentChat(role: AgentChatRole, text: string, body: string | null = null): void {
+		if (!this.task) return;
+		this.task.agentChat.push({ id: randomUUID(), role, text, body, createdAt: this.now() });
+		if (this.task.agentChat.length > MAX_AGENT_CHAT) {
+			this.task.agentChat.splice(0, this.task.agentChat.length - MAX_AGENT_CHAT);
+		}
 	}
 
 	private erase(): void {
@@ -602,6 +651,7 @@ export class TaskService {
 			if (this.task?.status === "sending") {
 				this.task.status = "needs_user";
 				this.task.detail = "The send could not be confirmed. Check the conversation before resuming.";
+				this.appendAgentChat("event", "The send could not be confirmed.");
 			}
 		}
 		for (const attempt of this.attempts.values()) {
@@ -620,6 +670,7 @@ export class TaskService {
 		this.suppressedRevisions.add(attempt.command.expectedRevision);
 		this.suppressedContexts.add(attempt.context);
 		this.task.pendingReply = null;
+		this.appendAgentChat("event", "A previous send may have completed.");
 		if (this.task.status === "taken_over" || this.task.status === "completed") {
 			if (this.retentionTimer) clearTimeout(this.retentionTimer);
 			this.retentionTimer = undefined;
@@ -780,10 +831,12 @@ export class TaskService {
 			case "ask":
 				task.status = "needs_user";
 				task.detail = decision.text;
+				this.appendAgentChat("agent", decision.text);
 				break;
 			case "finish":
 				task.status = "completed";
 				task.detail = decision.text;
+				this.appendAgentChat("agent", decision.text);
 				this.scheduleRetention(task.id);
 				break;
 		}

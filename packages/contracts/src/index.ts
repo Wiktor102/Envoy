@@ -62,6 +62,18 @@ export interface PendingReply extends SendReplyCommand {
 export type TaskStatus =
 	"thinking" | "waiting" | "pending" | "editing" | "sending" | "paused" | "needs_user" | "completed" | "taken_over";
 
+export type AgentChatRole = "agent" | "user" | "event";
+
+export interface AgentChatMessage {
+	// Backend-owned identifier. Unlike Messenger node IDs, it survives reloads.
+	id: string;
+	role: AgentChatRole;
+	text: string;
+	// Expandable detail, such as the text of a sent reply. Null when the line stands alone.
+	body: string | null;
+	createdAt: number;
+}
+
 export interface TaskState {
 	id: string;
 	chatId: string;
@@ -70,6 +82,9 @@ export interface TaskState {
 	pendingReply: PendingReply | null;
 	// A short status or question for the user. Never an API error containing message bodies.
 	detail: string | null;
+	// Private conversation with Envoy: agent questions, user answers, and reply
+	// outcomes. Task-local history; it dies with the task.
+	agentChat: AgentChatMessage[];
 }
 
 export type AgentDecision =
@@ -92,7 +107,7 @@ export interface ConnectorSyncResult {
 export type SendResult = "sent" | "rejected" | "uncertain";
 
 export type TaskControlAction =
-	"send-now" | "edit" | "save-edit" | "cancel" | "pause" | "resume" | "take-over" | "update-goal";
+	"send-now" | "edit" | "save-edit" | "cancel" | "pause" | "resume" | "take-over" | "update-goal" | "answer-agent";
 
 export interface HealthRequest {
 	type: "envoy:health";

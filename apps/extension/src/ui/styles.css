@@ -23,6 +23,8 @@
 	--envoy-on-primary: #fff;
 	--envoy-focus: #0866ff;
 	--envoy-error: #c4251c;
+	--envoy-success: #1a7f37;
+	--envoy-warning: #c2410c;
 }
 
 /* Follow Messenger's own theme, or the system theme until Messenger reports one. */
@@ -44,6 +46,8 @@
 	--envoy-on-primary: #10243d;
 	--envoy-focus: #75b8ff;
 	--envoy-error: #ffb4aa;
+	--envoy-success: #3fb950;
+	--envoy-warning: #d29922;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -65,6 +69,8 @@
 		--envoy-on-primary: #10243d;
 		--envoy-focus: #75b8ff;
 		--envoy-error: #ffb4aa;
+		--envoy-success: #3fb950;
+		--envoy-warning: #d29922;
 	}
 }
 
@@ -195,6 +201,115 @@ summary:focus-visible,
 	border-bottom-right-radius: 0;
 }
 
+#envoy-header {
+	position: sticky;
+	top: 0;
+	z-index: 5;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 12px;
+	background: var(--envoy-surface);
+	border-bottom: 1px solid var(--envoy-divider);
+}
+
+:host([data-facebook]) #envoy-header {
+	background: var(--envoy-facebook-surface);
+}
+
+.header-main {
+	flex: 1;
+	min-width: 0;
+}
+
+.icon-actions {
+	display: flex;
+	flex: none;
+	gap: 2px;
+}
+
+.icon-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	min-height: 0;
+	padding: 0;
+	border-radius: 8px;
+	background: transparent;
+}
+
+.icon-btn:not(:disabled):hover {
+	background: var(--envoy-control);
+}
+
+.icon-btn.primary:not(:disabled):hover {
+	background: var(--envoy-primary);
+}
+
+.icon-btn svg {
+	width: 18px;
+	height: 18px;
+	flex: none;
+}
+
+#envoy-resume:not(:disabled) {
+	color: var(--envoy-success);
+}
+
+#envoy-pause:not(:disabled) {
+	color: var(--envoy-warning);
+}
+
+#envoy-take-over:not(:disabled) {
+	color: var(--envoy-error);
+}
+
+.goal-line {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	min-height: 0;
+	padding: 2px 4px;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--envoy-secondary-text);
+	font-size: 12px;
+	font-weight: 400;
+	line-height: 1.4;
+	text-align: start;
+}
+
+.goal-line:not(:disabled):hover {
+	background: var(--envoy-control);
+}
+
+.goal-line span {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.goal-line .goal-label {
+	flex: none;
+	overflow: visible;
+	font-weight: 600;
+}
+
+.goal-line svg {
+	width: 14px;
+	height: 14px;
+	flex: none;
+}
+
+.goal-line:disabled svg {
+	display: none;
+}
+
 section,
 .diagnostics {
 	padding: 20px 16px;
@@ -306,9 +421,8 @@ button.primary:focus-visible:not(:disabled) {
 	color: var(--envoy-error);
 }
 
-.task-controls {
-	padding-top: 12px;
-	border-top: 1px solid var(--envoy-divider);
+#envoy-thread {
+	padding: 12px 16px 16px;
 }
 
 .hint,
@@ -383,35 +497,144 @@ summary .hint {
 	overflow-wrap: anywhere;
 }
 
-.task-status {
-	display: flex;
-	align-items: baseline;
-	gap: 8px;
-	padding: 10px 12px;
-	border-radius: 10px;
-	background: var(--envoy-control);
+.agent-state {
+	margin: 12px 0 0;
 	font-size: 13px;
 	font-weight: 600;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 
-.task-status::before {
+.agent-state::before {
 	content: "";
-	flex: 0 0 7px;
+	display: inline-block;
+	width: 7px;
 	height: 7px;
+	margin-inline-end: 8px;
 	border-radius: 50%;
 	background: var(--envoy-secondary-text);
 }
 
-.task-status:is([data-status="thinking"], [data-status="pending"], [data-status="sending"])::before {
+.agent-state:is([data-status="thinking"], [data-status="pending"], [data-status="sending"])::before {
 	background: var(--envoy-focus);
 }
 
-.task-status[data-status="needs_user"]::before {
+.agent-state[data-status="needs_user"]::before {
 	background: var(--envoy-error);
 }
 
-.task-detail {
-	padding: 4px 0;
+.cancel-thinking {
+	display: block;
+	min-height: 0;
+	margin: 2px 0 0;
+	padding: 2px 0;
+	background: transparent;
+	color: var(--envoy-error);
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.cancel-thinking:not(:disabled):hover {
+	background: transparent;
+	text-decoration: underline;
+}
+
+.reconnect-btn {
+	width: 100%;
+	margin-top: 12px;
+}
+
+#envoy-agent-messages {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+#envoy-agent-messages li {
+	margin-top: 8px;
+	padding: 8px 10px;
+	border-radius: 2px 10px 10px 10px;
+	background: var(--envoy-message);
+}
+
+#envoy-agent-messages li[data-role="user"] {
+	margin-inline-start: 24px;
+	border-radius: 10px 10px 2px 10px;
+	background: var(--envoy-tab-selected);
+}
+
+#envoy-agent-messages li[data-role="event"] {
+	padding: 0;
+	background: transparent;
+	text-align: center;
+	font-size: 12px;
+	color: var(--envoy-secondary-text);
+}
+
+#envoy-agent-messages li.tool-call {
+	text-align: start;
+}
+
+#envoy-agent-messages li.tool-call summary {
+	cursor: pointer;
+}
+
+#envoy-agent-messages li.tool-call summary:hover {
+	color: var(--envoy-text);
+}
+
+#envoy-agent-messages li.tool-call p {
+	margin: 6px 0 0;
+	padding: 8px 10px;
+	border: 1px dashed var(--envoy-control-border);
+	border-radius: 2px 10px 10px 10px;
+	color: color-mix(in srgb, var(--envoy-text) 80%, var(--envoy-secondary-text));
+	font-size: 13px;
+	font-weight: 400;
+}
+
+#envoy-agent-messages strong {
+	display: block;
+	margin-bottom: 2px;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--envoy-secondary-text);
+}
+
+#envoy-footer {
+	position: sticky;
+	bottom: 0;
+	z-index: 5;
+	padding: 10px 12px;
+	background: var(--envoy-surface);
+	border-top: 1px solid var(--envoy-divider);
+}
+
+:host([data-facebook]) #envoy-footer {
+	background: var(--envoy-facebook-surface);
+}
+
+.answer-bar {
+	display: flex;
+	align-items: flex-end;
+	gap: 8px;
+}
+
+.answer-bar textarea {
+	flex: 1;
+	min-width: 0;
+	min-height: 40px;
+	resize: none;
+}
+
+#envoy-answer-send {
+	width: 40px;
+	height: 40px;
+}
+
+#envoy-answer-send svg {
+	width: 20px;
+	height: 20px;
 }
 
 .pending-reply {
@@ -435,7 +658,7 @@ summary .hint {
 	font-variant-numeric: tabular-nums;
 }
 
-.task-status:is([data-status="pending"], [data-status="sending"]) ~ .pending-reply #envoy-countdown {
+#envoy-thread:is([data-status="pending"], [data-status="sending"]) #envoy-countdown {
 	color: var(--envoy-tab-selected-text);
 }
 
@@ -448,7 +671,7 @@ summary .hint {
 }
 
 #envoy-error {
-	margin-top: 12px;
+	margin: 12px 16px 0;
 	padding: 10px 12px;
 	border: 1px solid var(--envoy-error);
 	border-radius: 10px;

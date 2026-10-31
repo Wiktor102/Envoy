@@ -17,7 +17,61 @@
 	</button>
 </div>
 <div id="envoy-panel" role="tabpanel" aria-labelledby="envoy-tab" tabindex="0" hidden>
-	<section aria-labelledby="envoy-goal-title">
+	<header id="envoy-header">
+		<div class="header-main">
+			<button
+				type="button"
+				id="envoy-goal-toggle"
+				class="goal-line"
+				aria-expanded="false"
+				title="Edit instructions"
+				hidden
+			>
+				<span class="goal-label">Goal</span>
+				<span id="envoy-goal-text"></span>
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+					<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+				</svg>
+			</button>
+		</div>
+		<div id="envoy-header-actions" class="icon-actions" role="group" aria-label="Task actions">
+			<button type="button" id="envoy-pause" class="icon-btn" aria-label="Pause" title="Pause" hidden>
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
+					<line x1="9" y1="5" x2="9" y2="19" />
+					<line x1="15" y1="5" x2="15" y2="19" />
+				</svg>
+			</button>
+			<button type="button" id="envoy-resume" class="icon-btn" aria-label="Resume" title="Resume" hidden>
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+					<polygon points="6 4 20 12 6 20 6 4" />
+				</svg>
+			</button>
+			<button type="button" id="envoy-take-over" class="icon-btn" aria-label="Take over" title="Take over" hidden>
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+					<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+					<polyline points="16 17 21 12 16 7" />
+					<line x1="21" y1="12" x2="9" y2="12" />
+				</svg>
+			</button>
+			<button
+				type="button"
+				id="envoy-delete"
+				class="icon-btn danger"
+				aria-label="Delete task"
+				title="Delete task"
+				hidden
+			>
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+					<polyline points="3 6 5 6 21 6" />
+					<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+					<line x1="10" y1="11" x2="10" y2="17" />
+					<line x1="14" y1="11" x2="14" y2="17" />
+				</svg>
+			</button>
+		</div>
+	</header>
+	<p id="envoy-error" role="alert" hidden></p>
+	<section id="envoy-instructions" aria-labelledby="envoy-goal-title" hidden>
 		<h2 id="envoy-goal-title">Your instructions</h2>
 		<p id="envoy-conversation-notice" class="hint" role="status" hidden></p>
 		<label for="envoy-goal">Goal and limits</label>
@@ -33,11 +87,10 @@
 			<button type="button" id="envoy-update-goal" class="primary" hidden>Update instructions</button>
 		</div>
 	</section>
-	<section aria-labelledby="envoy-controls-title">
-		<h2 id="envoy-controls-title">Agent</h2>
-		<p id="envoy-task-status" class="task-status" role="status">No active task.</p>
+	<section id="envoy-thread" aria-label="Conversation with Envoy" hidden>
 		<p id="envoy-task-notice" class="hint" role="status" hidden></p>
-		<p id="envoy-task-detail" class="task-detail message-text" hidden></p>
+		<p id="envoy-agent-empty" class="hint">Envoy's questions and your answers will appear here.</p>
+		<ol id="envoy-agent-messages" aria-label="Conversation with Envoy"></ol>
 		<div id="envoy-pending" class="pending-reply" hidden>
 			<h3>Proposed reply</h3>
 			<p id="envoy-pending-text" class="message-text" dir="auto"></p>
@@ -48,22 +101,40 @@
 				<button type="button" id="envoy-save-edit" class="primary">Save reply</button>
 				<p id="envoy-edit-hint" class="hint">Saving keeps the reply paused. Use Send now when it is ready.</p>
 			</div>
+			<div id="envoy-reply-controls" class="controls reply-controls" aria-label="Reply controls" role="group" hidden>
+				<button type="button" id="envoy-send-now" class="primary">Send now</button>
+				<button type="button" id="envoy-edit">Edit</button>
+				<button type="button" id="envoy-cancel">Cancel reply</button>
+			</div>
 		</div>
-		<div id="envoy-reply-controls" class="controls reply-controls" aria-label="Reply controls" role="group" hidden>
-			<button type="button" id="envoy-send-now" class="primary">Send now</button>
-			<button type="button" id="envoy-edit">Edit</button>
-			<button type="button" id="envoy-cancel">Cancel reply</button>
-		</div>
-		<div id="envoy-task-controls" class="controls task-controls" aria-label="Task controls" role="group" hidden>
-			<button type="button" id="envoy-pause">Pause</button>
-			<button type="button" id="envoy-resume">Resume</button>
-			<button type="button" id="envoy-reconnect" hidden>Reconnect</button>
-			<button type="button" id="envoy-take-over">Take over</button>
-			<button type="button" id="envoy-delete" class="danger" hidden>Delete task</button>
-		</div>
+		<p id="envoy-agent-state" class="agent-state" role="status" hidden></p>
+		<button type="button" id="envoy-cancel-thinking" class="cancel-thinking" hidden>Cancel</button>
+		<p id="envoy-owner-hint" class="hint" role="status" hidden></p>
+		<button type="button" id="envoy-reconnect" class="primary reconnect-btn" hidden>Reconnect</button>
 		<p id="envoy-delete-hint" class="hint" hidden></p>
-		<p id="envoy-error" role="alert" hidden></p>
 	</section>
+	<footer id="envoy-footer" hidden>
+		<div id="envoy-answer" class="answer-bar">
+			<textarea
+				id="envoy-answer-text"
+				rows="2"
+				aria-label="Answer Envoy"
+				placeholder="Answer Envoy; instructions stay as they are."
+			></textarea>
+			<button
+				type="button"
+				id="envoy-answer-send"
+				class="icon-btn primary"
+				aria-label="Send answer"
+				title="Send answer"
+			>
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+					<line x1="22" y1="2" x2="11" y2="13" />
+					<polygon points="22 2 15 22 11 13 2 9 22 2" />
+				</svg>
+			</button>
+		</div>
+	</footer>
 	<div id="envoy-developer-details" hidden>
 		<section aria-labelledby="envoy-conversation-title">
 			<h2 id="envoy-conversation-title">Conversation diagnostics</h2>
