@@ -40,6 +40,7 @@ const activeTask: TaskState = {
 	status: "waiting",
 	pendingReply: null,
 	detail: null,
+	agentChat: [],
 };
 
 function syncResult(task: TaskState | null, command: SendReplyCommand | null = null): ConnectorSyncResult {

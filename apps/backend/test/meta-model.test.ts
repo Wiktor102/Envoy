@@ -1,15 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { TaskState } from "@envoy/contracts";
 import { MetaModelAdapter } from "../src/agent/meta-model.js";
 
-const task = {
+const task: TaskState = {
 	id: "task",
 	chatId: "chat",
 	goal: "Meet Tuesday, ask me before agreeing to another day.",
 	status: "thinking",
 	pendingReply: null,
 	detail: null,
-} as const;
+	agentChat: [],
+};
 const conversation = {
 	chatId: "chat",
 	revision: "revision",
@@ -139,6 +141,47 @@ test("the Meta request marks unverified history and attachments without sending 
 		});
 		assert.doesNotMatch(body.messages[2].content, /private\.example/);
 		assert.match(body.messages[0].content, /Do not guess their authors or missing contents/);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the Meta request includes the agent conversation alongside instructions", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	let body: any;
+	globalThis.fetch = async (input, init) => {
+		body = await new Request(input, init).json();
+		return new Response(
+			JSON.stringify({ choices: [{ message: { role: "assistant", content: '{"action":"wait"}' } }] }),
+			{
+				status: 200,
+				headers: { "content-type": "application/json" },
+			},
+		);
+	};
+	try {
+		await new MetaModelAdapter().run(
+			{
+				...task,
+				agentChat: [
+					{ id: "q1", role: "agent", text: "Is Friday allowed?", createdAt: 1 },
+					{ id: "a1", role: "user", text: "Yes, after 3.", createdAt: 2 },
+					{ id: "e1", role: "event", text: "Reply sent.", createdAt: 3 },
+				],
+			},
+			conversation,
+			"instructions_updated",
+		);
+		assert.match(body.messages[1].content, /Is Friday allowed\?/);
+		assert.match(body.messages[1].content, /Yes, after 3\./);
+		assert.match(body.messages[1].content, /Reply sent\./);
+		assert.doesNotMatch(body.messages[2].content, /Is Friday allowed\?/);
+		assert.doesNotMatch(body.messages[2].content, /Yes, after 3\./);
+		assert.match(body.messages[0].content, /do not repeat answered questions/);
 	} finally {
 		globalThis.fetch = previousFetch;
 		if (previousKey === undefined) delete process.env.MODEL_API_KEY;

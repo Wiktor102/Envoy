@@ -35,6 +35,7 @@ const task: TaskState = {
 	status: "waiting",
 	detail: null,
 	pendingReply: null,
+	agentChat: [],
 };
 
 function preferenceStorage(initialValue: unknown = false) {
@@ -67,6 +68,7 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 	};
 	let publish!: (state: ControllerState) => void;
 	const actions: string[] = [];
+	const texts: (string | undefined)[] = [];
 	const controller: EnvoyController = {
 		subscribe(listener) {
 			publish = listener;
@@ -76,8 +78,9 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 		async start() {},
 		async attach() {},
 		async clear() {},
-		async control(action) {
+		async control(action, text) {
 			actions.push(action);
+			texts.push(text);
 		},
 		async checkHealth() {
 			return true;
@@ -93,8 +96,14 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 	});
 	return {
 		actions,
+		texts,
 		element<T extends HTMLElement = HTMLElement>(id: string) {
 			return (view.panel.getRootNode() as ShadowRoot).querySelector<T>(`#envoy-${id}`)!;
+		},
+		setText(id: string, value: string) {
+			const field = (view.panel.getRootNode() as ShadowRoot).querySelector<HTMLTextAreaElement>(`#envoy-${id}`)!;
+			field.value = value;
+			field.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 		},
 		selectTab(showEnvoy: boolean) {
 			view.selectTab(showEnvoy);
@@ -271,6 +280,68 @@ test("the reply text stays visible while it is being sent", (t) => {
 	assert.equal(ui.element("pending").hidden, true);
 	ui.update({ task: { ...task, status: "sending", pendingReply: null }, isOwner: true });
 	assert.equal(ui.element("pending").hidden, true);
+});
+
+test("agent chat renders questions, answers, and events as distinct messages", (t) => {
+	const ui = setup(t);
+	ui.update({
+		task: {
+			...task,
+			status: "needs_user",
+			detail: "Is Friday allowed?",
+			agentChat: [
+				{ id: "q1", role: "agent", text: "Is Friday allowed?", createdAt: 1 },
+				{ id: "a1", role: "user", text: "Yes, after 3.", createdAt: 2 },
+				{ id: "e1", role: "event", text: "Reply sent.", createdAt: 3 },
+			],
+		},
+		isOwner: true,
+	});
+	assert.equal(ui.element("agent-chat").hidden, false);
+	assert.equal(ui.element("agent-empty").hidden, true);
+	const items = ui.element("agent-messages").querySelectorAll("li");
+	assert.equal(items.length, 3);
+	assert.equal(items[0]!.dataset.role, "agent");
+	assert.equal(items[0]!.querySelector("strong")?.textContent, "Envoy");
+	assert.match(items[0]!.textContent ?? "", /Is Friday allowed\?/);
+	assert.equal(items[1]!.dataset.role, "user");
+	assert.equal(items[1]!.querySelector("strong")?.textContent, "You");
+	assert.equal(items[2]!.dataset.role, "event");
+	assert.equal(items[2]!.querySelector("strong"), null);
+	assert.equal(ui.element("agent-messages").closest("#envoy-developer-details"), null);
+});
+
+test("answers send to the agent without rewriting the goal", async (t) => {
+	const ui = setup(t);
+	ui.update({ task: { ...task, status: "needs_user", detail: "Is Friday allowed?" }, isOwner: true });
+	const goal = ui.element<HTMLTextAreaElement>("goal");
+	assert.equal(goal.value, "Arrange a meeting");
+	const send = ui.element<HTMLButtonElement>("answer-send");
+	assert.equal(send.disabled, true);
+	ui.setText("answer-text", "Yes, after 3.");
+	assert.equal(send.disabled, false);
+	send.click();
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	assert.deepEqual(ui.actions, ["answer-agent"]);
+	assert.deepEqual(ui.texts, ["Yes, after 3."]);
+	assert.equal(ui.element<HTMLTextAreaElement>("answer-text").value, "");
+	assert.equal(goal.value, "Arrange a meeting");
+});
+
+test("agent chat hides from other tabs and stays read-only after the task ends", (t) => {
+	const ui = setup(t);
+	const chatting: TaskState = {
+		...task,
+		status: "needs_user",
+		agentChat: [{ id: "q1", role: "agent", text: "Is Friday allowed?", createdAt: 1 }],
+	};
+	ui.update({ task: chatting, isOwner: false });
+	assert.equal(ui.element("agent-chat").hidden, true);
+	ui.update({ task: { ...chatting, status: "completed" }, isOwner: true });
+	assert.equal(ui.element("agent-chat").hidden, false);
+	assert.equal(ui.element("answer").hidden, true);
+	ui.update({ task: { ...task, status: "completed" }, isOwner: true });
+	assert.equal(ui.element("agent-chat").hidden, true);
 });
 
 test("paused, ended, and unowned tasks keep recovery controls without reply actions", (t) => {

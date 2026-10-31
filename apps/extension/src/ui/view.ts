@@ -66,6 +66,12 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const taskChat = element<HTMLElement>("#envoy-task-chat");
 	const taskNotice = element<HTMLElement>("#envoy-task-notice");
 	const taskDetail = element<HTMLElement>("#envoy-task-detail");
+	const agentChat = element<HTMLElement>("#envoy-agent-chat");
+	const agentEmpty = element<HTMLElement>("#envoy-agent-empty");
+	const agentMessages = element<HTMLOListElement>("#envoy-agent-messages");
+	const answer = element<HTMLElement>("#envoy-answer");
+	const answerText = element<HTMLTextAreaElement>("#envoy-answer-text");
+	const answerSend = element<HTMLButtonElement>("#envoy-answer-send");
 	const pendingSection = element<HTMLElement>("#envoy-pending");
 	const pendingText = element<HTMLElement>("#envoy-pending-text");
 	const countdown = element<HTMLElement>("#envoy-countdown");
@@ -73,6 +79,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const editText = element<HTMLTextAreaElement>("#envoy-reply-edit");
 	isolateTextInput(goal);
 	isolateTextInput(editText);
+	isolateTextInput(answerText);
 	const saveEditButton = element<HTMLButtonElement>("#envoy-save-edit");
 	const replyControls = element<HTMLElement>("#envoy-reply-controls");
 	const taskControls = element<HTMLElement>("#envoy-task-controls");
@@ -246,6 +253,28 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		taskNotice.hidden = !task || !state.snapshot || currentChat;
 		taskDetail.textContent = owner ? (task?.detail ?? "") : "";
 		taskDetail.hidden = !owner || !task?.detail;
+		const chat = owner && task ? task.agentChat : [];
+		agentChat.hidden = !owner || !task || (!active && chat.length === 0);
+		agentEmpty.hidden = chat.length !== 0;
+		agentMessages.replaceChildren();
+		for (const message of chat) {
+			const item = document.createElement("li");
+			item.dataset.role = message.role;
+			if (message.role !== "event") {
+				const sender = document.createElement("strong");
+				sender.textContent = message.role === "agent" ? "Envoy" : "You";
+				item.append(sender);
+			}
+			const text = document.createElement("span");
+			text.className = "message-text";
+			text.dir = "auto";
+			text.textContent = message.text;
+			item.append(text);
+			agentMessages.append(item);
+		}
+		answer.hidden = !owner || !active;
+		answerText.disabled = busy;
+		answerSend.disabled = busy || !owner || !active || !answerText.value.trim();
 		const pending = owner ? (task?.pendingReply ?? null) : null;
 		if (task && pending) sendingReply = { taskId: task.id, text: pending.text };
 		else if (task?.status !== "sending" || task.id !== sendingReply?.taskId) sendingReply = null;
@@ -312,6 +341,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		render();
 	});
 	editText.addEventListener("input", render);
+	answerText.addEventListener("input", render);
 	startButton.addEventListener("click", () => {
 		const value = goal.value.trim();
 		void run(async () => {
@@ -324,6 +354,13 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		void run(async () => {
 			await controller.control("update-goal", value);
 			if (goal.value.trim() === value) goalDirty = false;
+		});
+	});
+	answerSend.addEventListener("click", () => {
+		const value = answerText.value.trim();
+		void run(async () => {
+			await controller.control("answer-agent", value);
+			if (answerText.value.trim() === value) answerText.value = "";
 		});
 	});
 	sendButton.addEventListener("click", () => control("send-now"));

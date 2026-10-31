@@ -96,6 +96,7 @@ const actions: readonly TaskControlAction[] = [
 	"resume",
 	"take-over",
 	"update-goal",
+	"answer-agent",
 ];
 const results: readonly SendResult[] = ["sent", "rejected", "uncertain"];
 

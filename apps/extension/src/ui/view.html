@@ -38,6 +38,20 @@
 		<p id="envoy-task-status" class="task-status" role="status">No active task.</p>
 		<p id="envoy-task-notice" class="hint" role="status" hidden></p>
 		<p id="envoy-task-detail" class="task-detail message-text" hidden></p>
+		<div id="envoy-agent-chat" class="agent-chat" hidden>
+			<h3>Conversation with Envoy</h3>
+			<p id="envoy-agent-empty" class="hint">Envoy's questions and your answers will appear here.</p>
+			<ol id="envoy-agent-messages" aria-label="Conversation with Envoy"></ol>
+			<div id="envoy-answer">
+				<label for="envoy-answer-text">Answer Envoy</label>
+				<textarea
+					id="envoy-answer-text"
+					rows="2"
+					placeholder="Answer here. Your instructions stay as they are."
+				></textarea>
+				<button type="button" id="envoy-answer-send" class="primary">Send answer</button>
+			</div>
+		</div>
 		<div id="envoy-pending" class="pending-reply" hidden>
 			<h3>Proposed reply</h3>
 			<p id="envoy-pending-text" class="message-text" dir="auto"></p>
