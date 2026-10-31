@@ -59,6 +59,8 @@ function message(value: unknown): ConversationMessage {
 		id: string(item.id),
 		text: string(item.text, 20_000, true),
 		direction,
+		// Per-message display label. Older extension versions send no field.
+		sender: item.sender === undefined ? null : optionalText(item.sender, 512),
 		replyTo: reply && {
 			text: optionalText(reply.text, 20_000),
 			context: optionalText(reply.context, 4000),

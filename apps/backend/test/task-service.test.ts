@@ -1032,3 +1032,16 @@ test("answering an ended task is rejected", async () => {
 	);
 	assert.throws(() => service.control("owner", task.id, "answer-agent", "Thanks."), /has ended/);
 });
+
+test("a sender display rename at the same revision does not pause verification", () => {
+	const { service } = setup();
+	const named = (sender: string | null) => {
+		const renamed = snapshot();
+		renamed.messages[0] = { ...renamed.messages[0]!, sender };
+		return renamed;
+	};
+	service.start("owner", "Arrange a meeting", named("Mikołaj Gaweł"));
+	const { task } = service.sync("owner", named("Mikołaj"));
+	assert.notEqual(task?.status, "paused");
+	assert.doesNotMatch(task?.detail ?? "", /could not be verified/);
+});

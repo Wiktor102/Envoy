@@ -89,6 +89,30 @@ test("connector sync accepts participant display names and older snapshots witho
 	assert.equal(legacy.task, null);
 });
 
+test("connector sync accepts per-message sender labels and older messages without them", async () => {
+	const named = await caller.connector.sync({
+		connectorId: "owner",
+		snapshot: { ...snapshot, messages: [{ ...message, sender: "Wiktor testowy" }] },
+	});
+	assert.equal(named.task, null);
+	const unknown = await caller.connector.sync({
+		connectorId: "owner",
+		snapshot: { ...snapshot, messages: [{ ...message, sender: null }] },
+	});
+	assert.equal(unknown.task, null);
+	const legacy = await caller.connector.sync({ connectorId: "owner", snapshot });
+	assert.equal(legacy.task, null);
+	for (const sender of [42, "x".repeat(513), ["Alex"]]) {
+		await assert.rejects(
+			caller.connector.sync({
+				connectorId: "owner",
+				snapshot: { ...snapshot, messages: [{ ...message, sender }] },
+			} as never),
+			(error: unknown) => (error as { code: string }).code === "BAD_REQUEST",
+		);
+	}
+});
+
 test("connector sync accepts sticker attachments as unavailable media", async () => {
 	const stickerSnapshot = {
 		...snapshot,
