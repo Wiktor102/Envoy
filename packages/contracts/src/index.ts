@@ -69,6 +69,8 @@ export interface AgentChatMessage {
 	id: string;
 	role: AgentChatRole;
 	text: string;
+	// Expandable detail, such as the text of a sent reply. Null when the line stands alone.
+	body: string | null;
 	createdAt: number;
 }
 

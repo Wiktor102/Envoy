@@ -984,6 +984,7 @@ test("reply sends, edits, and cancellations are recorded for the model", async (
 			{ role: "event", text: "Reply sent." },
 		],
 	);
+	assert.equal(sent.agentChat.find((entry) => entry.text === "Reply sent.")?.body, "Thursday works.");
 	service.sync("owner", snapshot("r2", "What time?"));
 	await resolveReply(agent, 1, "After 3.");
 	assert.equal(service.control("owner", task.id, "cancel").agentChat.at(-1)?.text, "Reply cancelled.");

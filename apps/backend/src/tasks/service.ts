@@ -523,7 +523,7 @@ export class TaskService {
 		if (result === "sent" && attempt.authorized) {
 			this.task.status = "waiting";
 			this.task.detail = "Reply sent. Waiting for a new message.";
-			this.appendAgentChat("event", "Reply sent.");
+			this.appendAgentChat("event", "Reply sent.", attempt.command.text);
 		} else {
 			if (result !== "rejected") this.requiresVerification = true;
 			this.task.status = "needs_user";
@@ -551,9 +551,9 @@ export class TaskService {
 		return this.task ? structuredClone(this.task) : null;
 	}
 
-	private appendAgentChat(role: AgentChatRole, text: string): void {
+	private appendAgentChat(role: AgentChatRole, text: string, body: string | null = null): void {
 		if (!this.task) return;
-		this.task.agentChat.push({ id: randomUUID(), role, text, createdAt: this.now() });
+		this.task.agentChat.push({ id: randomUUID(), role, text, body, createdAt: this.now() });
 		if (this.task.agentChat.length > MAX_AGENT_CHAT) {
 			this.task.agentChat.splice(0, this.task.agentChat.length - MAX_AGENT_CHAT);
 		}

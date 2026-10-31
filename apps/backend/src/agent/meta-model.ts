@@ -94,7 +94,8 @@ export class MetaModelAdapter implements Agent {
 
 function formatAgentChat(chat: readonly AgentChatMessage[]): string {
 	if (!chat.length) return "";
-	return `\nConversation with the user: ${JSON.stringify(chat.map(({ role, text }) => ({ role, text })))}`;
+	const lines = chat.map(({ role, text, body }) => (body ? { role, text, body } : { role, text }));
+	return `\nConversation with the user: ${JSON.stringify(lines)}`;
 }
 
 function parseDecision(value: unknown): AgentDecision {

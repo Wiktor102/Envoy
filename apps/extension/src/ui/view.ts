@@ -272,16 +272,29 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		for (const message of chat) {
 			const item = document.createElement("li");
 			item.dataset.role = message.role;
-			if (message.role !== "event") {
-				const sender = document.createElement("strong");
-				sender.textContent = message.role === "agent" ? "Envoy" : "You";
-				item.append(sender);
+			if (message.role === "event" && message.body) {
+				item.classList.add("tool-call");
+				const details = document.createElement("details");
+				const summary = document.createElement("summary");
+				summary.textContent = message.text;
+				const body = document.createElement("p");
+				body.className = "message-text";
+				body.dir = "auto";
+				body.textContent = message.body;
+				details.append(summary, body);
+				item.append(details);
+			} else {
+				if (message.role !== "event") {
+					const sender = document.createElement("strong");
+					sender.textContent = message.role === "agent" ? "Envoy" : "You";
+					item.append(sender);
+				}
+				const text = document.createElement("span");
+				text.className = "message-text";
+				text.dir = "auto";
+				text.textContent = message.text;
+				item.append(text);
 			}
-			const text = document.createElement("span");
-			text.className = "message-text";
-			text.dir = "auto";
-			text.textContent = message.text;
-			item.append(text);
 			agentMessages.append(item);
 		}
 		footer.hidden = !owner || !active;

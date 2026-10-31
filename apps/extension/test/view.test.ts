@@ -299,9 +299,9 @@ test("agent thread renders questions, answers, and events without a frame", (t) 
 			status: "needs_user",
 			detail: "Is Friday allowed?",
 			agentChat: [
-				{ id: "q1", role: "agent", text: "Is Friday allowed?", createdAt: 1 },
-				{ id: "a1", role: "user", text: "Yes, after 3.", createdAt: 2 },
-				{ id: "e1", role: "event", text: "Reply sent.", createdAt: 3 },
+				{ id: "q1", role: "agent", text: "Is Friday allowed?", body: null, createdAt: 1 },
+				{ id: "a1", role: "user", text: "Yes, after 3.", body: null, createdAt: 2 },
+				{ id: "e1", role: "event", text: "Reply sent.", body: "It's okay!", createdAt: 3 },
 			],
 		},
 		isOwner: true,
@@ -318,6 +318,9 @@ test("agent thread renders questions, answers, and events without a frame", (t) 
 	assert.equal(items[1]!.querySelector("strong")?.textContent, "You");
 	assert.equal(items[2]!.dataset.role, "event");
 	assert.equal(items[2]!.querySelector("strong"), null);
+	assert.equal(items[2]!.classList.contains("tool-call"), true);
+	assert.equal(items[2]!.querySelector("summary")?.textContent, "Reply sent.");
+	assert.equal(items[2]!.querySelector("p")?.textContent, "It's okay!");
 	assert.equal(ui.element("agent-messages").closest("#envoy-developer-details"), null);
 });
 
@@ -344,7 +347,7 @@ test("agent history stays hidden from other tabs and read-only after the task en
 	const chatting: TaskState = {
 		...task,
 		status: "needs_user",
-		agentChat: [{ id: "q1", role: "agent", text: "Is Friday allowed?", createdAt: 1 }],
+		agentChat: [{ id: "q1", role: "agent", text: "Is Friday allowed?", body: null, createdAt: 1 }],
 	};
 	ui.update({ task: chatting, isOwner: false });
 	assert.equal(ui.element("agent-messages").querySelectorAll("li").length, 0);
@@ -411,7 +414,7 @@ test("agent state shows once and hides when it repeats the last Envoy message", 
 			...task,
 			status: "needs_user",
 			detail: "Is Friday allowed?",
-			agentChat: [{ id: "q1", role: "agent", text: "Is Friday allowed?", createdAt: 1 }],
+			agentChat: [{ id: "q1", role: "agent", text: "Is Friday allowed?", body: null, createdAt: 1 }],
 		},
 		isOwner: true,
 	});

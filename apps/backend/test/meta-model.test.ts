@@ -168,9 +168,9 @@ test("the Meta request includes the agent conversation alongside instructions", 
 			{
 				...task,
 				agentChat: [
-					{ id: "q1", role: "agent", text: "Is Friday allowed?", createdAt: 1 },
-					{ id: "a1", role: "user", text: "Yes, after 3.", createdAt: 2 },
-					{ id: "e1", role: "event", text: "Reply sent.", createdAt: 3 },
+					{ id: "q1", role: "agent", text: "Is Friday allowed?", body: null, createdAt: 1 },
+					{ id: "a1", role: "user", text: "Yes, after 3.", body: null, createdAt: 2 },
+					{ id: "e1", role: "event", text: "Reply sent.", body: "Friday works.", createdAt: 3 },
 				],
 			},
 			conversation,
@@ -179,6 +179,7 @@ test("the Meta request includes the agent conversation alongside instructions", 
 		assert.match(body.messages[1].content, /Is Friday allowed\?/);
 		assert.match(body.messages[1].content, /Yes, after 3\./);
 		assert.match(body.messages[1].content, /Reply sent\./);
+		assert.match(body.messages[1].content, /Friday works\./);
 		assert.doesNotMatch(body.messages[2].content, /Is Friday allowed\?/);
 		assert.doesNotMatch(body.messages[2].content, /Yes, after 3\./);
 		assert.match(body.messages[0].content, /do not repeat answered questions/);

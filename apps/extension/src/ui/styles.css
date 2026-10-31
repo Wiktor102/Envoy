@@ -555,6 +555,28 @@ summary .hint {
 	color: var(--envoy-secondary-text);
 }
 
+#envoy-agent-messages li.tool-call {
+	text-align: start;
+}
+
+#envoy-agent-messages li.tool-call summary {
+	cursor: pointer;
+}
+
+#envoy-agent-messages li.tool-call summary:hover {
+	color: var(--envoy-text);
+}
+
+#envoy-agent-messages li.tool-call p {
+	margin: 6px 0 0;
+	padding: 8px 10px;
+	border-radius: 2px 10px 10px 10px;
+	background: var(--envoy-message);
+	color: var(--envoy-text);
+	font-size: 13px;
+	font-weight: 400;
+}
+
 #envoy-agent-messages strong {
 	display: block;
 	margin-bottom: 2px;
