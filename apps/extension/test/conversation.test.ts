@@ -1159,6 +1159,52 @@ test("reads group events as system context and omits the group introduction", as
 	dom.window.close();
 });
 
+test("omits the 1-1 encrypted introduction notice in English and Polish", async () => {
+	const dom = setup();
+	// Stripped to tags, roles, and attributes: a bare avatar img, an h3 name,
+	// and the notice text with a "Learn more" button (not a link). The matcher
+	// ignores wording, so the notice text here is representative, not exact.
+	const intro = (name: string, notice: string, more: string) =>
+		`<div data-scope="messages_table" data-release-focus-from="CLICK" tabindex="0">` +
+		`<div><img alt="${name}"></div><h3 dir="auto"><span dir="auto">${name}</span></h3>` +
+		`<div><span dir="auto">${notice}</span><div role="button" tabindex="0"><span>${more}</span></div></div></div>`;
+	const message = `<div data-scope="messages_table" data-message-id="1" aria-roledescription="message" aria-label="At 17:50, Alex: Hello"><span dir="auto">Hello</span></div>`;
+	for (const [name, notice, more] of [
+		["Alex", "Messages and calls are secured with end-to-end encryption.", "Learn more"],
+		["Alex", "Wiadomości i połączenia są szyfrowane.", "Dowiedz się więcej"],
+	]) {
+		setMessages(`${intro(name, notice, more)}${message}`);
+		assert.deepEqual(
+			(await messengerChatAdapter.readConversation()).messages.map(({ text, direction }) => [text, direction]),
+			[["Hello", "incoming"]],
+		);
+	}
+	dom.window.close();
+});
+
+test("keeps h4 messages and h3 scopes with message metadata or media", async () => {
+	const dom = setup();
+	// Real messages use h4, not h3, and carry message metadata.
+	const h4Message = `<div data-scope="messages_table" data-message-id="1" aria-roledescription="message" aria-label="At 11:12, Alex: Hello"><h4 dir="auto">Alex</h4><span dir="auto">Hello <img alt="👍"></span></div>`;
+	const h3Message = `<div data-scope="messages_table" data-message-id="2" aria-roledescription="message" aria-label="At 11:13, Alex: Update"><h3 dir="auto">Alex</h3><img alt="Alex"><span dir="auto">Update</span><div role="button" tabindex="0"><span>More</span></div></div>`;
+	setMessages(`${h4Message}${h3Message}`);
+	assert.deepEqual(
+		(await messengerChatAdapter.readConversation()).messages.map(({ text, direction }) => [text, direction]),
+		[
+			["Hello 👍", "incoming"],
+			["Update", "incoming"],
+		],
+	);
+	// An intro-shaped scope with media is not silently dropped.
+	const mediaIntro = `<div data-scope="messages_table" data-release-focus-from="CLICK" tabindex="0"><div><img alt="Alex"></div><h3 dir="auto"><span dir="auto">Alex</span></h3><div><span dir="auto">Notice</span><div role="button" tabindex="0"><span>More</span></div></div><video></video></div>`;
+	setMessages(`${mediaIntro}${h4Message}`);
+	await assert.rejects(
+		messengerChatAdapter.readConversation(),
+		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+	);
+	dom.window.close();
+});
+
 test("reads an animated preview as an unreadable attachment and tracks its blob source", async () => {
 	const dom = setup();
 	const path =

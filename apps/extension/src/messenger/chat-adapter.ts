@@ -1,5 +1,5 @@
 import { isAnimatedPreview } from "./animated-preview";
-import { isGroupIntro, isGroupSystemEvent } from "./group-events";
+import { isGroupSystemEvent, isThreadIntro } from "./group-events";
 import type { ConversationMessage, ConversationSnapshot, SendReplyCommand, SendResult } from "@envoy/contracts";
 
 export interface MessengerChatAdapter {
@@ -168,7 +168,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	);
 	const textCandidates = [...candidates].filter((element) => {
 		const scope = element.closest('[data-scope="messages_table"]');
-		if (scope && (isGroupIntro(scope) || isTypingStatus(scope))) return false;
+		if (scope && (isThreadIntro(scope) || isTypingStatus(scope))) return false;
 		if (
 			element.closest(
 				'button, [role="button"], [contenteditable="true"], [aria-hidden="true"], h1, h2, h3, h4, h5, h6, [role="heading"]',
@@ -285,7 +285,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	)) {
 		const scope = element.closest('[data-scope="messages_table"]');
 		if (
-			(scope && (isGroupIntro(scope) || isTypingStatus(scope))) ||
+			(scope && (isThreadIntro(scope) || isTypingStatus(scope))) ||
 			element.closest(
 				'[dir="auto"], button, [role="button"], [contenteditable="true"], [aria-hidden="true"], h1, h2, h3, h4, h5, h6, [role="heading"]',
 			)
@@ -481,7 +481,7 @@ function isMessageDecoration(element: HTMLElement): boolean {
 
 function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]): boolean {
 	const scopes = [...main.querySelectorAll<HTMLElement>('[data-scope="messages_table"]')].filter(
-		(scope) => isVisible(scope) && !isMessageDecoration(scope) && !isGroupIntro(scope) && !isTypingStatus(scope),
+		(scope) => isVisible(scope) && !isMessageDecoration(scope) && !isThreadIntro(scope) && !isTypingStatus(scope),
 	);
 	if (scopes.length === 0) return true;
 	// A message row may be adjacent to, rather than inside, a recognized scope.
@@ -600,7 +600,7 @@ function collectVideoViewers(main: HTMLElement): HTMLElement[] {
 		const element = video as HTMLElement;
 		if (!isVisible(element) || element.closest('[role="toolbar"], [aria-hidden="true"]')) continue;
 		const scope = element.closest('[data-scope="messages_table"]');
-		if (!scope || isGroupIntro(scope) || isTypingStatus(scope)) continue;
+		if (!scope || isThreadIntro(scope) || isTypingStatus(scope)) continue;
 		if (isMessageDecoration(scope as HTMLElement)) continue;
 		const viewer = (video.closest('[role="button"], a[href]') as HTMLElement | null) ?? element;
 		if (!viewer.isConnected || !isVisible(viewer) || viewer.closest('[role="toolbar"], [aria-hidden="true"]')) continue;
@@ -628,7 +628,7 @@ function collectStickerViewers(main: HTMLElement): HTMLElement[] {
 		if (graphic.closest('button, [role="button"], [contenteditable="true"], h1, h2, h3, h4, h5, h6, [role="heading"]'))
 			continue;
 		const scope = graphic.closest('[data-scope="messages_table"]');
-		if (!scope || isGroupIntro(scope) || isTypingStatus(scope)) continue;
+		if (!scope || isThreadIntro(scope) || isTypingStatus(scope)) continue;
 		if (isMessageDecoration(scope as HTMLElement)) continue;
 		const boundary = messageBoundary(graphic);
 		if (!boundary?.matches('[data-scope="messages_table"][data-message-id]')) continue;
