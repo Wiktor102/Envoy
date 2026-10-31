@@ -562,6 +562,29 @@ test("unreadable photos, other media, and quotes still pause for the user", () =
 	}
 });
 
+test("a quoted photo pauses with a specific message", () => {
+	const photo = { type: "image" as const, url: "https://example.test/photo", description: null, media: null };
+	{
+		const { agent, service } = setup();
+		const content = snapshot("r1", "What word is on this?");
+		content.messages[0]!.replyTo = { text: null, context: null, attachments: [] };
+		content.messages[0]!.attachments = [{ type: "video", url: null, description: null }];
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "needs_user");
+		assert.equal(result.detail, "The latest message contains content Envoy cannot interpret.");
+		assert.equal(agent.calls.length, 0);
+	}
+	{
+		const { agent, service } = setup();
+		const content = snapshot("r1", "What word is on this?");
+		content.messages[0]!.replyTo = { text: "Original", context: "Reply", attachments: [photo] };
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "needs_user");
+		assert.equal(result.detail, "The latest message quotes an image Envoy cannot read. Take over to reply yourself.");
+		assert.equal(agent.calls.length, 0);
+	}
+});
+
 test("a re-encoded photo at the same revision does not pause verification", async () => {
 	const { agent, service } = setup();
 	const first = snapshot("r1", "See this");

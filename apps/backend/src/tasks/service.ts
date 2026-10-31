@@ -759,7 +759,11 @@ export class TaskService {
 		}
 		if (latest && !readableLatest(snapshot.messages, latest)) {
 			task.status = "needs_user";
-			task.detail = "The latest message contains content Envoy cannot interpret.";
+			// Quote bytes never reach the model, so a quoted attachment always
+			// causes this pause. Name it: the general message hides what happened.
+			task.detail = latest.replyTo?.attachments.length
+				? "The latest message quotes an image Envoy cannot read. Take over to reply yourself."
+				: "The latest message contains content Envoy cannot interpret.";
 			return;
 		}
 		task.status = "thinking";
