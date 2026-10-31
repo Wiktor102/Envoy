@@ -199,7 +199,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 
 		// In a 1-1 chat the incoming side is the single named participant.
 		// Groups and ambiguous headers leave participants empty, keeping the
-		// generic label. This is chat-level display data, not per-message authorship.
+		// generic label. A known per-message label names that bubble's sender
+		// instead; it is display data, never a verified identity.
 		const incomingLabel = snapshot.participants[0] ?? "Other person";
 		for (const message of snapshot.messages.slice(-5)) {
 			const item = document.createElement("li");
@@ -209,7 +210,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 				message.direction === "outgoing"
 					? "You"
 					: message.direction === "incoming"
-						? incomingLabel
+						? (message.sender ?? incomingLabel)
 						: message.direction === "system"
 							? "System"
 							: "Unknown sender";
