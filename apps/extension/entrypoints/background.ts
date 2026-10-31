@@ -1,4 +1,5 @@
 import { defineBackground } from "wxt/utils/define-background";
+import { normalizeReplySettings } from "@envoy/contracts";
 import type { BackendRequest } from "../src/messaging";
 import { createBackendClient } from "../src/backend-client";
 import { OWNER_HEARTBEAT_PORT, startBackgroundHeartbeat } from "../src/heartbeat";
@@ -38,6 +39,14 @@ function connectorFor(sender: chrome.runtime.MessageSender): string | null {
 	}
 }
 
+async function preferences() {
+	const saved = await chrome.storage.local.get(["envoyDeveloperMode", "envoyReplySettings"]);
+	return {
+		developerMode: saved.envoyDeveloperMode === true,
+		replySettings: normalizeReplySettings(saved.envoyReplySettings),
+	};
+}
+
 export default defineBackground(() => {
 	const backend = createBackendClient();
 	chrome.runtime.onConnect.addListener((port) => {
@@ -60,18 +69,11 @@ export default defineBackground(() => {
 			switch (request.type) {
 				case "envoy:health":
 					return (await backend.health.query(undefined, options)).status === "ok";
-				case "envoy:start": {
-					const { envoyDeveloperMode } = await chrome.storage.local.get("envoyDeveloperMode");
+				case "envoy:start":
 					return backend.task.start.mutate(
-						{
-							connectorId,
-							goal: request.goal,
-							snapshot: request.snapshot,
-							developerMode: envoyDeveloperMode === true,
-						},
+						{ connectorId, goal: request.goal, snapshot: request.snapshot, ...(await preferences()) },
 						options,
 					);
-				}
 				case "envoy:attach":
 					return backend.task.attach.mutate(
 						{ connectorId, taskId: request.taskId, snapshot: request.snapshot },
@@ -89,13 +91,11 @@ export default defineBackground(() => {
 						},
 						options,
 					);
-				case "envoy:sync": {
-					const { envoyDeveloperMode } = await chrome.storage.local.get("envoyDeveloperMode");
+				case "envoy:sync":
 					return backend.connector.sync.mutate(
-						{ connectorId, snapshot: request.snapshot, developerMode: envoyDeveloperMode === true },
+						{ connectorId, snapshot: request.snapshot, ...(await preferences()) },
 						options,
 					);
-				}
 				case "envoy:authorize":
 					return backend.connector.authorize.mutate(
 						{ connectorId, commandId: request.commandId, chatId: request.chatId, revision: request.revision },

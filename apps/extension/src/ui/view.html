@@ -82,6 +82,46 @@
 			placeholder="Arrange a coffee next week. I’m free Tuesday or Thursday after 3 pm. Ask me before confirming a place."
 		></textarea>
 		<p id="envoy-goal-hint" class="hint"></p>
+		<fieldset class="reply-settings" aria-describedby="envoy-delay-hint">
+			<legend>Reply sending</legend>
+			<div class="settings-card">
+				<button
+					type="button"
+					id="envoy-auto-send"
+					class="setting-row setting-switch"
+					role="switch"
+					aria-checked="true"
+				>
+					Auto-send replies <span class="switch-track" aria-hidden="true"></span>
+				</button>
+				<div id="envoy-delay" class="setting-row delay-range" role="group" aria-labelledby="envoy-delay-label">
+					<span id="envoy-delay-label">Send after</span>
+					<span class="delay-inputs">
+						<input
+							type="number"
+							id="envoy-delay-min"
+							min="1"
+							max="600"
+							step="1"
+							inputmode="numeric"
+							aria-label="Shortest delay in seconds"
+						/>
+						<span aria-hidden="true">–</span>
+						<input
+							type="number"
+							id="envoy-delay-max"
+							min="1"
+							max="600"
+							step="1"
+							inputmode="numeric"
+							aria-label="Longest delay in seconds"
+						/>
+						<span aria-hidden="true">s</span>
+					</span>
+				</div>
+			</div>
+			<p id="envoy-delay-hint" class="hint"></p>
+		</fieldset>
 		<div class="controls goal-controls">
 			<button type="button" id="envoy-start" class="primary">Start task</button>
 			<button type="button" id="envoy-update-goal" class="primary" hidden>Update instructions</button>

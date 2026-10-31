@@ -6,6 +6,7 @@ import type {
 	ConversationMessage,
 	ConversationSnapshot,
 	PendingReply,
+	ReplySettings,
 	SendReplyCommand,
 	SendResult,
 	TaskControlAction,
@@ -21,6 +22,7 @@ const SEND_RESULT_TIMEOUT_MS = 30_000;
 const TERMINAL_RETENTION_MS = 60 * 60 * 1000;
 const MAX_REPLY_LENGTH = 4000;
 const MAX_AGENT_CHAT = 50;
+const AUTO_SEND_OFF = "Automatic sending is off. Choose Send now when it is ready.";
 
 type Attempt = {
 	command: SendReplyCommand;
@@ -39,7 +41,9 @@ type Attempt = {
 };
 type Options = {
 	now?: () => number;
+	// Delay used until a connector sends its reply settings.
 	replyDelayMs?: number;
+	random?: () => number;
 	leaseMs?: number;
 	connector?: () => BrowserConnector;
 };
@@ -50,6 +54,10 @@ export class TaskService {
 	private task: TaskState | null = null;
 	private owner: string | null = null;
 	private developerMode = false;
+	private replySettings: ReplySettings | null = null;
+	// The pending reply whose countdown auto-send started. Send now also sets
+	// sendAt, so only this reply stops when auto-send is switched off.
+	private autoCountdown: string | null = null;
 	private connector: BrowserConnector;
 	private leaseUntil = 0;
 	private leaseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -70,6 +78,7 @@ export class TaskService {
 	private resumeWhenReadable = false;
 	private readonly now: () => number;
 	private readonly replyDelayMs: number;
+	private readonly random: () => number;
 	private readonly leaseMs: number;
 	private readonly newConnector: () => BrowserConnector;
 
@@ -79,12 +88,19 @@ export class TaskService {
 	) {
 		this.now = options.now ?? Date.now;
 		this.replyDelayMs = options.replyDelayMs ?? DEFAULT_REPLY_DELAY_SECONDS * 1000;
+		this.random = options.random ?? Math.random;
 		this.leaseMs = options.leaseMs ?? LEASE_MS;
 		this.newConnector = options.connector ?? (() => new ExtensionConnector());
 		this.connector = this.newConnector();
 	}
 
-	start(connectorId: string, goal: string, snapshot: ConversationSnapshot, developerMode = false): TaskState {
+	start(
+		connectorId: string,
+		goal: string,
+		snapshot: ConversationSnapshot,
+		developerMode = false,
+		replySettings?: ReplySettings,
+	): TaskState {
 		this.expireLease();
 		if (this.task && this.task.status !== "completed" && this.task.status !== "taken_over") {
 			throw new Error("A task is already active. Take over the existing task first.");
@@ -112,6 +128,8 @@ export class TaskService {
 		this.resumeWhenReadable = false;
 		this.owner = connectorId;
 		this.developerMode = developerMode;
+		this.replySettings = replySettings ?? null;
+		this.autoCountdown = null;
 		this.task = {
 			id: randomUUID(),
 			chatId: snapshot.chatId,
@@ -324,7 +342,12 @@ export class TaskService {
 		return this.state()!;
 	}
 
-	sync(connectorId: string, snapshot: ConversationSnapshot | null, developerMode?: boolean): ConnectorSyncResult {
+	sync(
+		connectorId: string,
+		snapshot: ConversationSnapshot | null,
+		developerMode?: boolean,
+		replySettings?: ReplySettings,
+	): ConnectorSyncResult {
 		this.expireLease();
 		if (!this.task) return { task: null, isOwner: false, command: null };
 		if (connectorId !== this.owner) {
@@ -368,6 +391,9 @@ export class TaskService {
 		}
 		this.touch();
 		if (developerMode !== undefined) this.developerMode = developerMode;
+		// Applied before the send claim below, so the sync that switches
+		// auto-send off can never hand out the reply it stops.
+		if (replySettings) this.applyReplySettings(replySettings);
 		const copy = structuredClone(snapshot);
 		if (previous && previous.revision === copy.revision && semanticMessages(previous) !== semanticMessages(copy)) {
 			this.pauseForDisconnect("The conversation could not be verified. Reopen it and resume.");
@@ -579,6 +605,26 @@ export class TaskService {
 		this.suppressedContexts.clear();
 		this.requiresVerification = false;
 		this.resumeWhenReadable = false;
+		this.autoCountdown = null;
+	}
+
+	private applyReplySettings(settings: ReplySettings): void {
+		this.replySettings = settings;
+		const task = this.task;
+		const pending = task?.pendingReply;
+		if (settings.autoSend || task?.status !== "pending" || !pending || pending.commandId !== this.autoCountdown) return;
+		pending.sendAt = null;
+		task.detail = AUTO_SEND_OFF;
+		this.autoCountdown = null;
+	}
+
+	// Null when the user sends each reply explicitly.
+	private nextReplyDelayMs(): number | null {
+		const settings = this.replySettings;
+		if (!settings) return this.replyDelayMs;
+		if (!settings.autoSend) return null;
+		const { minDelaySeconds: min, maxDelaySeconds: max } = settings;
+		return (min + Math.floor(this.random() * (max - min + 1))) * 1000;
 	}
 
 	private scheduleRetention(taskId: string): void {
@@ -811,16 +857,18 @@ export class TaskService {
 					task.detail = "The model returned an invalid reply. Check the conversation.";
 					return;
 				}
+				const delay = this.nextReplyDelayMs();
 				const pending: PendingReply = {
 					commandId: randomUUID(),
 					chatId: task.chatId,
 					expectedRevision: snapshot.revision,
 					text,
-					sendAt: this.now() + this.replyDelayMs,
+					sendAt: delay === null ? null : this.now() + delay,
 				};
 				task.pendingReply = pending;
 				task.status = "pending";
-				task.detail = "Review the reply before it sends.";
+				task.detail = delay === null ? AUTO_SEND_OFF : "Review the reply before it sends.";
+				this.autoCountdown = delay === null ? null : pending.commandId;
 				break;
 			}
 			case "wait":

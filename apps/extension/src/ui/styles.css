@@ -101,7 +101,8 @@
 }
 
 button,
-textarea {
+textarea,
+input {
 	font: inherit;
 }
 
@@ -174,11 +175,11 @@ summary:focus-visible,
 	background: var(--envoy-surface);
 }
 
-.developer-toggle[aria-checked="true"] .switch-track {
+[role="switch"][aria-checked="true"] .switch-track {
 	background: var(--envoy-primary);
 }
 
-.developer-toggle[aria-checked="true"] .switch-track::before {
+[role="switch"][aria-checked="true"] .switch-track::before {
 	transform: translateX(12px);
 	background: var(--envoy-on-primary);
 }
@@ -381,6 +382,94 @@ textarea:focus-visible {
 textarea:disabled {
 	color: var(--envoy-disabled-text);
 	cursor: not-allowed;
+}
+
+.reply-settings {
+	min-width: 0;
+	margin: 16px 0 0;
+	padding: 0;
+	border: 0;
+}
+
+.reply-settings legend {
+	margin-bottom: 6px;
+	padding: 0;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.settings-card {
+	overflow: hidden;
+	border: 1px solid var(--envoy-divider);
+	border-radius: 10px;
+}
+
+.setting-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	width: 100%;
+	min-height: 44px;
+	padding: 6px 12px;
+	font-size: 13px;
+}
+
+.setting-row + .setting-row {
+	border-top: 1px solid var(--envoy-divider);
+}
+
+.setting-switch {
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	font-weight: 400;
+	text-align: start;
+}
+
+.delay-range[aria-disabled="true"] {
+	color: var(--envoy-disabled-text);
+}
+
+.delay-inputs {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--envoy-secondary-text);
+}
+
+.delay-inputs input {
+	width: 52px;
+	height: 30px;
+	border: 1px solid var(--envoy-control-border);
+	border-radius: 8px;
+	padding: 0 6px;
+	background: var(--envoy-control);
+	color: var(--envoy-text);
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+	appearance: textfield;
+}
+
+.delay-inputs input::-webkit-inner-spin-button,
+.delay-inputs input::-webkit-outer-spin-button {
+	margin: 0;
+	appearance: none;
+}
+
+.delay-inputs input:focus-visible {
+	border-color: var(--envoy-focus);
+	outline: 2px solid var(--envoy-focus);
+	outline-offset: 1px;
+}
+
+.delay-inputs input:disabled {
+	color: var(--envoy-disabled-text);
+	cursor: not-allowed;
+}
+
+.reply-settings .hint {
+	margin-bottom: 0;
 }
 
 .controls {
