@@ -26,6 +26,7 @@ const snapshot: NonNullable<ControllerState["snapshot"]> = {
 	chatId: "chat-1",
 	revision: "revision-1",
 	messages: [{ id: "message-1", direction: "incoming", text: "Hello", attachments: [], reactions: [], replyTo: null }],
+	participants: [],
 };
 
 const task: TaskState = {
@@ -126,6 +127,19 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 		},
 	};
 }
+
+test("setup shows the chat name next to goal setup and hides it when unknown", (t) => {
+	const ui = setup(t);
+	assert.equal(ui.element("chat-name").hidden, true);
+	ui.update({ snapshot: { ...snapshot, participants: ["Wiktor Golicz"] } });
+	assert.equal(ui.element("chat-name").hidden, false);
+	assert.equal(ui.element("chat-name").textContent, "Chat name: Wiktor Golicz");
+	ui.update({ snapshot: { ...snapshot, participants: [] } });
+	assert.equal(ui.element("chat-name").hidden, true);
+	assert.equal(ui.element("chat-name").textContent, "");
+	ui.update({ snapshot: null });
+	assert.equal(ui.element("chat-name").hidden, true);
+});
 
 test("setup shows the start form while the thread and footer stay hidden", (t) => {
 	const ui = setup(t);
