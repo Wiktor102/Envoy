@@ -483,6 +483,51 @@ textarea:disabled {
 	width: 100%;
 }
 
+.terms-text {
+	max-height: 320px;
+	overflow-y: auto;
+	margin: 12px 0;
+	border: 1px solid var(--envoy-divider);
+	border-radius: 10px;
+	padding: 4px 12px 12px;
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.terms-text:focus-visible {
+	outline: 2px solid var(--envoy-focus);
+	outline-offset: 1px;
+}
+
+.terms-text h3 {
+	margin: 14px 0 4px;
+	color: var(--envoy-text);
+	font-size: 12px;
+}
+
+.terms-text ul {
+	margin: 6px 0;
+	padding-inline-start: 18px;
+}
+
+.terms-agree {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	font-weight: 400;
+	cursor: pointer;
+}
+
+.terms-agree input {
+	flex: none;
+	margin: 2px 0 0;
+	accent-color: var(--envoy-primary);
+}
+
+.terms-controls button {
+	flex: 1;
+}
+
 .reply-controls {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));

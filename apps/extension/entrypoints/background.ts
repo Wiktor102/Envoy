@@ -3,10 +3,13 @@ import { normalizeReplySettings } from "@envoy/contracts";
 import type { BackendRequest } from "../src/messaging";
 import { createBackendClient } from "../src/backend-client";
 import { OWNER_HEARTBEAT_PORT, startBackgroundHeartbeat } from "../src/heartbeat";
+import { hasAcceptedTerms, TERMS_STORAGE_KEY } from "../src/terms";
 
 // Only fixed service messages are forwarded. Provider/transport errors may
 // contain private request content and must never be surfaced or logged.
+const TERMS_REQUIRED = "Accept the Envoy Terms of Use first.";
 const safeErrors = new Set([
+	TERMS_REQUIRED,
 	"A task is already active. Take over the existing task first.",
 	"The previous send may have completed. Check the conversation and delete the old task first.",
 	"A previous send is still being checked. Try again shortly.",
@@ -37,6 +40,12 @@ function connectorFor(sender: chrome.runtime.MessageSender): string | null {
 	} catch {
 		return null;
 	}
+}
+
+// The panel gates first use too; this keeps a stale or modified view from starting work.
+async function requireAcceptedTerms() {
+	const saved = await chrome.storage.local.get(TERMS_STORAGE_KEY);
+	if (!hasAcceptedTerms(saved[TERMS_STORAGE_KEY])) throw new Error(TERMS_REQUIRED);
 }
 
 async function preferences() {
@@ -70,11 +79,13 @@ export default defineBackground(() => {
 				case "envoy:health":
 					return (await backend.health.query(undefined, options)).status === "ok";
 				case "envoy:start":
+					await requireAcceptedTerms();
 					return backend.task.start.mutate(
 						{ connectorId, goal: request.goal, snapshot: request.snapshot, ...(await preferences()) },
 						options,
 					);
 				case "envoy:attach":
+					await requireAcceptedTerms();
 					return backend.task.attach.mutate(
 						{ connectorId, taskId: request.taskId, snapshot: request.snapshot },
 						options,

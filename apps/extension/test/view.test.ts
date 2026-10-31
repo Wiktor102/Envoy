@@ -5,6 +5,7 @@ import { test, type TestContext } from "node:test";
 import { JSDOM } from "jsdom";
 import type { TaskState, TaskStatus } from "@envoy/contracts";
 import type { ControllerState, EnvoyController } from "../src/controller";
+import { TERMS_STORAGE_KEY, TERMS_VERSION } from "../src/terms";
 
 // Supply Vite's static asset imports when running the view in Node.
 const assets = registerHooks({
@@ -61,7 +62,7 @@ function preferenceStorage(initial: Record<string, unknown> = { envoyDeveloperMo
 	};
 }
 
-function setup(t: TestContext, storage = preferenceStorage()) {
+function setup(t: TestContext, storage = preferenceStorage(), { acceptTerms = true } = {}) {
 	const dom = new JSDOM("", { url: "https://www.messenger.com/t/chat-1" });
 	Object.assign(globalThis, {
 		window: dom.window,
@@ -101,6 +102,14 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 	let view = createEnvoyView(() => {}, controller);
 	document.body.append(view.host);
 	view.selectTab(true);
+	// Most tests exercise the panel after first use, so accept the terms in the view.
+	function accept() {
+		if (!acceptTerms) return;
+		const root = view.panel.getRootNode() as ShadowRoot;
+		root.querySelector<HTMLInputElement>("#envoy-terms-agree")!.click();
+		root.querySelector<HTMLButtonElement>("#envoy-terms-accept")!.click();
+	}
+	accept();
 	t.after(() => {
 		view.destroy();
 		dom.window.close();
@@ -135,6 +144,7 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 			view = createEnvoyView(() => {}, controller);
 			document.body.append(view.host);
 			view.selectTab(true);
+			accept();
 		},
 		update(patch: Partial<ControllerState>) {
 			state = { ...state, ...patch };
@@ -232,7 +242,7 @@ test("developer switch remembers both choices across remounts and stays outside 
 	assert.equal(toggle.getAttribute("aria-checked"), "true");
 	assert.equal(ui.element("developer-details").hidden, false);
 	await flush();
-	assert.deepEqual(await storage.get(), { envoyDeveloperMode: true });
+	assert.equal((await storage.get()).envoyDeveloperMode, true);
 	ui.remount();
 	await flush();
 	assert.equal(ui.element("developer-details").hidden, false);
@@ -243,7 +253,7 @@ test("developer switch remembers both choices across remounts and stays outside 
 	ui.element<HTMLButtonElement>("developer-mode").click();
 	assert.equal(ui.element("developer-details").hidden, true);
 	await flush();
-	assert.deepEqual(await storage.get(), { envoyDeveloperMode: false });
+	assert.equal((await storage.get()).envoyDeveloperMode, false);
 	ui.remount();
 	await flush();
 	assert.equal(ui.element("developer-mode").getAttribute("aria-checked"), "false");
@@ -260,6 +270,7 @@ test("a late preference read cannot undo a toggle and slow writes preserve the l
 				finishRead = resolve;
 			}),
 		async set(items) {
+			if (!("envoyDeveloperMode" in items)) return;
 			writes.push(items.envoyDeveloperMode);
 			if (writes.length === 1)
 				await new Promise<void>((resolve) => {
@@ -296,6 +307,64 @@ test("unavailable preference storage leaves the toggle usable", async (t) => {
 });
 
 const flushPreferences = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test("first use shows only the terms until they are accepted", async (t) => {
+	const storage = preferenceStorage();
+	const ui = setup(t, storage, { acceptTerms: false });
+	await flushPreferences();
+	assert.equal(ui.element("terms").hidden, false);
+	assert.match(ui.element("terms-text").textContent ?? "", /Telling the other person about AI/);
+	for (const id of ["header", "instructions", "thread", "footer", "developer-mode", "developer-details"]) {
+		assert.equal(ui.element(id).hidden, true, id);
+	}
+	const accept = ui.element<HTMLButtonElement>("terms-accept");
+	assert.equal(accept.disabled, true);
+	ui.element<HTMLInputElement>("terms-agree").click();
+	assert.equal(accept.disabled, false);
+	accept.click();
+	assert.equal(ui.element("terms").hidden, true);
+	assert.equal(ui.element("instructions").hidden, false);
+	assert.equal(ui.element("developer-mode").hidden, false);
+	await flushPreferences();
+	const saved = (await storage.get())[TERMS_STORAGE_KEY] as { version: string; acceptedAt: string };
+	assert.equal(saved.version, TERMS_VERSION);
+	assert.ok(!Number.isNaN(Date.parse(saved.acceptedAt)));
+	ui.remount();
+	await flushPreferences();
+	assert.equal(ui.element("terms").hidden, true);
+	assert.equal(ui.element("instructions").hidden, false);
+});
+
+test("an older terms version asks for acceptance again", async (t) => {
+	const storage = preferenceStorage({
+		[TERMS_STORAGE_KEY]: { version: "2000-01-01", acceptedAt: "2000-01-01T00:00:00Z" },
+	});
+	const ui = setup(t, storage, { acceptTerms: false });
+	await flushPreferences();
+	assert.equal(ui.element("terms").hidden, false);
+	assert.equal(ui.element("instructions").hidden, true);
+});
+
+test("declining the terms returns to the chat list", async (t) => {
+	const ui = setup(t, preferenceStorage(), { acceptTerms: false });
+	await flushPreferences();
+	ui.element<HTMLButtonElement>("terms-decline").click();
+	assert.equal(ui.element("panel").hidden, true);
+	assert.equal(ui.element("developer-mode").hidden, true);
+});
+
+test("unavailable storage still lets the terms be accepted in this view", async (t) => {
+	const unavailable = async () => {
+		throw new Error("Storage unavailable");
+	};
+	const ui = setup(t, { get: unavailable, set: unavailable }, { acceptTerms: false });
+	await flushPreferences();
+	assert.equal(ui.element("terms").hidden, false);
+	ui.element<HTMLInputElement>("terms-agree").click();
+	ui.element<HTMLButtonElement>("terms-accept").click();
+	assert.equal(ui.element("terms").hidden, true);
+	assert.equal(ui.element("instructions").hidden, false);
+});
 
 test("reply sending defaults to auto-send after a 10-second countdown", async (t) => {
 	const ui = setup(t);

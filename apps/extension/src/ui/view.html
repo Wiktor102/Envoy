@@ -17,6 +17,19 @@
 	</button>
 </div>
 <div id="envoy-panel" role="tabpanel" aria-labelledby="envoy-tab" tabindex="0" hidden>
+	<section id="envoy-terms" aria-labelledby="envoy-terms-title" hidden>
+		<h2 id="envoy-terms-title">Envoy Terms of Use</h2>
+		<p class="hint">Read and accept these terms before using Envoy.</p>
+		<div id="envoy-terms-text" class="terms-text" role="document" tabindex="0" aria-label="Terms of Use"></div>
+		<label class="terms-agree">
+			<input type="checkbox" id="envoy-terms-agree" />
+			I am at least 18 and agree to the Terms of Use and Privacy Notice.
+		</label>
+		<div class="controls terms-controls">
+			<button type="button" id="envoy-terms-accept" class="primary" disabled>Accept</button>
+			<button type="button" id="envoy-terms-decline">Not now</button>
+		</div>
+	</section>
 	<header id="envoy-header">
 		<div class="header-main">
 			<button

@@ -9,8 +9,10 @@ import {
 	type TaskStatus,
 } from "@envoy/contracts";
 import type { ControllerState, EnvoyController } from "../controller";
+import { hasAcceptedTerms, TERMS_STORAGE_KEY, TERMS_VERSION, type TermsAcceptance } from "../terms";
 import { isolateTextInput } from "./text-input";
 import styles from "./styles.css?inline";
+import termsMarkup from "./terms.html?raw";
 import markup from "./view.html?raw";
 
 const statusLabels: Record<TaskStatus, string> = {
@@ -59,6 +61,11 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const chatsTab = element<HTMLButtonElement>("#chats-tab");
 	const envoyTab = element<HTMLButtonElement>("#envoy-tab");
 	const panel = element<HTMLElement>("#envoy-panel");
+	const terms = element<HTMLElement>("#envoy-terms");
+	const termsAgree = element<HTMLInputElement>("#envoy-terms-agree");
+	const termsAccept = element<HTMLButtonElement>("#envoy-terms-accept");
+	const termsDecline = element<HTMLButtonElement>("#envoy-terms-decline");
+	element<HTMLElement>("#envoy-terms-text").innerHTML = termsMarkup;
 	const developerToggle = element<HTMLButtonElement>("#envoy-developer-mode");
 	const developerDetails = element<HTMLElement>("#envoy-developer-details");
 	const chatId = element<HTMLElement>("#envoy-chat-id");
@@ -141,6 +148,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const openToolCalls = new Set<string>();
 	let developerMode = false;
 	let developerModeChanged = false;
+	let termsAccepted = false;
+	let termsChanged = false;
 	let replySettings: ReplySettings = { ...DEFAULT_REPLY_SETTINGS };
 	let replySettingsChanged = false;
 	let preferenceWrite = Promise.resolve();
@@ -148,7 +157,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	function setDeveloperMode(enabled: boolean) {
 		developerMode = enabled;
 		developerToggle.setAttribute("aria-checked", String(enabled));
-		developerDetails.hidden = !enabled;
+		developerDetails.hidden = !enabled || !termsAccepted;
 	}
 
 	// Field values change only here, so a render during typing keeps the draft.
@@ -161,9 +170,10 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 
 	async function restorePreferences() {
 		try {
-			const saved = await chrome.storage.local.get(["envoyDeveloperMode", "envoyReplySettings"]);
+			const saved = await chrome.storage.local.get(["envoyDeveloperMode", "envoyReplySettings", TERMS_STORAGE_KEY]);
 			// A slow storage read must not undo a choice made in this view.
 			if (destroyed) return;
+			if (!termsChanged) setTermsAccepted(hasAcceptedTerms(saved[TERMS_STORAGE_KEY]));
 			if (!developerModeChanged) setDeveloperMode(saved.envoyDeveloperMode === true);
 			if (!replySettingsChanged) setReplySettings(normalizeReplySettings(saved.envoyReplySettings));
 		} catch {
@@ -181,6 +191,26 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			}
 		});
 	}
+
+	function setTermsAccepted(accepted: boolean) {
+		termsAccepted = accepted;
+		terms.hidden = accepted;
+		developerToggle.hidden = !accepted || panel.hidden;
+		setDeveloperMode(developerMode);
+		render();
+	}
+
+	termsAgree.addEventListener("change", () => {
+		termsAccept.disabled = !termsAgree.checked;
+	});
+	termsAccept.addEventListener("click", () => {
+		if (!termsAgree.checked) return;
+		termsChanged = true;
+		const acceptance: TermsAcceptance = { version: TERMS_VERSION, acceptedAt: new Date().toISOString() };
+		savePreference({ [TERMS_STORAGE_KEY]: acceptance });
+		setTermsAccepted(true);
+	});
+	termsDecline.addEventListener("click", () => selectTab(false));
 
 	developerToggle.addEventListener("click", () => {
 		developerModeChanged = true;
@@ -224,7 +254,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		chatsTab.tabIndex = showEnvoy ? -1 : 0;
 		envoyTab.tabIndex = showEnvoy ? 0 : -1;
 		panel.hidden = !showEnvoy;
-		developerToggle.hidden = !showEnvoy;
+		developerToggle.hidden = !showEnvoy || !termsAccepted;
 		onSelectionChange();
 	}
 
@@ -302,6 +332,12 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 
 	function render() {
 		if (destroyed) return;
+		// Nothing else in the panel is usable until the current terms are accepted.
+		if (!termsAccepted) {
+			for (const section of [header, instructions, thread, footer]) section.hidden = true;
+			startButton.disabled = true;
+			return;
+		}
 		renderConversation();
 		const task = state.task;
 		const active = Boolean(task && !isTaskEnded(task.status));
@@ -549,6 +585,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		render();
 	});
 	const countdownTimer = window.setInterval(renderCountdown, 1000);
+	setTermsAccepted(false);
 	setReplySettings(replySettings);
 	void restorePreferences();
 	return {
