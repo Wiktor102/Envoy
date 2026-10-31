@@ -1,6 +1,11 @@
 const playPath =
 	"M13.126 9.949c1.5-.866 1.5-3.031 0-3.897l-6.75-3.898C4.875 1.288 3 2.371 3 4.103v7.794c0 1.732 1.875 2.815 3.375 1.949l6.75-3.897z";
 
+// Standalone "gif" word in Messenger-supplied labels and alt text.
+export function isGifLabel(value: string): boolean {
+	return /(?:^|\s)gif(?=$|[\s:.,])/i.test(value);
+}
+
 // An encrypted-chat GIF is a button holding a lone image whose alt names the
 // format. No play control or tabindex required; some variants omit them. The
 // alt word carries the classification: photo buttons never carry it, and a
@@ -15,7 +20,7 @@ export function isGifButton(button: HTMLElement): boolean {
 		return false;
 	const images = button.querySelectorAll("img");
 	if (images.length !== 1) return false;
-	return /(?:^|\s)gif(?=$|[\s:.,])/i.test(images[0]!.getAttribute("alt") ?? "");
+	return isGifLabel(images[0]!.getAttribute("alt") ?? "");
 }
 
 // The observed Messenger animated preview is a blob image with a nested play

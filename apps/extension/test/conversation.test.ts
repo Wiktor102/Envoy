@@ -1314,6 +1314,36 @@ test("reads encrypted GIF buttons as presence-only without blocking the chat", a
 	dom.window.close();
 });
 
+test("reads quoted GIFs as type-only without blocking the chat", async () => {
+	const dom = setup();
+	setMessages(
+		`<div data-scope="messages_table"><h4>You replied to Alex</h4><div role="button" aria-label="View original message"><img alt="Funny GIF" src="blob:https://www.messenger.com/q"></div><span dir="auto">Nice one</span></div>` +
+			`<div data-scope="messages_table"><h4>You replied to Sam</h4><div role="button" aria-label="Przejdź do wiadomości, na którą odpowiadasz"><img alt="Fish GIF" src="https://example.test/gif"><img alt="Zdjęcie" src="https://example.test/photo"></div><span dir="auto">Haha</span></div>`,
+	);
+	const snapshot = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		snapshot.messages.map((message) => message.replyTo),
+		[
+			{
+				text: null,
+				context: "You replied to Alex",
+				attachments: [{ type: "gif", url: null, description: null }],
+			},
+			{
+				text: null,
+				context: "You replied to Sam",
+				attachments: [
+					{ type: "gif", url: null, description: null },
+					{ type: "image", url: "https://example.test/photo", description: null, media: null },
+				],
+			},
+		],
+	);
+	document.querySelector("img")!.setAttribute("src", "blob:https://www.messenger.com/changed");
+	assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
+	dom.window.close();
+});
+
 test("reads unsent placeholders as unsent messages without placeholder text", async () => {
 	const dom = setup();
 	for (const placeholder of [

@@ -1,4 +1,4 @@
-import { isAnimatedPreview, isGifButton } from "./animated-preview";
+import { isAnimatedPreview, isGifButton, isGifLabel } from "./animated-preview";
 import { isGroupSystemEvent, isThreadIntro } from "./group-events";
 import { attachmentIdentity, MAX_IMAGE_SIDE, MAX_INLINE_MEDIA_CHARS, MAX_SNAPSHOT_IMAGES } from "@envoy/contracts";
 import type {
@@ -519,8 +519,13 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 				"video, audio, object, embed, iframe, a[download], [aria-label], img[alt], [data-message-type], [data-attachment-type]",
 			),
 		].filter((element) => isVisible(element) && !element.closest('[role="toolbar"]'));
+		// Quoted images are captured as type-only metadata, never content.
+		// Exempt what the reader captures; anything else keeps tripping.
+		const reply = findReplyButton(scope);
+		const quoted: Set<Element> = new Set(reply ? getQuotedImages(reply) : []);
 		if (
 			media.some((element) => {
+				if (quoted.has(element)) return false;
 				if (inRecognizedMedia(element)) return false;
 				if (element.matches("video, audio, object, embed, iframe, a[download]")) return true;
 				const preview = rendered
@@ -547,7 +552,7 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 							isGifLink(viewer) &&
 							element.matches("img[alt]") &&
 							viewer.contains(element) &&
-							/(?:^|\s)gif(?=$|[\s:.,])/i.test(element.getAttribute("alt") ?? ""),
+							isGifLabel(element.getAttribute("alt") ?? ""),
 					);
 				const checkedMetadata =
 					preview || giphyImage ? metadata.replace(/(?:^|\s)gif(?=$|[\s:.,])/gi, " ") : metadata;
@@ -618,7 +623,7 @@ function isGifLink(viewer: HTMLElement): boolean {
 	const image = viewer.querySelector("img[alt]");
 	return (
 		image !== null &&
-		/(?:^|\s)gif(?=$|[\s:.,])/i.test(image.getAttribute("alt") ?? "") &&
+		isGifLabel(image.getAttribute("alt") ?? "") &&
 		[...viewer.querySelectorAll("span")].some((span) => span.textContent?.trim() === "GIPHY")
 	);
 }
@@ -718,7 +723,9 @@ function readReply(boundary: Element): ConversationSnapshot["messages"][number][
 					? text
 					: null,
 		context: context?.textContent?.trim() || null,
-		attachments: getQuotedImages(button).map(imageAttachment),
+		attachments: getQuotedImages(button).map((image) =>
+			isGifLabel(quotedImageLabel(image)) ? gifAttachment() : imageAttachment(image),
+		),
 	};
 }
 
@@ -808,9 +815,16 @@ function readInlineText(element: Element): string {
 
 function getQuotedImages(button: Element): HTMLImageElement[] {
 	return [...button.querySelectorAll<HTMLImageElement>("img")].filter((image) => {
-		const label = `${image.alt} ${image.getAttribute("aria-label") ?? ""}`;
-		return !image.closest('[dir="auto"], [aria-hidden="true"]') && /photo|image|zdjęci|obraz/i.test(label);
+		const label = quotedImageLabel(image);
+		return (
+			!image.closest('[dir="auto"], [aria-hidden="true"]') &&
+			(/photo|image|zdjęci|obraz/i.test(label) || isGifLabel(label))
+		);
 	});
+}
+
+function quotedImageLabel(image: HTMLImageElement): string {
+	return `${image.alt} ${image.getAttribute("aria-label") ?? ""}`;
 }
 
 // A viewer link identifies the attachment; the image element supplies the
