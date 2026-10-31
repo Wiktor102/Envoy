@@ -1,6 +1,14 @@
-import { isAnimatedPreview } from "./animated-preview";
+import { isAnimatedPreview, isGifButton, isGifLabel } from "./animated-preview";
 import { isGroupSystemEvent, isThreadIntro } from "./group-events";
-import type { ConversationMessage, ConversationSnapshot, SendReplyCommand, SendResult } from "@envoy/contracts";
+import { attachmentIdentity, MAX_IMAGE_SIDE, MAX_INLINE_MEDIA_CHARS, MAX_SNAPSHOT_IMAGES } from "@envoy/contracts";
+import type {
+	ConversationMessage,
+	ConversationSnapshot,
+	InlineImageMedia,
+	InlineImageMime,
+	SendReplyCommand,
+	SendResult,
+} from "@envoy/contracts";
 
 export interface MessengerChatAdapter {
 	readConversation(): Promise<ConversationSnapshot>;
@@ -219,6 +227,12 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	}
 	for (const button of main.querySelectorAll<HTMLElement>('[data-scope="messages_table"] [role="button"][tabindex]')) {
 		if (!isAnimatedPreview(button) || !isVisible(button)) continue;
+		const boundary = messageBoundary(button);
+		if (!boundary || findReplyButton(boundary)?.contains(button)) continue;
+		images.push(button);
+	}
+	for (const button of main.querySelectorAll<HTMLElement>('[data-scope="messages_table"] [role="button"]')) {
+		if (!isGifButton(button) || !isVisible(button)) continue;
 		const boundary = messageBoundary(button);
 		if (!boundary || findReplyButton(boundary)?.contains(button)) continue;
 		images.push(button);
@@ -505,13 +519,20 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 				"video, audio, object, embed, iframe, a[download], [aria-label], img[alt], [data-message-type], [data-attachment-type]",
 			),
 		].filter((element) => isVisible(element) && !element.closest('[role="toolbar"]'));
+		// Quote previews may wrap their image in labelled GIF chrome. The gif
+		// word alone never trips inside a quote; any other media word still does.
+		const reply = findReplyButton(scope);
 		if (
 			media.some((element) => {
 				if (inRecognizedMedia(element)) return false;
 				if (element.matches("video, audio, object, embed, iframe, a[download]")) return true;
 				const preview = rendered
 					.flatMap(({ images }) => images)
-					.find((image) => isAnimatedPreview(image) && (image === element || image.contains(element)));
+					.find(
+						(image) =>
+							(isAnimatedPreview(image) || isGifButton(image)) &&
+							(image === element || image.contains(element)),
+					);
 				const metadata = [
 					// A per-message label contains the sender and message body, not
 					// attachment metadata. Words such as "plik" can be ordinary text.
@@ -524,17 +545,16 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 					.join(" ");
 				const giphyImage = rendered
 					.flatMap(({ images }) => images)
-					.some((viewer) => {
-						if (!viewer.matches("a[href]") || !isMessengerPhotoLink(viewer as HTMLAnchorElement)) return false;
-						return (
+					.some(
+						(viewer) =>
+							isGifLink(viewer) &&
 							element.matches("img[alt]") &&
 							viewer.contains(element) &&
-							/(?:^|\s)gif(?=$|[\s:.,])/i.test(element.getAttribute("alt") ?? "") &&
-							[...viewer.querySelectorAll("span")].some((span) => span.textContent?.trim() === "GIPHY")
-						);
-					});
+							isGifLabel(element.getAttribute("alt") ?? ""),
+					);
+				const inQuote = reply?.contains(element) ?? false;
 				const checkedMetadata =
-					preview || giphyImage ? metadata.replace(/(?:^|\s)gif(?=$|[\s:.,])/gi, " ") : metadata;
+					preview || giphyImage || inQuote ? metadata.replace(/(?:^|\s)gif(?=$|[\s:.,])/gi, " ") : metadata;
 				return /(?:^|\s)(?:sticker|voice(?: message)?|audio(?: message)?|video|gif|file attachment|naklejka|wiadomość głosowa|plik)(?:$|[\s:.,])/i.test(
 					checkedMetadata,
 				);
@@ -592,6 +612,23 @@ function isMessengerPhotoLink(anchor: HTMLAnchorElement): boolean {
 	} catch {
 		return false;
 	}
+}
+
+// A GIF sent through GIPHY renders as a photo link whose image alt names the
+// format and whose caption names the service. Animated previews carry a play
+// glyph instead. Both stay presence-only: only photos forward bytes.
+function isGifLink(viewer: HTMLElement): boolean {
+	if (!viewer.matches("a[href]") || !isMessengerPhotoLink(viewer as HTMLAnchorElement)) return false;
+	const image = viewer.querySelector("img[alt]");
+	return (
+		image !== null &&
+		isGifLabel(image.getAttribute("alt") ?? "") &&
+		[...viewer.querySelectorAll("span")].some((span) => span.textContent?.trim() === "GIPHY")
+	);
+}
+
+function isGifViewer(viewer: HTMLElement): boolean {
+	return isAnimatedPreview(viewer) || isGifButton(viewer) || isGifLink(viewer);
 }
 
 function collectVideoViewers(main: HTMLElement): HTMLElement[] {
@@ -685,7 +722,9 @@ function readReply(boundary: Element): ConversationSnapshot["messages"][number][
 					? text
 					: null,
 		context: context?.textContent?.trim() || null,
-		attachments: getQuotedImages(button).map(imageAttachment),
+		attachments: getQuotedImages(button).map((image) =>
+			isGifLabel(quotedImageLabel(image)) ? gifAttachment() : imageAttachment(image),
+		),
 	};
 }
 
@@ -775,9 +814,16 @@ function readInlineText(element: Element): string {
 
 function getQuotedImages(button: Element): HTMLImageElement[] {
 	return [...button.querySelectorAll<HTMLImageElement>("img")].filter((image) => {
-		const label = `${image.alt} ${image.getAttribute("aria-label") ?? ""}`;
-		return !image.closest('[dir="auto"], [aria-hidden="true"]') && /photo|image|zdjęci|obraz/i.test(label);
+		const label = quotedImageLabel(image);
+		return (
+			!image.closest('[dir="auto"], [aria-hidden="true"]') &&
+			(/photo|image|zdjęci|obraz/i.test(label) || isGifLabel(label))
+		);
 	});
+}
+
+function quotedImageLabel(image: HTMLImageElement): string {
+	return `${image.alt} ${image.getAttribute("aria-label") ?? ""}`;
 }
 
 // A viewer link identifies the attachment; the image element supplies the
@@ -794,20 +840,146 @@ function stickerAttachment(): { type: "sticker"; url: null; description: null } 
 	return { type: "sticker", url: null, description: null };
 }
 
-function imageAttachment(image: HTMLImageElement | null): { type: "image"; url: string | null; description: null } {
+function gifAttachment(): { type: "gif"; url: null; description: null } {
+	// Only photos forward bytes. The model only learns that a GIF is present.
+	return { type: "gif", url: null, description: null };
+}
+
+function imageSource(image: HTMLImageElement | null): string {
+	return image?.currentSrc || image?.getAttribute("src") || "";
+}
+
+function imageAttachment(image: HTMLImageElement | null): {
+	type: "image";
+	url: string | null;
+	description: null;
+	media: null;
+} {
 	const sources = image ? [image.currentSrc, image.getAttribute("src")] : [];
 	for (const source of sources) {
 		if (!source?.trim()) continue;
 		try {
 			const url = new URL(source, location.href);
 			if (url.protocol === "http:" || url.protocol === "https:") {
-				return { type: "image", url: url.href, description: null };
+				return { type: "image", url: url.href, description: null, media: null };
 			}
 		} catch {
 			// Ignore malformed or unavailable sources.
 		}
 	}
-	return { type: "image", url: null, description: null };
+	return { type: "image", url: null, description: null, media: null };
+}
+
+const inlineMimes: readonly InlineImageMime[] = ["image/jpeg", "image/png", "image/webp"];
+const MEDIA_LOAD_TIMEOUT_MS = 5000;
+const MEDIA_JPEG_QUALITY = 0.85;
+// Raw sources decode before the byte cap applies: downscaling is what earns
+// compliance. This only bounces pathological inputs before decoding them.
+const MAX_INLINE_SOURCE_CHARS = 12_000_000;
+
+// Decoded photo bytes keyed by element. Polling re-reads the same nodes, so
+// the cache avoids re-decoding every snapshot. Entries die with their nodes.
+const mediaCache = new WeakMap<HTMLImageElement, { source: string; media: InlineImageMedia | null }>();
+
+function parseInlineData(source: string): { mime: string; data: string } | null {
+	const match = source.match(/^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/]*={0,2})$/);
+	if (!match || !match[2] || match[2].length % 4 !== 0) return null;
+	return { mime: match[1]!, data: match[2]! };
+}
+
+function loadImage(source: string): Promise<HTMLImageElement> {
+	return new Promise((resolve, reject) => {
+		const image = new Image();
+		const timer = setTimeout(() => reject(new Error("timeout")), MEDIA_LOAD_TIMEOUT_MS);
+		image.onload = () => {
+			clearTimeout(timer);
+			resolve(image);
+		};
+		image.onerror = () => {
+			clearTimeout(timer);
+			reject(new Error("unreadable"));
+		};
+		image.src = source;
+	});
+}
+
+// Decode a local data: source, downscaling or re-encoding through canvas until
+// it fits the caps. Anything unexpected stays presence-only.
+async function decodeLocalMedia(source: string): Promise<InlineImageMedia | null> {
+	const parsed = parseInlineData(source);
+	if (!parsed || !inlineMimes.includes(parsed.mime as InlineImageMime)) return null;
+	if (parsed.data.length > MAX_INLINE_SOURCE_CHARS) return null;
+	let loaded: HTMLImageElement;
+	try {
+		loaded = await loadImage(source);
+	} catch {
+		return null;
+	}
+	const width = loaded.naturalWidth;
+	const height = loaded.naturalHeight;
+	if (!width || !height) return null;
+	if (width <= MAX_IMAGE_SIDE && height <= MAX_IMAGE_SIDE && parsed.data.length <= MAX_INLINE_MEDIA_CHARS) {
+		return { mime: parsed.mime as InlineImageMime, data: parsed.data, width, height };
+	}
+	const scale = Math.min(1, MAX_IMAGE_SIDE / width, MAX_IMAGE_SIDE / height);
+	const targetWidth = Math.max(1, Math.floor(width * scale));
+	const targetHeight = Math.max(1, Math.floor(height * scale));
+	try {
+		const canvas = document.createElement("canvas");
+		canvas.width = targetWidth;
+		canvas.height = targetHeight;
+		const context = canvas.getContext("2d");
+		if (!context) return null;
+		context.drawImage(loaded, 0, 0, targetWidth, targetHeight);
+		const downscaled = parseInlineData(canvas.toDataURL("image/jpeg", MEDIA_JPEG_QUALITY));
+		if (!downscaled || downscaled.mime !== "image/jpeg" || downscaled.data.length > MAX_INLINE_MEDIA_CHARS) return null;
+		return { mime: "image/jpeg", data: downscaled.data, width: targetWidth, height: targetHeight };
+	} catch {
+		return null;
+	}
+}
+
+async function extractLocalMedia(image: HTMLImageElement): Promise<InlineImageMedia | null> {
+	const source = imageSource(image);
+	const cached = mediaCache.get(image);
+	if (cached && cached.source === source) return cached.media;
+	const media = await decodeLocalMedia(source);
+	mediaCache.set(image, { source, media });
+	return media;
+}
+
+function isRemoteSource(source: string): boolean {
+	if (!source.trim()) return false;
+	try {
+		const url = new URL(source, location.href);
+		return url.protocol === "http:" || url.protocol === "https:";
+	} catch {
+		return false;
+	}
+}
+
+// Fill inline bytes for local photo sources, newest first within the snapshot
+// cap. Remote sources need nothing: the backend fetches them itself.
+async function attachInlineMedia(rendered: RenderedMessage[], messages: ConversationSnapshot["messages"]): Promise<void> {
+	const candidates: { message: number; position: number; image: HTMLImageElement }[] = [];
+	rendered.forEach(({ images }, message) => {
+		images.forEach((viewer, position) => {
+			if (isGifViewer(viewer)) return;
+			const image = viewer.querySelector("img");
+			if (!image) return;
+			const source = imageSource(image);
+			if (!isRemoteSource(source) && !parseInlineData(source)) return;
+			candidates.push({ message, position, image });
+		});
+	});
+	await Promise.all(
+		candidates.slice(-MAX_SNAPSHOT_IMAGES).map(async ({ message, position, image }) => {
+			if (isRemoteSource(imageSource(image))) return;
+			const media = await extractLocalMedia(image);
+			const slot = messages[message]?.attachments[position];
+			if (slot?.type === "image" && media) slot.media = media;
+		}),
+	);
 }
 
 function readReactions(boundary: Element): ConversationSnapshot["messages"][number]["reactions"] {
@@ -961,7 +1133,9 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 			sender: boundary && (unique || matchesLabel) ? (readLabeledMessage(boundary)?.sender ?? null) : null,
 			replyTo: unique ? readReply(boundary) : null,
 			attachments: [
-				...images.map((image) => imageAttachment(image.querySelector<HTMLImageElement>("img"))),
+				...images.map((image) =>
+					isGifViewer(image) ? gifAttachment() : imageAttachment(image.querySelector<HTMLImageElement>("img")),
+				),
 				...videos.map(() => videoAttachment()),
 				...stickers.map(() => stickerAttachment()),
 			],
@@ -1000,11 +1174,13 @@ async function revisionOf(
 	imageState: string[][],
 ): Promise<string> {
 	// DOM-node IDs are temporary. Only the ordered message content contributes to the revision.
+	// Inline bytes are transport: the rendered source already feeds the revision
+	// through the fingerprint, so attachments enter stripped of media.
 	const content = messages.map(({ text, direction, replyTo, attachments, reactions, unsent }) => ({
 		text,
 		direction,
 		replyTo,
-		attachments,
+		attachments: attachments.map(attachmentIdentity),
 		reactions,
 		unsent,
 	}));
@@ -1067,7 +1243,7 @@ function contentOf(messages: ConversationSnapshot["messages"]): unknown[] {
 		text,
 		direction,
 		replyTo,
-		attachments,
+		attachments: attachments.map(attachmentIdentity),
 		reactions,
 		unsent,
 	}));
@@ -1075,7 +1251,11 @@ function contentOf(messages: ConversationSnapshot["messages"]): unknown[] {
 
 async function readCapturedConversation(): Promise<{ capture: ConversationCapture; snapshot: ConversationSnapshot }> {
 	const capture = captureConversation();
-	const revision = await revisionOf(capture.chatId, capture.messages, capture.imageState);
+	// Hashing starts synchronously so a change during the hash still rejects.
+	// Media decoding runs alongside it; the currency check below covers both.
+	const revisionPromise = revisionOf(capture.chatId, capture.messages, capture.imageState);
+	await attachInlineMedia(capture.rendered, capture.messages);
+	const revision = await revisionPromise;
 	if (!captureIsCurrent(capture)) {
 		throw new ConversationUnavailableError(documentHasNavigated() ? "navigated" : "changed");
 	}

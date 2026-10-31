@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { TaskState } from "@envoy/contracts";
+import sharp from "sharp";
+import type { ConversationSnapshot, ImageAttachment, TaskState } from "@envoy/contracts";
 import { MetaModelAdapter } from "../src/agent/meta-model.js";
 
 const task: TaskState = {
@@ -213,6 +214,267 @@ test("the Meta request marks unverified history and attachments without sending 
 		});
 		assert.doesNotMatch(body.messages[2].content, /private\.example/);
 		assert.match(body.messages[0].content, /Do not guess their authors or missing contents/);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+async function photo(width = 100, height = 80): Promise<Buffer> {
+	return sharp({
+		create: { width, height, channels: 3, background: { r: 10, g: 120, b: 200 } },
+	})
+		.jpeg()
+		.toBuffer();
+}
+
+function imageMessage(id: string, attachments: ImageAttachment[]): ConversationSnapshot["messages"][number] {
+	return {
+		id,
+		direction: "incoming",
+		sender: "Alex",
+		text: "See this",
+		replyTo: null,
+		attachments,
+		reactions: [],
+		unsent: false,
+	};
+}
+
+const remote = (url: string): ImageAttachment => ({ type: "image", url, description: null, media: null });
+const local = (data: string, width: number, height: number): ImageAttachment => ({
+	type: "image",
+	url: null,
+	description: null,
+	media: { mime: "image/jpeg", data, width, height },
+});
+
+function modelResponse(action = '{"action":"wait"}'): Response {
+	return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: action } }] }), {
+		status: 200,
+		headers: { "content-type": "application/json" },
+	});
+}
+
+test("the Meta request forwards the newest photos as image blocks without their URLs", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	const bytes = await photo();
+	const inline = (await photo(60, 40)).toString("base64");
+	const seen: { url: string; init: { redirect?: string; credentials?: string } }[] = [];
+	let body: any;
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			body = await new Request(input, init).json();
+			return modelResponse();
+		}
+		seen.push({ url, init: { redirect: init?.redirect, credentials: init?.credentials } });
+		if (url === "https://example.test/redirect") {
+			return new Response(null, { status: 302, headers: { location: "https://example.test/target" } });
+		}
+		return new Response(bytes as unknown as BodyInit, { status: 200, headers: { "content-type": "image/jpeg" } });
+	}) as typeof fetch;
+	try {
+		const messages = [
+			imageMessage("oldest", [remote("https://example.test/oldest")]),
+			imageMessage("middle", [remote("https://example.test/redirect"), local(inline, 60, 40)]),
+			imageMessage("newest", [remote("https://example.test/newest")]),
+		];
+		const result = await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		assert.deepEqual(result, { action: "wait" });
+		const content = body.messages[2].content;
+		assert.equal(content[0].type, "text");
+		assert.deepEqual(
+			content
+				.slice(1)
+				.map(({ type, image_url }: { type: string; image_url: { detail: string } }) => [type, image_url.detail]),
+			[
+				["image_url", "auto"],
+				["image_url", "auto"],
+				["image_url", "auto"],
+				["image_url", "auto"],
+			],
+		);
+		for (const block of content.slice(1)) {
+			assert.match(block.image_url.url, /^data:image\/jpeg;base64,/);
+		}
+		// The inline photo passes through untouched.
+		assert.equal(content[3].image_url.url, `data:image/jpeg;base64,${inline}`);
+		const payload = JSON.parse(content[0].text);
+		assert.deepEqual(
+			payload.conversation.map((entry: { attachments: unknown[] }) => entry.attachments),
+			[
+				[{ type: "image", imageIndex: 0 }],
+				[
+					{ type: "image", imageIndex: 1 },
+					{ type: "image", imageIndex: 2 },
+				],
+				[{ type: "image", imageIndex: 3 }],
+			],
+		);
+		assert.doesNotMatch(JSON.stringify(body), /example\.test/);
+		assert.match(body.messages[0].content, /imageIndex/);
+		// Redirects stay manual and cookie-free.
+		assert.deepEqual(
+			seen.map(({ init }) => init),
+			seen.map(() => ({ redirect: "manual", credentials: "omit" })),
+		);
+		assert.deepEqual(seen.map(({ url }) => url).sort(), [
+			"https://example.test/newest",
+			"https://example.test/oldest",
+			"https://example.test/redirect",
+			"https://example.test/target",
+		]);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the Meta request keeps photos past the cap and failed fetches presence-only", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	const bytes = await photo();
+	let body: any;
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			body = await new Request(input, init).json();
+			return modelResponse();
+		}
+		if (url === "https://example.test/down") throw new Error("socket hang up");
+		if (url === "https://example.test/not-image") {
+			return new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } });
+		}
+		if (url === "https://example.test/downgrade") {
+			return new Response(null, { status: 302, headers: { location: "http://example.test/plain" } });
+		}
+		if (url === "https://example.test/huge") {
+			return new Response(Buffer.alloc(8_000_001) as unknown as BodyInit, {
+				status: 200,
+				headers: { "content-type": "image/jpeg" },
+			});
+		}
+		if (url === "https://example.test/animated") {
+			const gif = Buffer.from("R0lGODlhAQABAIAAAP///////yH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==", "base64");
+			return new Response(gif as unknown as BodyInit, { status: 200, headers: { "content-type": "image/gif" } });
+		}
+		return new Response(bytes as unknown as BodyInit, { status: 200, headers: { "content-type": "image/jpeg" } });
+	}) as typeof fetch;
+	try {
+		const messages = [
+			imageMessage("oldest", [remote("https://example.test/oldest")]),
+			imageMessage("newest", [
+				remote("https://example.test/down"),
+				remote("https://example.test/not-image"),
+				remote("https://example.test/downgrade"),
+				remote("https://example.test/huge"),
+				remote("https://example.test/animated"),
+				remote("https://example.test/ok"),
+			]),
+		];
+		const result = await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		assert.deepEqual(result, { action: "wait" });
+		const content = body.messages[2].content;
+		// Newest-first selection takes the last four; only the fetchable one resolves.
+		assert.equal(content.length, 2);
+		assert.equal(content[1].type, "image_url");
+		const payload = JSON.parse(content[0].text);
+		assert.deepEqual(payload.conversation[0].attachments, [{ type: "image" }]);
+		assert.deepEqual(payload.conversation[1].attachments, [
+			{ type: "image" },
+			{ type: "image" },
+			{ type: "image" },
+			{ type: "image" },
+			{ type: "image" },
+			{ type: "image", imageIndex: 0 },
+		]);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the Meta request downscales fetched photos past the max side", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	const bytes = await photo(2000, 1000);
+	let body: any;
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			body = await new Request(input, init).json();
+			return modelResponse();
+		}
+		return new Response(bytes as unknown as BodyInit, { status: 200, headers: { "content-type": "image/jpeg" } });
+	}) as typeof fetch;
+	try {
+		await new MetaModelAdapter().run(
+			task,
+			{
+				...conversation,
+				messages: [imageMessage("only", [remote("https://example.test/big")])],
+			} as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		const block = body.messages[2].content[1];
+		assert.equal(block.type, "image_url");
+		const meta = await sharp(Buffer.from(block.image_url.url.split(",")[1], "base64")).metadata();
+		assert.equal(meta.width, 1568);
+		assert.equal(meta.height, 784);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the Meta request never fetches or forwards quoted photos", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	const fetched: string[] = [];
+	let body: any;
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			body = await new Request(input, init).json();
+			return modelResponse();
+		}
+		fetched.push(url);
+		return new Response("no", { status: 404 });
+	}) as typeof fetch;
+	try {
+		const quoted = imageMessage("only", []);
+		quoted.replyTo = {
+			text: "Original",
+			context: "Reply",
+			attachments: [remote("https://example.test/quote")],
+		};
+		await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages: [quoted] } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		assert.deepEqual(fetched, []);
+		assert.equal(typeof body.messages[2].content, "string");
+		const payload = JSON.parse(body.messages[2].content);
+		assert.deepEqual(payload.conversation[0].replyTo.attachments, [{ type: "image" }]);
 	} finally {
 		globalThis.fetch = previousFetch;
 		if (previousKey === undefined) delete process.env.MODEL_API_KEY;

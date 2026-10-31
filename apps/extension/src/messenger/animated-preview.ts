@@ -1,6 +1,28 @@
 const playPath =
 	"M13.126 9.949c1.5-.866 1.5-3.031 0-3.897l-6.75-3.898C4.875 1.288 3 2.371 3 4.103v7.794c0 1.732 1.875 2.815 3.375 1.949l6.75-3.897z";
 
+// Standalone "gif" word in Messenger-supplied labels and alt text.
+export function isGifLabel(value: string): boolean {
+	return /(?:^|\s)gif(?=$|[\s:.,])/i.test(value);
+}
+
+// An encrypted-chat GIF is a button holding a lone image whose alt names the
+// format. No play control or tabindex required; some variants omit them. The
+// alt word carries the classification: photo buttons never carry it, and a
+// gif never forwards bytes, so over-matching only pauses.
+export function isGifButton(button: HTMLElement): boolean {
+	if (!button.matches('[role="button"]') || button.closest('[aria-hidden="true"], [role="toolbar"]')) return false;
+	const scope = button.closest('[data-scope="messages_table"]');
+	if (!scope?.matches("[data-message-id][aria-roledescription]")) return false;
+	if (
+		button.querySelector("video, audio, object, embed, iframe, a[download], [data-message-type], [data-attachment-type]")
+	)
+		return false;
+	const images = button.querySelectorAll("img");
+	if (images.length !== 1) return false;
+	return isGifLabel(images[0]!.getAttribute("alt") ?? "");
+}
+
 // The observed Messenger animated preview is a blob image with a nested play
 // control. Require the exact play glyph and message boundary, not a label.
 export function isAnimatedPreview(button: HTMLElement): boolean {

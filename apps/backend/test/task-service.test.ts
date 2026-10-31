@@ -492,6 +492,116 @@ test("unknown direction and unsupported content do not trigger the model", () =>
 	}
 });
 
+test("readable photos trigger the model, including photo-only latest messages", () => {
+	const media = { mime: "image/jpeg" as const, data: "AAAA", width: 4, height: 4 };
+	{
+		const { agent, service } = setup();
+		const content = snapshot("r1", "");
+		content.messages[0]!.attachments = [
+			{ type: "image", url: "https://example.test/photo", description: null, media: null },
+		];
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "thinking");
+		assert.equal(agent.calls.length, 1);
+	}
+	{
+		const { agent, service } = setup();
+		const content = snapshot("r1", "What do you think?");
+		content.messages[0]!.attachments = [
+			{ type: "image", url: "https://example.test/one", description: null, media: null },
+			{ type: "image", url: null, description: null, media },
+		];
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "thinking");
+		assert.equal(agent.calls.length, 1);
+	}
+});
+
+test("unreadable photos, other media, and quotes still pause for the user", () => {
+	const media = { mime: "image/jpeg" as const, data: "AAAA", width: 4, height: 4 };
+	const photo = { type: "image" as const, url: "https://example.test/photo", description: null, media: null };
+	const cases: ConversationSnapshot["messages"][number][] = [
+		// Bytes beyond reach stay presence-only.
+		{
+			...snapshot("r1", "See this").messages[0]!,
+			attachments: [{ type: "image", url: null, description: null, media: null }],
+		},
+		{
+			...snapshot("r1", "See this").messages[0]!,
+			attachments: [{ type: "image", url: "http://example.test/photo", description: null, media: null }],
+		},
+		// Only photos forward bytes.
+		{ ...snapshot("r1", "See this").messages[0]!, attachments: [{ type: "gif", url: null, description: null }] },
+		{
+			...snapshot("r1", "See this").messages[0]!,
+			attachments: [photo, { type: "sticker", url: null, description: null }],
+		},
+		// Quote bytes stay client-side, so any quoted attachment pauses.
+		{
+			...snapshot("r1", "Nice").messages[0]!,
+			attachments: [photo],
+			replyTo: { text: "Original", context: "Reply", attachments: [photo] },
+		},
+	];
+	for (const latest of cases) {
+		const { agent, service } = setup();
+		const content = { ...snapshot("r1"), messages: [latest] };
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "needs_user");
+		assert.equal(agent.calls.length, 0);
+	}
+	// The fifth photo in one message falls past the snapshot cap.
+	{
+		const { agent, service } = setup();
+		const local = { type: "image" as const, url: null, description: null, media };
+		const content = snapshot("r1", "All five");
+		content.messages[0]!.attachments = [local, local, local, local, local];
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "needs_user");
+		assert.equal(agent.calls.length, 0);
+	}
+});
+
+test("a quoted photo pauses with a specific message", () => {
+	const photo = { type: "image" as const, url: "https://example.test/photo", description: null, media: null };
+	{
+		const { agent, service } = setup();
+		const content = snapshot("r1", "What word is on this?");
+		content.messages[0]!.replyTo = { text: null, context: null, attachments: [] };
+		content.messages[0]!.attachments = [{ type: "video", url: null, description: null }];
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "needs_user");
+		assert.equal(result.detail, "The latest message contains content Envoy cannot interpret.");
+		assert.equal(agent.calls.length, 0);
+	}
+	{
+		const { agent, service } = setup();
+		const content = snapshot("r1", "What word is on this?");
+		content.messages[0]!.replyTo = { text: "Original", context: "Reply", attachments: [photo] };
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "needs_user");
+		assert.equal(result.detail, "The latest message quotes an image Envoy cannot read. Take over to reply yourself.");
+		assert.equal(agent.calls.length, 0);
+	}
+});
+
+test("a re-encoded photo at the same revision does not pause verification", async () => {
+	const { agent, service } = setup();
+	const first = snapshot("r1", "See this");
+	first.messages[0]!.attachments = [
+		{ type: "image", url: null, description: null, media: { mime: "image/jpeg", data: "AAAA", width: 4, height: 4 } },
+	];
+	service.start("owner", "Arrange a meeting", first);
+	agent.calls[0]!.resolve({ action: "wait" });
+	await Promise.resolve();
+	const second = snapshot("r1", "See this");
+	second.messages[0]!.attachments = [
+		{ type: "image", url: null, description: null, media: { mime: "image/jpeg", data: "BBBB", width: 4, height: 4 } },
+	];
+	const result = service.sync("owner", second);
+	assert.equal(result.task?.status, "waiting");
+});
+
 test("an unsent latest message, including an unsent group event, does not trigger the model", () => {
 	{
 		const { agent, service } = setup();

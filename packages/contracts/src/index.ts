@@ -6,10 +6,31 @@ export interface HealthResponse {
 	service: "envoy-backend";
 }
 
+// Photos only. Video, GIF, stickers, and files stay presence-only.
+export const MAX_IMAGE_SIDE = 1568;
+export const MAX_SNAPSHOT_IMAGES = 4;
+// Base64 characters per inline image and per snapshot. Both stay well under
+// the backend socket payload limit.
+export const MAX_INLINE_MEDIA_CHARS = 1_000_000;
+export const MAX_SNAPSHOT_MEDIA_CHARS = 3_000_000;
+
+export type InlineImageMime = "image/jpeg" | "image/png" | "image/webp";
+
+export interface InlineImageMedia {
+	mime: InlineImageMime;
+	// Base64 bytes, already downscaled to MAX_IMAGE_SIDE by the sender.
+	data: string;
+	width: number;
+	height: number;
+}
+
 export interface ImageAttachment {
 	type: "image";
 	url: string | null;
 	description: string | null;
+	// Inline bytes for local sources the backend cannot fetch. Null for remote
+	// sources and when extraction failed. Older clients omit this field.
+	media: InlineImageMedia | null;
 }
 
 export interface VideoAttachment {
@@ -24,7 +45,13 @@ export interface StickerAttachment {
 	description: null;
 }
 
-export type MessageAttachment = ImageAttachment | VideoAttachment | StickerAttachment;
+export interface GifAttachment {
+	type: "gif";
+	url: null;
+	description: null;
+}
+
+export type MessageAttachment = ImageAttachment | VideoAttachment | StickerAttachment | GifAttachment;
 
 export interface ConversationMessage {
 	// Temporary identifier for a rendered node; it can change on reload or remount.
@@ -124,3 +151,34 @@ export interface HealthRequest {
 }
 
 export type HealthReply = { ok: true; health: HealthResponse } | { ok: false; error: "backend-unavailable" };
+
+// Transport bytes never identify content. The rendered source already feeds
+// the revision through the fingerprint; hashing base64 would only churn.
+export function attachmentIdentity(attachment: MessageAttachment): MessageAttachment {
+	return attachment.type === "image" && attachment.media ? { ...attachment, media: null } : attachment;
+}
+
+function fetchableImageUrl(url: string | null): boolean {
+	// Prefix only; the backend parses strictly before fetching. A malformed
+	// URL merely fails there and stays presence-only.
+	return !!url && url.startsWith("https://");
+}
+
+// Newest-first selection of the images the model may see, one flag per
+// attachment in message order. Reply quotes never qualify: their bytes stay
+// client-side. Anything beyond MAX_SNAPSHOT_IMAGES stays presence-only.
+export function forwardableImageSlots(messages: readonly ConversationMessage[]): boolean[][] {
+	const slots = messages.map((message) => message.attachments.map(() => false));
+	let remaining = MAX_SNAPSHOT_IMAGES;
+	for (let m = messages.length - 1; m >= 0 && remaining > 0; m--) {
+		const attachments = messages[m]!.attachments;
+		for (let a = attachments.length - 1; a >= 0 && remaining > 0; a--) {
+			const attachment = attachments[a]!;
+			if (attachment.type !== "image") continue;
+			if (!fetchableImageUrl(attachment.url) && !attachment.media) continue;
+			slots[m]![a] = true;
+			remaining--;
+		}
+	}
+	return slots;
+}

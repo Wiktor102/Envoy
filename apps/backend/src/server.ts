@@ -7,7 +7,8 @@ import { allowedOrigin } from "./origin.js";
 const server = new WebSocketServer({
 	host: config.host,
 	port: config.port,
-	maxPayload: 2_000_000,
+	// Snapshots may carry up to 3MB of inline photo bytes plus text.
+	maxPayload: 4_000_000,
 	verifyClient: (info, done) => done(allowedOrigin(info.origin), 403, "Forbidden"),
 });
 applyWSSHandler({ wss: server, router: appRouter });
