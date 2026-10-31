@@ -292,19 +292,21 @@ test("the Meta request forwards the newest photos as image blocks without their 
 		const content = body.messages[2].content;
 		assert.equal(content[0].type, "text");
 		assert.deepEqual(
-			content.slice(1).map(({ type, detail }: { type: string; detail: string }) => [type, detail]),
+			content
+				.slice(1)
+				.map(({ type, image_url }: { type: string; image_url: { detail: string } }) => [type, image_url.detail]),
 			[
-				["input_image", "auto"],
-				["input_image", "auto"],
-				["input_image", "auto"],
-				["input_image", "auto"],
+				["image_url", "auto"],
+				["image_url", "auto"],
+				["image_url", "auto"],
+				["image_url", "auto"],
 			],
 		);
 		for (const block of content.slice(1)) {
-			assert.match(block.image_url, /^data:image\/jpeg;base64,/);
+			assert.match(block.image_url.url, /^data:image\/jpeg;base64,/);
 		}
 		// The inline photo passes through untouched.
-		assert.equal(content[3].image_url, `data:image/jpeg;base64,${inline}`);
+		assert.equal(content[3].image_url.url, `data:image/jpeg;base64,${inline}`);
 		const payload = JSON.parse(content[0].text);
 		assert.deepEqual(
 			payload.conversation.map((entry: { attachments: unknown[] }) => entry.attachments),
@@ -389,7 +391,7 @@ test("the Meta request keeps photos past the cap and failed fetches presence-onl
 		const content = body.messages[2].content;
 		// Newest-first selection takes the last four; only the fetchable one resolves.
 		assert.equal(content.length, 2);
-		assert.equal(content[1].type, "input_image");
+		assert.equal(content[1].type, "image_url");
 		const payload = JSON.parse(content[0].text);
 		assert.deepEqual(payload.conversation[0].attachments, [{ type: "image" }]);
 		assert.deepEqual(payload.conversation[1].attachments, [
@@ -431,8 +433,8 @@ test("the Meta request downscales fetched photos past the max side", async () =>
 			"new_message",
 		);
 		const block = body.messages[2].content[1];
-		assert.equal(block.type, "input_image");
-		const meta = await sharp(Buffer.from(block.image_url.split(",")[1], "base64")).metadata();
+		assert.equal(block.type, "image_url");
+		const meta = await sharp(Buffer.from(block.image_url.url.split(",")[1], "base64")).metadata();
 		assert.equal(meta.width, 1568);
 		assert.equal(meta.height, 784);
 	} finally {

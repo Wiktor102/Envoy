@@ -71,12 +71,16 @@ export class MetaModelAdapter implements Agent {
 					images.length
 						? {
 								role: "user",
-								// The Model API documents input_image blocks. The SDK
-								// chat types predate them, so the wire shape is cast.
 								content: [
 									{ type: "text", text: payload },
-									...images.map((image) => ({ type: "input_image", image_url: image, detail: "auto" })),
-								] as unknown as string,
+									...images.map(
+										(image) =>
+											({
+												type: "image_url",
+												image_url: { url: image, detail: "auto" },
+											}) as const,
+									),
+								],
 							}
 						: {
 								role: "user",
