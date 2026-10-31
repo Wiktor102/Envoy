@@ -57,6 +57,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const conversationNotice = element<HTMLElement>("#envoy-conversation-notice");
 	const conversation = element<HTMLOListElement>("#envoy-conversation");
 	const conversationEmpty = element<HTMLElement>("#envoy-conversation-empty");
+	const header = element<HTMLElement>("#envoy-header");
 	const goalToggle = element<HTMLButtonElement>("#envoy-goal-toggle");
 	const goalText = element<HTMLElement>("#envoy-goal-text");
 	const instructions = element<HTMLElement>("#envoy-instructions");
@@ -66,11 +67,10 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const goalHint = element<HTMLElement>("#envoy-goal-hint");
 	const startButton = element<HTMLButtonElement>("#envoy-start");
 	const updateGoalButton = element<HTMLButtonElement>("#envoy-update-goal");
-	const taskStatus = element<HTMLElement>("#envoy-task-status");
 	const taskId = element<HTMLElement>("#envoy-task-id");
 	const taskChat = element<HTMLElement>("#envoy-task-chat");
 	const taskNotice = element<HTMLElement>("#envoy-task-notice");
-	const taskDetail = element<HTMLElement>("#envoy-task-detail");
+	const agentState = element<HTMLElement>("#envoy-agent-state");
 	const agentEmpty = element<HTMLElement>("#envoy-agent-empty");
 	const agentMessages = element<HTMLOListElement>("#envoy-agent-messages");
 	const answerText = element<HTMLTextAreaElement>("#envoy-answer-text");
@@ -251,21 +251,22 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		goalToggle.disabled = busy || !active;
 		goalToggle.setAttribute("aria-expanded", String(goalEditorOpen));
 		goalText.textContent = task?.goal ?? "";
+		header.hidden = !task;
 		thread.hidden = !task;
+		thread.dataset.status = task?.status ?? "idle";
 
-		taskStatus.textContent = task
-			? `${statusLabels[task.status]}${active && !owner ? " (not connected to this tab)" : ""}.`
-			: "No active task.";
-		taskStatus.dataset.status = task?.status ?? "idle";
 		taskId.textContent = task ? `Task ID: ${task.id}` : "";
 		taskId.hidden = !task;
 		taskChat.textContent = task ? `Task chat: ${task.chatId}` : "";
 		taskChat.hidden = !task || currentChat;
 		taskNotice.textContent = "This task belongs to another conversation. Reopen its dedicated tab to continue.";
 		taskNotice.hidden = !task || !state.snapshot || currentChat;
-		taskDetail.textContent = owner ? (task?.detail ?? "") : "";
-		taskDetail.hidden = !owner || !task?.detail;
 		const chat = owner && task ? task.agentChat : [];
+		const baseState = task ? (task.detail ?? `${statusLabels[task.status]}.`) : "";
+		const lastAgent = [...chat].reverse().find((message) => message.role === "agent");
+		agentState.textContent = baseState + (task && active && !owner ? " (Not connected to this tab.)" : "");
+		agentState.hidden = !task || baseState === lastAgent?.text;
+		agentState.dataset.status = task?.status ?? "idle";
 		agentEmpty.hidden = chat.length !== 0 || !active || !owner;
 		agentMessages.replaceChildren();
 		for (const message of chat) {

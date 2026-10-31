@@ -124,6 +124,7 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 
 test("setup shows the start form while the thread and footer stay hidden", (t) => {
 	const ui = setup(t);
+	assert.equal(ui.element("header").hidden, true);
 	assert.equal(ui.element("instructions").hidden, false);
 	assert.equal(ui.element("start").hidden, false);
 	assert.equal(ui.element("thread").hidden, true);
@@ -150,8 +151,8 @@ test("developer mode hides history and diagnostics by default but keeps actionab
 	}
 	ui.update({ task: { ...task, detail: "Can you meet on Friday?" }, isOwner: true });
 	assert.equal(ui.element("task-id").textContent, "Task ID: task-1");
-	assert.equal(ui.element("task-detail").hidden, false);
-	assert.equal(ui.element("task-detail").closest("#envoy-developer-details"), null);
+	assert.equal(ui.element("agent-state").hidden, false);
+	assert.equal(ui.element("agent-state").closest("#envoy-developer-details"), null);
 	ui.update({ snapshot: null, conversationStatus: "Scroll to the bottom or reload this tab." });
 	assert.equal(ui.element("conversation-notice").hidden, false);
 	assert.equal(ui.element("conversation-notice").textContent, "Scroll to the bottom or reload this tab.");
@@ -362,7 +363,9 @@ test("agent history stays hidden from other tabs and read-only after the task en
 test("header shows the goal with icon actions for an active task", (t) => {
 	const ui = setup(t);
 	ui.update({ task: { ...task, status: "waiting" }, isOwner: true });
-	assert.match(ui.element("task-status").textContent ?? "", /Waiting for a new message/);
+	assert.equal(ui.element("header").hidden, false);
+	assert.equal(ui.element("agent-state").textContent, "Waiting for a new message.");
+	assert.equal(ui.element("agent-state").closest("#envoy-header"), null);
 	assert.equal(ui.element("goal-toggle").hidden, false);
 	assert.equal(ui.element("goal-text").textContent, "Arrange a meeting");
 	assert.equal(ui.element("goal-toggle").getAttribute("aria-expanded"), "false");
@@ -393,6 +396,29 @@ test("goal toggle opens the editor and updating closes it", async (t) => {
 	assert.deepEqual(ui.texts, ["Arrange a meeting on Thursday"]);
 	assert.equal(toggle.getAttribute("aria-expanded"), "false");
 	assert.equal(ui.element("instructions").hidden, true);
+});
+
+test("agent state shows once and hides when it repeats the last Envoy message", (t) => {
+	const ui = setup(t);
+	ui.update({ task: { ...task, status: "thinking", detail: "Considering the conversation." }, isOwner: true });
+	assert.equal(ui.element("agent-state").hidden, false);
+	assert.equal(ui.element("agent-state").textContent, "Considering the conversation.");
+	ui.update({
+		task: {
+			...task,
+			status: "needs_user",
+			detail: "Is Friday allowed?",
+			agentChat: [{ id: "q1", role: "agent", text: "Is Friday allowed?", createdAt: 1 }],
+		},
+		isOwner: true,
+	});
+	assert.equal(ui.element("agent-state").hidden, true);
+	ui.update({ task: { ...task, status: "waiting", detail: null }, isOwner: true });
+	assert.equal(ui.element("agent-state").hidden, false);
+	assert.equal(ui.element("agent-state").textContent, "Waiting for a new message.");
+	ui.update({ task: { ...task, status: "paused", detail: null }, isOwner: false });
+	assert.equal(ui.element("agent-state").hidden, false);
+	assert.equal(ui.element("agent-state").textContent, "Paused. (Not connected to this tab.)");
 });
 
 test("paused, ended, and unowned tasks keep recovery actions without reply actions", (t) => {
