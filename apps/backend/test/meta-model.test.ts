@@ -15,6 +15,7 @@ const task: TaskState = {
 const conversation = {
 	chatId: "chat",
 	revision: "revision",
+	participants: [],
 	messages: [
 		{
 			id: "node",
@@ -66,6 +67,33 @@ test("the Meta request keeps user instructions separate from untrusted conversat
 		else process.env.MODEL_API_KEY = previousKey;
 		if (previousModel === undefined) delete process.env.MODEL_API_MODEL;
 		else process.env.MODEL_API_MODEL = previousModel;
+	}
+});
+
+test("the Meta request includes the chat name as unverified display context", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	let body: any;
+	globalThis.fetch = async (input, init) => {
+		body = await new Request(input, init).json();
+		return new Response(
+			JSON.stringify({ choices: [{ message: { role: "assistant", content: '{"action":"wait"}' } }] }),
+			{
+				status: 200,
+				headers: { "content-type": "application/json" },
+			},
+		);
+	};
+	try {
+		await new MetaModelAdapter().run(task, { ...conversation, participants: ["Wiktor Golicz"] }, "task_started");
+		const content = JSON.parse(body.messages[2].content);
+		assert.deepEqual(content.participants, ["Wiktor Golicz"]);
+		assert.match(body.messages[0].content, /unverified display context/);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
 	}
 });
 

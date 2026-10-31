@@ -84,7 +84,16 @@ function snapshot(value: unknown): ConversationSnapshot {
 	const messages = array(item.messages, 500).map(message);
 	if (messages.reduce((size, item) => size + item.text.length + (item.replyTo?.text?.length ?? 0), 0) > 300_000)
 		return invalid();
-	return { chatId: string(item.chatId), revision: string(item.revision), messages };
+	// Display-only header names. Older extension versions send no field.
+	const participants =
+		item.participants === undefined
+			? []
+			: array(item.participants, 10).map((name) => {
+					const trimmed = string(name, 512, true).trim();
+					if (!trimmed) return invalid();
+					return trimmed;
+				});
+	return { chatId: string(item.chatId), revision: string(item.revision), messages, participants };
 }
 
 const actions: readonly TaskControlAction[] = [

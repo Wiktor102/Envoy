@@ -38,6 +38,16 @@ test("task and connector procedures reject invalid or oversized inputs without l
 				snapshot: { ...snapshot, messages: Array(501).fill(message) },
 			} as never),
 		() => caller.connector.report({ connectorId: "owner", commandId: "cmd", result: "retry" } as never),
+		() =>
+			caller.connector.sync({
+				connectorId: "owner",
+				snapshot: { ...snapshot, participants: ["Wiktor Golicz", 42] },
+			} as never),
+		() =>
+			caller.connector.sync({
+				connectorId: "owner",
+				snapshot: { ...snapshot, participants: ["   "] },
+			} as never),
 	];
 	for (const action of cases) {
 		await assert.rejects(action, (error: unknown) => {
@@ -67,6 +77,16 @@ test("connector sync accepts video attachments as unavailable media", async () =
 		} as never),
 		(error: unknown) => (error as { code: string }).code === "BAD_REQUEST",
 	);
+});
+
+test("connector sync accepts participant display names and older snapshots without them", async () => {
+	const named = await caller.connector.sync({
+		connectorId: "owner",
+		snapshot: { ...snapshot, participants: ["Wiktor Golicz"] },
+	});
+	assert.equal(named.task, null);
+	const legacy = await caller.connector.sync({ connectorId: "owner", snapshot });
+	assert.equal(legacy.task, null);
 });
 
 test("connector sync accepts sticker attachments as unavailable media", async () => {
