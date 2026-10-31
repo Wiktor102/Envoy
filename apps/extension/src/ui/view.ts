@@ -1,4 +1,12 @@
-import { DEFAULT_REPLY_DELAY_SECONDS, type TaskControlAction, type TaskStatus } from "@envoy/contracts";
+import {
+	DEFAULT_REPLY_SETTINGS,
+	MAX_REPLY_DELAY_SECONDS,
+	MIN_REPLY_DELAY_SECONDS,
+	normalizeReplySettings,
+	type ReplySettings,
+	type TaskControlAction,
+	type TaskStatus,
+} from "@envoy/contracts";
 import type { ControllerState, EnvoyController } from "../controller";
 import { isolateTextInput } from "./text-input";
 import styles from "./styles.css?inline";
@@ -84,6 +92,13 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	isolateTextInput(goal);
 	isolateTextInput(editText);
 	isolateTextInput(answerText);
+	const autoSendToggle = element<HTMLButtonElement>("#envoy-auto-send");
+	const delayRange = element<HTMLElement>("#envoy-delay");
+	const delayMin = element<HTMLInputElement>("#envoy-delay-min");
+	const delayMax = element<HTMLInputElement>("#envoy-delay-max");
+	const delayHint = element<HTMLElement>("#envoy-delay-hint");
+	isolateTextInput(delayMin);
+	isolateTextInput(delayMax);
 	const saveEditButton = element<HTMLButtonElement>("#envoy-save-edit");
 	const replyControls = element<HTMLElement>("#envoy-reply-controls");
 	const cancelThinking = element<HTMLButtonElement>("#envoy-cancel-thinking");
@@ -125,6 +140,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const openToolCalls = new Set<string>();
 	let developerMode = false;
 	let developerModeChanged = false;
+	let replySettings: ReplySettings = { ...DEFAULT_REPLY_SETTINGS };
+	let replySettingsChanged = false;
 	let preferenceWrite = Promise.resolve();
 
 	function setDeveloperMode(enabled: boolean) {
@@ -133,29 +150,72 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		developerDetails.hidden = !enabled;
 	}
 
-	async function restoreDeveloperMode() {
+	// Field values change only here, so a render during typing keeps the draft.
+	function setReplySettings(next: ReplySettings) {
+		replySettings = next;
+		delayMin.value = String(next.minDelaySeconds);
+		delayMax.value = String(next.maxDelaySeconds);
+		render();
+	}
+
+	async function restorePreferences() {
 		try {
-			const saved = await chrome.storage.local.get("envoyDeveloperMode");
+			const saved = await chrome.storage.local.get(["envoyDeveloperMode", "envoyReplySettings"]);
 			// A slow storage read must not undo a choice made in this view.
-			if (!destroyed && !developerModeChanged) setDeveloperMode(saved.envoyDeveloperMode === true);
+			if (destroyed) return;
+			if (!developerModeChanged) setDeveloperMode(saved.envoyDeveloperMode === true);
+			if (!replySettingsChanged) setReplySettings(normalizeReplySettings(saved.envoyReplySettings));
 		} catch {
-			// Keep diagnostics off if extension storage is unavailable.
+			// Keep the defaults if extension storage is unavailable.
 		}
+	}
+
+	function savePreference(items: Record<string, unknown>) {
+		// Preserve the last choice even when storage writes complete slowly.
+		preferenceWrite = preferenceWrite.then(async () => {
+			try {
+				await chrome.storage.local.set(items);
+			} catch {
+				// The control still works for this view if saving is unavailable.
+			}
+		});
 	}
 
 	developerToggle.addEventListener("click", () => {
 		developerModeChanged = true;
 		const enabled = !developerMode;
 		setDeveloperMode(enabled);
-		// Preserve the last choice even when storage writes complete slowly.
-		preferenceWrite = preferenceWrite.then(async () => {
-			try {
-				await chrome.storage.local.set({ envoyDeveloperMode: enabled });
-			} catch {
-				// The toggle still works for this view if saving is unavailable.
-			}
-		});
+		savePreference({ envoyDeveloperMode: enabled });
 	});
+
+	function changeReplySettings(next: ReplySettings) {
+		replySettingsChanged = true;
+		setReplySettings(next);
+		savePreference({ envoyReplySettings: next });
+	}
+
+	autoSendToggle.addEventListener("click", () => {
+		changeReplySettings({ ...replySettings, autoSend: !replySettings.autoSend });
+	});
+
+	// The edited bound wins: the other bound moves to keep the range ordered.
+	function changeDelay(edited: "min" | "max") {
+		const value = (edited === "min" ? delayMin : delayMax).valueAsNumber;
+		if (!Number.isFinite(value)) {
+			setReplySettings(replySettings);
+			return;
+		}
+		const seconds = Math.min(MAX_REPLY_DELAY_SECONDS, Math.max(MIN_REPLY_DELAY_SECONDS, Math.round(value)));
+		const { minDelaySeconds, maxDelaySeconds } = replySettings;
+		changeReplySettings({
+			...replySettings,
+			minDelaySeconds: edited === "min" ? seconds : Math.min(minDelaySeconds, seconds),
+			maxDelaySeconds: edited === "max" ? seconds : Math.max(maxDelaySeconds, seconds),
+		});
+	}
+
+	delayMin.addEventListener("change", () => changeDelay("min"));
+	delayMax.addEventListener("change", () => changeDelay("max"));
 
 	function selectTab(showEnvoy: boolean) {
 		chatsTab.setAttribute("aria-selected", String(!showEnvoy));
@@ -235,7 +295,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			const seconds = Math.max(0, Math.ceil((task.pendingReply.sendAt - Date.now()) / 1000));
 			countdown.textContent = seconds > 0 ? `Sending in ${seconds}s.` : "Waiting to send...";
 		} else {
-			countdown.textContent = "Automatic sending is stopped.";
+			countdown.textContent = replySettings.autoSend ? "Automatic sending is stopped." : "Waiting for Send now.";
 		}
 	}
 
@@ -256,9 +316,20 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		displayedTaskOwner = owner;
 
 		goal.disabled = busy || Boolean(active && !owner);
-		goalHint.textContent = active
-			? "Changes apply after you choose Update instructions."
-			: `Replies send automatically after a ${DEFAULT_REPLY_DELAY_SECONDS}-second countdown.`;
+		goalHint.textContent = "Changes apply after you choose Update instructions.";
+		goalHint.hidden = !active;
+		const { autoSend, minDelaySeconds, maxDelaySeconds } = replySettings;
+		autoSendToggle.setAttribute("aria-checked", String(autoSend));
+		delayRange.setAttribute("aria-disabled", String(!autoSend));
+		delayMin.disabled = !autoSend;
+		delayMax.disabled = !autoSend;
+		delayHint.textContent =
+			(!autoSend
+				? "Replies wait until you choose Send now."
+				: minDelaySeconds === maxDelaySeconds
+					? `Replies send after a ${minDelaySeconds}-second countdown.`
+					: `Replies send after a random ${minDelaySeconds}–${maxDelaySeconds}-second countdown.`) +
+			(active ? " Changes apply right away." : "");
 		startButton.hidden = active;
 		startButton.disabled = busy || !state.snapshot || !goal.value.trim();
 		updateGoalButton.hidden = !active;
@@ -477,8 +548,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		render();
 	});
 	const countdownTimer = window.setInterval(renderCountdown, 1000);
-	render();
-	void restoreDeveloperMode();
+	setReplySettings(replySettings);
+	void restorePreferences();
 	return {
 		host,
 		panel,
