@@ -32,6 +32,11 @@ export interface ConversationMessage {
 	text: string;
 	// Unknown must never be treated as an incoming message.
 	direction: "incoming" | "outgoing" | "unknown" | "system";
+	// Unverified viewer-relative display label from the message boundary, kept
+	// as parsed. Attribution-only metadata: excluded from the revision like
+	// participants, never a verified identity, and PII like message bodies.
+	// Null when the label is missing, malformed, or attribution-ambiguous.
+	sender: string | null;
 	// The quoted text is a preview, not a stable reference to another message.
 	replyTo: { text: string | null; context: string | null; attachments: readonly MessageAttachment[] } | null;
 	attachments: readonly MessageAttachment[];
