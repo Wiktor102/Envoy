@@ -1281,6 +1281,39 @@ test("reads the observed GIPHY image link while rejecting ambiguous media", asyn
 	dom.window.close();
 });
 
+test("reads encrypted GIF buttons as presence-only without blocking the chat", async () => {
+	const dom = setup();
+	setMessages(
+		`<div data-scope="messages_table" data-message-id="g1" aria-roledescription="message" aria-label="At 17:50, Alex"><div role="button" aria-label="Otwórz GIF"><img alt="Evening sky GIF" src="blob:https://www.messenger.com/first"></div></div>` +
+			`<div data-scope="messages_table" data-message-id="g2" aria-roledescription="wiadomość"><div role="button" tabindex="0"><img alt="Funny GIF" src="data:image/gif;base64,AAAA"></div></div>` +
+			`<div data-scope="messages_table" data-message-id="t1" aria-roledescription="message" aria-label="At 17:51, Alex: Hello"><span dir="auto">Hello</span></div>`,
+	);
+	const snapshot = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		snapshot.messages.map(({ text, attachments }) => [text, attachments]),
+		[
+			["", [{ type: "gif", url: null, description: null }]],
+			["", [{ type: "gif", url: null, description: null }]],
+			["Hello", []],
+		],
+	);
+	document.querySelector("img")!.setAttribute("src", "blob:https://www.messenger.com/second");
+	assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
+	for (const unsafe of [
+		// Two images in one button.
+		`<div data-scope="messages_table" data-message-id="g1" aria-roledescription="message"><div role="button"><img alt="First GIF" src="blob:https://example.test/1"><img alt="Second GIF" src="blob:https://example.test/2"></div></div>`,
+		// No message boundary.
+		`<div data-scope="messages_table"><div role="button"><img alt="Stray GIF" src="blob:https://example.test/3"></div></div>`,
+	]) {
+		setMessages(unsafe);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	dom.window.close();
+});
+
 test("reads unsent placeholders as unsent messages without placeholder text", async () => {
 	const dom = setup();
 	for (const placeholder of [

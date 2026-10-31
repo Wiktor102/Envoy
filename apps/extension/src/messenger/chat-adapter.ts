@@ -1,4 +1,4 @@
-import { isAnimatedPreview } from "./animated-preview";
+import { isAnimatedPreview, isGifButton } from "./animated-preview";
 import { isGroupSystemEvent, isThreadIntro } from "./group-events";
 import { attachmentIdentity, MAX_IMAGE_SIDE, MAX_INLINE_MEDIA_CHARS, MAX_SNAPSHOT_IMAGES } from "@envoy/contracts";
 import type {
@@ -227,6 +227,12 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	}
 	for (const button of main.querySelectorAll<HTMLElement>('[data-scope="messages_table"] [role="button"][tabindex]')) {
 		if (!isAnimatedPreview(button) || !isVisible(button)) continue;
+		const boundary = messageBoundary(button);
+		if (!boundary || findReplyButton(boundary)?.contains(button)) continue;
+		images.push(button);
+	}
+	for (const button of main.querySelectorAll<HTMLElement>('[data-scope="messages_table"] [role="button"]')) {
+		if (!isGifButton(button) || !isVisible(button)) continue;
 		const boundary = messageBoundary(button);
 		if (!boundary || findReplyButton(boundary)?.contains(button)) continue;
 		images.push(button);
@@ -519,7 +525,11 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 				if (element.matches("video, audio, object, embed, iframe, a[download]")) return true;
 				const preview = rendered
 					.flatMap(({ images }) => images)
-					.find((image) => isAnimatedPreview(image) && (image === element || image.contains(element)));
+					.find(
+						(image) =>
+							(isAnimatedPreview(image) || isGifButton(image)) &&
+							(image === element || image.contains(element)),
+					);
 				const metadata = [
 					// A per-message label contains the sender and message body, not
 					// attachment metadata. Words such as "plik" can be ordinary text.
@@ -614,7 +624,7 @@ function isGifLink(viewer: HTMLElement): boolean {
 }
 
 function isGifViewer(viewer: HTMLElement): boolean {
-	return isAnimatedPreview(viewer) || isGifLink(viewer);
+	return isAnimatedPreview(viewer) || isGifButton(viewer) || isGifLink(viewer);
 }
 
 function collectVideoViewers(main: HTMLElement): HTMLElement[] {
