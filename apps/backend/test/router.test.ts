@@ -113,6 +113,91 @@ test("connector sync accepts per-message sender labels and older messages withou
 	}
 });
 
+test("connector sync accepts bounded inline photo bytes and older images without them", async () => {
+	const media = { mime: "image/jpeg", data: "AAAA".repeat(256), width: 1568, height: 900 };
+	const accepted = await caller.connector.sync({
+		connectorId: "owner",
+		snapshot: {
+			...snapshot,
+			messages: [{ ...message, attachments: [{ type: "image", url: null, description: null, media }] }],
+		},
+	});
+	assert.equal(accepted.task, null);
+	const legacy = await caller.connector.sync({
+		connectorId: "owner",
+		snapshot: {
+			...snapshot,
+			messages: [{ ...message, attachments: [{ type: "image", url: null, description: null }] }],
+		},
+	});
+	assert.equal(legacy.task, null);
+	const invalid = [
+		{ ...media, mime: "image/gif" },
+		{ ...media, mime: "text/plain" },
+		{ ...media, data: "" },
+		{ ...media, data: "AAAA".repeat(250_001) },
+		{ ...media, data: "!!!" },
+		{ ...media, data: "AAAAA" },
+		{ ...media, width: 0 },
+		{ ...media, width: 1569 },
+		{ ...media, height: -4 },
+		{ ...media, height: 2000 },
+		"not-an-object",
+	];
+	for (const bad of invalid) {
+		await assert.rejects(
+			caller.connector.sync({
+				connectorId: "owner",
+				snapshot: {
+					...snapshot,
+					messages: [{ ...message, attachments: [{ type: "image", url: null, description: null, media: bad }] }],
+				},
+			} as never),
+			(error: unknown) => (error as { code: string }).code === "BAD_REQUEST",
+		);
+	}
+});
+
+test("connector sync rejects quote bytes and snapshots past the media caps", async () => {
+	const media = { mime: "image/png", data: "AAAA", width: 4, height: 4 };
+	await assert.rejects(
+		caller.connector.sync({
+			connectorId: "owner",
+			snapshot: {
+				...snapshot,
+				messages: [
+					{
+						...message,
+						replyTo: {
+							text: "Original",
+							context: "Reply",
+							attachments: [{ type: "image", url: null, description: null, media }],
+						},
+					},
+				],
+			},
+		} as never),
+		(error: unknown) => (error as { code: string }).code === "BAD_REQUEST",
+	);
+	const photo = { type: "image", url: null, description: null, media };
+	await assert.rejects(
+		caller.connector.sync({
+			connectorId: "owner",
+			snapshot: { ...snapshot, messages: [{ ...message, attachments: [photo, photo, photo, photo, photo] }] },
+		} as never),
+		(error: unknown) => (error as { code: string }).code === "BAD_REQUEST",
+	);
+	const big = { ...media, data: "AAAA".repeat(200_000) };
+	const bigPhoto = { type: "image", url: null, description: null, media: big };
+	await assert.rejects(
+		caller.connector.sync({
+			connectorId: "owner",
+			snapshot: { ...snapshot, messages: [{ ...message, attachments: [bigPhoto, bigPhoto, bigPhoto, bigPhoto] }] },
+		} as never),
+		(error: unknown) => (error as { code: string }).code === "BAD_REQUEST",
+	);
+});
+
 test("connector sync accepts sticker attachments as unavailable media", async () => {
 	const stickerSnapshot = {
 		...snapshot,
@@ -129,6 +214,30 @@ test("connector sync accepts sticker attachments as unavailable media", async ()
 					{
 						...message,
 						attachments: [{ type: "sticker", url: "https://example.test/s", description: null }],
+					},
+				],
+			},
+		} as never),
+		(error: unknown) => (error as { code: string }).code === "BAD_REQUEST",
+	);
+});
+
+test("connector sync accepts gif attachments as unavailable media", async () => {
+	const gifSnapshot = {
+		...snapshot,
+		messages: [{ ...message, attachments: [{ type: "gif", url: null, description: null }] }],
+	};
+	const result = await caller.connector.sync({ connectorId: "owner", snapshot: gifSnapshot });
+	assert.equal(result.task, null);
+	await assert.rejects(
+		caller.connector.sync({
+			connectorId: "owner",
+			snapshot: {
+				...snapshot,
+				messages: [
+					{
+						...message,
+						attachments: [{ type: "gif", url: "https://example.test/g", description: null }],
 					},
 				],
 			},

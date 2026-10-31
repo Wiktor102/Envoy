@@ -3,6 +3,7 @@ import type {
 	AgentChatRole,
 	AgentDecision,
 	ConnectorSyncResult,
+	ConversationMessage,
 	ConversationSnapshot,
 	PendingReply,
 	SendReplyCommand,
@@ -10,7 +11,7 @@ import type {
 	TaskControlAction,
 	TaskState,
 } from "@envoy/contracts";
-import { DEFAULT_REPLY_DELAY_SECONDS } from "@envoy/contracts";
+import { attachmentIdentity, DEFAULT_REPLY_DELAY_SECONDS, forwardableImageSlots } from "@envoy/contracts";
 import type { Agent, EvaluationReason } from "../agent/agent.js";
 import type { BrowserConnector } from "../connectors/browser-connector.js";
 import { ExtensionConnector } from "../connectors/extension-connector.js";
@@ -756,13 +757,7 @@ export class TaskService {
 			task.detail = "The latest message has an unknown sender. Check the conversation before resuming.";
 			return;
 		}
-		if (
-			latest &&
-			(latest.attachments.length ||
-				!latest.text.trim() ||
-				(latest.replyTo &&
-					(latest.replyTo.attachments.length || !latest.replyTo.text?.trim() || !latest.replyTo.context?.trim())))
-		) {
+		if (latest && !readableLatest(snapshot.messages, latest)) {
 			task.status = "needs_user";
 			task.detail = "The latest message contains content Envoy cannot interpret.";
 			return;
@@ -856,10 +851,29 @@ function checkedReply(value: string | undefined): string {
 	return checkedText(value);
 }
 
+function readableLatest(messages: readonly ConversationMessage[], latest: ConversationMessage): boolean {
+	// Only forwarded photos read as content. Anything else attached, or a
+	// photo past the per-snapshot cap, still pauses for the user.
+	const slots = forwardableImageSlots(messages);
+	const index = messages.indexOf(latest);
+	if (!latest.attachments.every((attachment, position) => attachment.type === "image" && slots[index]?.[position]))
+		return false;
+	if (!latest.text.trim() && !latest.attachments.length) return false;
+	const quote = latest.replyTo;
+	return !quote || !(quote.attachments.length || !quote.text?.trim() || !quote.context?.trim());
+}
+
 function semanticMessages(snapshot: ConversationSnapshot): string {
 	// Sender labels are attribution-only metadata outside the revision. A
 	// loading rename must not read as unverifiable content at the same revision.
-	return JSON.stringify(snapshot.messages.map(({ id: _id, sender: _sender, ...message }) => message));
+	// Inline bytes are transport, not content: the same photo re-encoded must
+	// not read as unverifiable either.
+	return JSON.stringify(
+		snapshot.messages.map(({ id: _id, sender: _sender, attachments, ...message }) => ({
+			...message,
+			attachments: attachments.map(attachmentIdentity),
+		})),
+	);
 }
 
 // Reactions and other cosmetic DOM changes must not trigger another reply to

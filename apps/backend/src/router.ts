@@ -3,10 +3,13 @@ import type {
 	ConversationMessage,
 	ConversationSnapshot,
 	HealthResponse,
+	InlineImageMedia,
+	InlineImageMime,
 	MessageAttachment,
 	SendResult,
 	TaskControlAction,
 } from "@envoy/contracts";
+import { MAX_IMAGE_SIDE, MAX_INLINE_MEDIA_CHARS, MAX_SNAPSHOT_IMAGES, MAX_SNAPSHOT_MEDIA_CHARS } from "@envoy/contracts";
 import { MetaModelAdapter } from "./agent/meta-model.js";
 import { TaskService } from "./tasks/service.js";
 
@@ -38,14 +41,45 @@ function array(value: unknown, max: number): unknown[] {
 	return value;
 }
 
-function attachment(value: unknown): MessageAttachment {
+const inlineMimes: readonly InlineImageMime[] = ["image/jpeg", "image/png", "image/webp"];
+
+function inlineMedia(value: unknown): InlineImageMedia {
 	const item = object(value);
-	if (item.type === "video" || item.type === "sticker") {
+	if (typeof item.mime !== "string" || !inlineMimes.includes(item.mime as InlineImageMime)) return invalid();
+	if (
+		typeof item.data !== "string" ||
+		!item.data.length ||
+		item.data.length > MAX_INLINE_MEDIA_CHARS ||
+		item.data.length % 4 !== 0 ||
+		!/^[A-Za-z0-9+/]*={0,2}$/.test(item.data)
+	)
+		return invalid();
+	for (const side of [item.width, item.height]) {
+		if (!Number.isSafeInteger(side) || (side as number) < 1 || (side as number) > MAX_IMAGE_SIDE) return invalid();
+	}
+	return {
+		mime: item.mime as InlineImageMime,
+		data: item.data,
+		width: item.width as number,
+		height: item.height as number,
+	};
+}
+
+function attachment(value: unknown, allowMedia: boolean): MessageAttachment {
+	const item = object(value);
+	if (item.type === "video" || item.type === "sticker" || item.type === "gif") {
 		if (item.url !== null || item.description !== null) return invalid();
 		return { type: item.type, url: null, description: null };
 	}
 	if (item.type !== "image") return invalid();
-	return { type: "image", url: optionalText(item.url, 8192), description: optionalText(item.description, 4000) };
+	// Reply quotes stay type-only: their bytes never reach the backend.
+	const media = item.media === undefined || item.media === null ? null : allowMedia ? inlineMedia(item.media) : invalid();
+	return {
+		type: "image",
+		url: optionalText(item.url, 8192),
+		description: optionalText(item.description, 4000),
+		media,
+	};
 }
 
 function message(value: unknown): ConversationMessage {
@@ -64,9 +98,9 @@ function message(value: unknown): ConversationMessage {
 		replyTo: reply && {
 			text: optionalText(reply.text, 20_000),
 			context: optionalText(reply.context, 4000),
-			attachments: array(reply.attachments, 50).map(attachment),
+			attachments: array(reply.attachments, 50).map((value) => attachment(value, false)),
 		},
-		attachments: array(item.attachments, 50).map(attachment),
+		attachments: array(item.attachments, 50).map((value) => attachment(value, true)),
 		reactions: array(item.reactions, 100).map((value) => {
 			const reaction = object(value);
 			if (reaction.count !== null && (!Number.isSafeInteger(reaction.count) || (reaction.count as number) < 0))
@@ -86,6 +120,17 @@ function snapshot(value: unknown): ConversationSnapshot {
 	const messages = array(item.messages, 500).map(message);
 	if (messages.reduce((size, item) => size + item.text.length + (item.replyTo?.text?.length ?? 0), 0) > 300_000)
 		return invalid();
+	let mediaCount = 0;
+	let mediaChars = 0;
+	for (const message of messages) {
+		for (const entry of message.attachments) {
+			if (entry.type === "image" && entry.media) {
+				mediaCount++;
+				mediaChars += entry.media.data.length;
+			}
+		}
+	}
+	if (mediaCount > MAX_SNAPSHOT_IMAGES || mediaChars > MAX_SNAPSHOT_MEDIA_CHARS) return invalid();
 	// Display-only header names. Older extension versions send no field.
 	const participants =
 		item.participants === undefined
