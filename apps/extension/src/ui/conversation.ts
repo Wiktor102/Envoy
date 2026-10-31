@@ -49,7 +49,11 @@ export function watchConversation(onUpdate: (snapshot: ConversationSnapshot | nu
 			if (!stopped && current === sequence && location.pathname === path) {
 				// Node IDs change when Messenger remounts old content. Comparing them
 				// would make the old chat appear new during a route transition.
-				const messages = JSON.stringify(snapshot.messages.map(({ id: _id, ...message }) => message));
+				// Sender labels are stripped the same way: a loading rename is
+				// not a new conversation.
+				const messages = JSON.stringify(
+					snapshot.messages.map(({ id: _id, sender: _sender, ...message }) => message),
+				);
 				if (previousMessages && previousMessages !== "[]" && previousMessages === messages) {
 					onUpdate(null, "Loading the selected conversation...");
 					return;

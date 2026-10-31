@@ -954,6 +954,11 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 			id: messageId(element),
 			text: texts[index]!,
 			direction: boundary && (unique || matchesLabel) ? readDirection(boundary) : "unknown",
+			// The raw boundary label, kept only where direction is attributed.
+			// Same gate, no You/Ty normalization: direction already carries
+			// that, and the label is viewer-relative. Null where the gate fails
+			// or the label is missing or malformed.
+			sender: boundary && (unique || matchesLabel) ? (readLabeledMessage(boundary)?.sender ?? null) : null,
 			replyTo: unique ? readReply(boundary) : null,
 			attachments: [
 				...images.map((image) => imageAttachment(image.querySelector<HTMLImageElement>("img"))),
@@ -1042,12 +1047,14 @@ function captureIsCurrent(capture: ConversationCapture): boolean {
 		const current = getRenderedMessages(capture.main);
 		// Participants are deliberately not compared: a display-name change is
 		// not a conversation change, and must neither invalidate a pending
-		// reply nor fail this check.
+		// reply nor fail this check. Sender labels are stripped the same way:
+		// a loading rename must not fail this check either. Element identity
+		// above already covers what node IDs would add.
 		return (
 			isAtLatestMessages(capture.main, current) &&
 			current.length === capture.rendered.length &&
 			capture.rendered.every((item, index) => current[index]?.element === item.element) &&
-			JSON.stringify(readMessages(current)) === JSON.stringify(capture.messages) &&
+			JSON.stringify(contentOf(readMessages(current))) === JSON.stringify(contentOf(capture.messages)) &&
 			JSON.stringify(imageFingerprint(current)) === JSON.stringify(capture.imageState)
 		);
 	} catch {

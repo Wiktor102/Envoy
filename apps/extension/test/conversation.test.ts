@@ -1733,6 +1733,189 @@ test("leaves participants empty when the header is not a 1-1 profile link", asyn
 	dom.window.close();
 });
 
+// Mirrors the observed group runs: every bubble carries its own boundary
+// label with the author, while only the first bubble of a run keeps a sender
+// heading. Second bubbles have no heading at all.
+function labeledBubble(id: string, roledescription: string, label: string, heading: string | null, text: string): string {
+	return (
+		`<div data-scope="messages_table" data-message-id="${id}" aria-roledescription="${roledescription}" aria-label="${label}">` +
+		(heading ? `<h4 dir="auto">${heading}</h4>` : "") +
+		`<span dir="auto">${text}</span></div>`
+	);
+}
+
+test("reads per-message sender labels across consecutive bubbles in English and Polish", async () => {
+	const dom = setup();
+	for (const [roledescription, bubbles] of [
+		[
+			"wiadomość",
+			[
+				["O 17:20, Ty: Envoy author test A1", "Wysłano", "Envoy author test A1", "Ty", "outgoing"],
+				["O 17:20, Ty: Envoy author test A2", null, "Envoy author test A2", "Ty", "outgoing"],
+				[
+					"O 17:20, Wiktor testowy: Envoy author test B1",
+					"Wiktor testowy",
+					"Envoy author test B1",
+					"Wiktor testowy",
+					"incoming",
+				],
+				[
+					"O 17:20, Wiktor testowy: Envoy author test B2: noted, thanks",
+					null,
+					"Envoy author test B2: noted, thanks",
+					"Wiktor testowy",
+					"incoming",
+				],
+			],
+		],
+		[
+			"message",
+			[
+				["At 5:20 PM, Wiktor: Envoy author test A1", "Wiktor", "Envoy author test A1", "Wiktor", "incoming"],
+				["At 5:20 PM, Wiktor: Envoy author test A2", null, "Envoy author test A2", "Wiktor", "incoming"],
+				["At 5:20 PM, You: Envoy author test B1", "You sent", "Envoy author test B1", "You", "outgoing"],
+				["At 5:20 PM, You: Envoy author test B2", null, "Envoy author test B2", "You", "outgoing"],
+			],
+		],
+	] as const) {
+		setMessages(
+			bubbles
+				.map(([label, heading, text], index) =>
+					labeledBubble(`message-${index}`, roledescription, label, heading, text),
+				)
+				.join(""),
+		);
+		// The same message is labeled Ty/You for its author and a name for the
+		// other account. The raw label is kept as-is; direction already carries
+		// the You/Ty distinction, so no normalization happens here.
+		assert.deepEqual(
+			(await messengerChatAdapter.readConversation()).messages.map(({ text, direction, sender }) => [
+				text,
+				direction,
+				sender,
+			]),
+			bubbles.map(([label, heading, text, sender, direction]) => [text, direction, sender]),
+		);
+	}
+	dom.window.close();
+});
+
+test("reads the sender of an attachment-only label without a message body", async () => {
+	const dom = setup();
+	setMessages(`<div data-scope="messages_table" data-message-id="photo" aria-roledescription="wiadomość" aria-label="O 12:56, Ty">
+		<h4 dir="auto">Wysłano</h4>
+		<div role="button" tabindex="-1"><div><img alt="Otwórz zdjęcie" src="https://example.test/photo"></div></div>
+	</div>`);
+	assert.deepEqual(
+		(await messengerChatAdapter.readConversation()).messages.map(({ text, direction, sender, attachments }) => ({
+			text,
+			direction,
+			sender,
+			urls: attachments.map(({ url }) => url),
+		})),
+		[{ text: "", direction: "outgoing", sender: "Ty", urls: ["https://example.test/photo"] }],
+	);
+	dom.window.close();
+});
+
+test("leaves the sender null for missing or malformed labels while keeping attribution", async () => {
+	const dom = setup();
+	setMessages(`
+		<div data-scope="messages_table" data-message-id="1" data-message-direction="incoming"><span dir="auto">Hello</span></div>
+		<div data-scope="messages_table" data-message-id="2" data-message-direction="outgoing" aria-roledescription="message" aria-label="Yesterday"><span dir="auto">Hi</span></div>
+		<div data-scope="messages_table" data-message-id="3" data-message-direction="incoming" aria-roledescription="wiadomość" aria-label="O 17:20"><span dir="auto">Again</span></div>`);
+	assert.deepEqual(
+		(await messengerChatAdapter.readConversation()).messages.map(({ direction, sender }) => [direction, sender]),
+		[
+			["incoming", null],
+			["outgoing", null],
+			["incoming", null],
+		],
+	);
+	dom.window.close();
+});
+
+test("leaves the sender null when a labeled boundary is shared by multiple messages", async () => {
+	const dom = setup();
+	setMessages(`<div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 21:58, Alex: Hi">
+		<span dir="auto">Hi</span><span dir="auto">Hi</span></div>`);
+	assert.deepEqual(
+		(await messengerChatAdapter.readConversation()).messages.map(({ direction, sender }) => [direction, sender]),
+		[
+			["unknown", null],
+			["unknown", null],
+		],
+	);
+	dom.window.close();
+});
+
+test("keeps the sender for the unique match sharing a container with a delivery status", async () => {
+	const dom = setup();
+	setMessages(`<div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 21:58, Ty: Hi there">
+		<span dir="auto">Hi there</span><span dir="auto">Wysłano</span>
+		<button aria-label="1 reaction">👍</button></div>`);
+	assert.deepEqual(
+		(await messengerChatAdapter.readConversation()).messages.map(({ text, direction, sender }) => [
+			text,
+			direction,
+			sender,
+		]),
+		[
+			["Hi there", "outgoing", "Ty"],
+			["Wysłano", "unknown", null],
+		],
+	);
+	dom.window.close();
+});
+
+test("keeps the revision when a sender label changes during loading", async () => {
+	const dom = setup();
+	setMessages(
+		`<div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 17:20, Mikołaj Gaweł: Hello"><span dir="auto">Hello</span></div>`,
+	);
+	const first = await messengerChatAdapter.readConversation();
+	assert.equal(first.messages[0]!.sender, "Mikołaj Gaweł");
+	// A loading rename changes the label without changing the message.
+	document.querySelector("[data-message-id]")!.setAttribute("aria-label", "O 17:20, Mikołaj: Hello");
+	const renamed = await messengerChatAdapter.readConversation();
+	assert.equal(renamed.messages[0]!.sender, "Mikołaj");
+	assert.equal(renamed.revision, first.revision);
+	assert.deepEqual(
+		renamed.messages.map(({ sender: _sender, ...message }) => message),
+		first.messages.map(({ sender: _sender, ...message }) => message),
+	);
+	dom.window.close();
+});
+
+test("stays current when a sender label changes while its revision is hashing", async () => {
+	const dom = setup();
+	setMessages(
+		`<div data-scope="messages_table" data-message-id="1" aria-roledescription="wiadomość" aria-label="O 17:20, Mikołaj Gaweł: Hello"><span dir="auto">Hello</span></div>`,
+	);
+	let resolveDigest!: (digest: ArrayBuffer) => void;
+	Object.defineProperty(globalThis, "crypto", {
+		configurable: true,
+		value: {
+			randomUUID: webcrypto.randomUUID.bind(webcrypto),
+			subtle: {
+				digest: () =>
+					new Promise<ArrayBuffer>((resolve) => {
+						resolveDigest = resolve;
+					}),
+			},
+		},
+	});
+	const pending = messengerChatAdapter.readConversation();
+	document.querySelector("[data-message-id]")!.setAttribute("aria-label", "O 17:20, Mikołaj: Hello");
+	resolveDigest(new ArrayBuffer(32));
+	const snapshot = await pending;
+	assert.deepEqual(
+		snapshot.messages.map(({ text, direction }) => [text, direction]),
+		[["Hello", "incoming"]],
+	);
+	dom.window.close();
+});
+
 test("leaves participants empty without a corroborating region heading", async () => {
 	const dom = setup();
 	for (const html of [
