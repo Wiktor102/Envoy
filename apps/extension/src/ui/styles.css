@@ -23,6 +23,8 @@
 	--envoy-on-primary: #fff;
 	--envoy-focus: #0866ff;
 	--envoy-error: #c4251c;
+	--envoy-success: #1a7f37;
+	--envoy-warning: #c2410c;
 }
 
 /* Follow Messenger's own theme, or the system theme until Messenger reports one. */
@@ -44,6 +46,8 @@
 	--envoy-on-primary: #10243d;
 	--envoy-focus: #75b8ff;
 	--envoy-error: #ffb4aa;
+	--envoy-success: #3fb950;
+	--envoy-warning: #d29922;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -65,6 +69,8 @@
 		--envoy-on-primary: #10243d;
 		--envoy-focus: #75b8ff;
 		--envoy-error: #ffb4aa;
+		--envoy-success: #3fb950;
+		--envoy-warning: #d29922;
 	}
 }
 
@@ -246,6 +252,18 @@ summary:focus-visible,
 	width: 18px;
 	height: 18px;
 	flex: none;
+}
+
+#envoy-resume:not(:disabled) {
+	color: var(--envoy-success);
+}
+
+#envoy-pause:not(:disabled) {
+	color: var(--envoy-warning);
+}
+
+#envoy-take-over:not(:disabled) {
+	color: var(--envoy-error);
 }
 
 .goal-line {
