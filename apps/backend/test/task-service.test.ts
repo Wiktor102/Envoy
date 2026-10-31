@@ -15,6 +15,7 @@ function snapshot(
 		chatId: "chat-1",
 		revision,
 		messages: [{ id: "node-1", text, direction, replyTo: null, attachments: [], reactions: [], unsent: false }],
+		participants: [],
 	};
 }
 

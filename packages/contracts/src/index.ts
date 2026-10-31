@@ -45,6 +45,11 @@ export interface ConversationSnapshot {
 	// Digest of the currently rendered conversation, not proof of complete history.
 	revision: string;
 	messages: readonly ConversationMessage[];
+	// Unverified chat-header display strings, shown as-is. Empty when the header
+	// is missing or ambiguous. Zero or one entries for now, leaving room for
+	// groups. Attribution-only metadata: never part of the revision, never a
+	// verified identity, and names are PII like message bodies.
+	participants: readonly string[];
 }
 
 export interface SendReplyCommand {
