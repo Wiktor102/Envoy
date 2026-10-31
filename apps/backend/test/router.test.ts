@@ -136,3 +136,22 @@ test("connector sync accepts sticker attachments as unavailable media", async ()
 		(error: unknown) => (error as { code: string }).code === "BAD_REQUEST",
 	);
 });
+
+test("reply settings must be whole seconds in an ordered, bounded range", async () => {
+	const valid = { autoSend: false, minDelaySeconds: 1, maxDelaySeconds: 600 };
+	assert.equal((await caller.connector.sync({ connectorId: "owner", snapshot, replySettings: valid })).task, null);
+	for (const replySettings of [
+		null,
+		{ ...valid, autoSend: "false" },
+		{ ...valid, minDelaySeconds: 0 },
+		{ ...valid, maxDelaySeconds: 601 },
+		{ ...valid, minDelaySeconds: 1.5 },
+		{ ...valid, minDelaySeconds: 20, maxDelaySeconds: 10 },
+		{ autoSend: true },
+	]) {
+		await assert.rejects(
+			caller.connector.sync({ connectorId: "owner", snapshot, replySettings } as never),
+			(error: unknown) => (error as { code: string }).code === "BAD_REQUEST",
+		);
+	}
+});

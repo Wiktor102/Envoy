@@ -4,9 +4,11 @@ import type {
 	ConversationSnapshot,
 	HealthResponse,
 	MessageAttachment,
+	ReplySettings,
 	SendResult,
 	TaskControlAction,
 } from "@envoy/contracts";
+import { MAX_REPLY_DELAY_SECONDS, MIN_REPLY_DELAY_SECONDS } from "@envoy/contracts";
 import { MetaModelAdapter } from "./agent/meta-model.js";
 import { TaskService } from "./tasks/service.js";
 
@@ -116,6 +118,23 @@ function optionalBoolean(value: unknown): boolean | undefined {
 	return value;
 }
 
+function delay(value: unknown): number {
+	if (!Number.isSafeInteger(value) || (value as number) < MIN_REPLY_DELAY_SECONDS) return invalid();
+	if ((value as number) > MAX_REPLY_DELAY_SECONDS) return invalid();
+	return value as number;
+}
+
+// Older extension versions send no settings; the service then keeps its defaults.
+function optionalReplySettings(value: unknown): ReplySettings | undefined {
+	if (value === undefined) return undefined;
+	const item = object(value);
+	if (typeof item.autoSend !== "boolean") return invalid();
+	const minDelaySeconds = delay(item.minDelaySeconds);
+	const maxDelaySeconds = delay(item.maxDelaySeconds);
+	if (maxDelaySeconds < minDelaySeconds) return invalid();
+	return { autoSend: item.autoSend, minDelaySeconds, maxDelaySeconds };
+}
+
 function startInput(value: unknown) {
 	const item = object(value);
 	return {
@@ -123,6 +142,7 @@ function startInput(value: unknown) {
 		goal: string(item.goal, 4000),
 		snapshot: snapshot(item.snapshot),
 		developerMode: optionalBoolean(item.developerMode),
+		replySettings: optionalReplySettings(item.replySettings),
 	};
 }
 
@@ -149,6 +169,7 @@ function syncInput(value: unknown) {
 		connectorId: string(item.connectorId),
 		snapshot: item.snapshot === null ? null : snapshot(item.snapshot),
 		developerMode: optionalBoolean(item.developerMode),
+		replySettings: optionalReplySettings(item.replySettings),
 	};
 }
 
@@ -182,7 +203,9 @@ export const appRouter = t.router({
 	task: t.router({
 		start: t.procedure
 			.input(startInput)
-			.mutation(({ input }) => service.start(input.connectorId, input.goal, input.snapshot, input.developerMode)),
+			.mutation(({ input }) =>
+				service.start(input.connectorId, input.goal, input.snapshot, input.developerMode, input.replySettings),
+			),
 		attach: t.procedure
 			.input(attachInput)
 			.mutation(({ input }) => service.attach(input.connectorId, input.taskId, input.snapshot)),
@@ -194,7 +217,9 @@ export const appRouter = t.router({
 	connector: t.router({
 		sync: t.procedure
 			.input(syncInput)
-			.mutation(({ input }) => service.sync(input.connectorId, input.snapshot, input.developerMode)),
+			.mutation(({ input }) =>
+				service.sync(input.connectorId, input.snapshot, input.developerMode, input.replySettings),
+			),
 		authorize: t.procedure
 			.input(authorizeInput)
 			.mutation(({ input }) => service.authorize(input.connectorId, input.commandId, input.chatId, input.revision)),

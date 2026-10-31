@@ -1,5 +1,42 @@
 // Browser-neutral contracts only. No Node, Chrome, DOM, or server imports here.
 export const DEFAULT_REPLY_DELAY_SECONDS = 10;
+export const MIN_REPLY_DELAY_SECONDS = 1;
+export const MAX_REPLY_DELAY_SECONDS = 600;
+
+// Browser-local preference. Each automatic send waits a random whole number of
+// seconds in [minDelaySeconds, maxDelaySeconds]; without autoSend a proposed
+// reply waits for Send now.
+export interface ReplySettings {
+	autoSend: boolean;
+	minDelaySeconds: number;
+	maxDelaySeconds: number;
+}
+
+export const DEFAULT_REPLY_SETTINGS: Readonly<ReplySettings> = {
+	autoSend: true,
+	minDelaySeconds: DEFAULT_REPLY_DELAY_SECONDS,
+	maxDelaySeconds: DEFAULT_REPLY_DELAY_SECONDS,
+};
+
+function delaySeconds(value: unknown, fallback: number): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+	return Math.min(MAX_REPLY_DELAY_SECONDS, Math.max(MIN_REPLY_DELAY_SECONDS, Math.round(value)));
+}
+
+// Stored values may be missing or come from an older version; fall back to
+// defaults field by field instead of rejecting the whole preference.
+export function normalizeReplySettings(value: unknown): ReplySettings {
+	const item = value && typeof value === "object" ? (value as Partial<Record<keyof ReplySettings, unknown>>) : {};
+	const minDelaySeconds = delaySeconds(item.minDelaySeconds, DEFAULT_REPLY_SETTINGS.minDelaySeconds);
+	return {
+		autoSend: typeof item.autoSend === "boolean" ? item.autoSend : DEFAULT_REPLY_SETTINGS.autoSend,
+		minDelaySeconds,
+		maxDelaySeconds: Math.max(
+			minDelaySeconds,
+			delaySeconds(item.maxDelaySeconds, DEFAULT_REPLY_SETTINGS.maxDelaySeconds),
+		),
+	};
+}
 
 export interface HealthResponse {
 	status: "ok";
