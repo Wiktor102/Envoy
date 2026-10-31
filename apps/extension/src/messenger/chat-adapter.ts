@@ -519,13 +519,11 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 				"video, audio, object, embed, iframe, a[download], [aria-label], img[alt], [data-message-type], [data-attachment-type]",
 			),
 		].filter((element) => isVisible(element) && !element.closest('[role="toolbar"]'));
-		// Quoted images are captured as type-only metadata, never content.
-		// Exempt what the reader captures; anything else keeps tripping.
+		// Quote previews may wrap their image in labelled GIF chrome. The gif
+		// word alone never trips inside a quote; any other media word still does.
 		const reply = findReplyButton(scope);
-		const quoted: Set<Element> = new Set(reply ? getQuotedImages(reply) : []);
 		if (
 			media.some((element) => {
-				if (quoted.has(element)) return false;
 				if (inRecognizedMedia(element)) return false;
 				if (element.matches("video, audio, object, embed, iframe, a[download]")) return true;
 				const preview = rendered
@@ -554,8 +552,9 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 							viewer.contains(element) &&
 							isGifLabel(element.getAttribute("alt") ?? ""),
 					);
+				const inQuote = reply?.contains(element) ?? false;
 				const checkedMetadata =
-					preview || giphyImage ? metadata.replace(/(?:^|\s)gif(?=$|[\s:.,])/gi, " ") : metadata;
+					preview || giphyImage || inQuote ? metadata.replace(/(?:^|\s)gif(?=$|[\s:.,])/gi, " ") : metadata;
 				return /(?:^|\s)(?:sticker|voice(?: message)?|audio(?: message)?|video|gif|file attachment|naklejka|wiadomość głosowa|plik)(?:$|[\s:.,])/i.test(
 					checkedMetadata,
 				);

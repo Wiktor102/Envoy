@@ -1317,7 +1317,7 @@ test("reads encrypted GIF buttons as presence-only without blocking the chat", a
 test("reads quoted GIFs as type-only without blocking the chat", async () => {
 	const dom = setup();
 	setMessages(
-		`<div data-scope="messages_table"><h4>You replied to Alex</h4><div role="button" aria-label="View original message"><img alt="Funny GIF" src="blob:https://www.messenger.com/q"></div><span dir="auto">Nice one</span></div>` +
+		`<div data-scope="messages_table"><h4>You replied to Alex</h4><div role="button" aria-label="View original message"><div role="button" aria-label="Open GIF"><img alt="Funny GIF" src="blob:https://www.messenger.com/q"></div></div><span dir="auto">Nice one</span></div>` +
 			`<div data-scope="messages_table"><h4>You replied to Sam</h4><div role="button" aria-label="Przejdź do wiadomości, na którą odpowiadasz"><img alt="Fish GIF" src="https://example.test/gif"><img alt="Zdjęcie" src="https://example.test/photo"></div><span dir="auto">Haha</span></div>`,
 	);
 	const snapshot = await messengerChatAdapter.readConversation();
@@ -1339,8 +1339,23 @@ test("reads quoted GIFs as type-only without blocking the chat", async () => {
 			},
 		],
 	);
+	assert.deepEqual(
+		snapshot.messages.map((message) => message.attachments),
+		[[], []],
+	);
 	document.querySelector("img")!.setAttribute("src", "blob:https://www.messenger.com/changed");
 	assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
+	for (const unsafe of [
+		// Other media words inside a quote still trip.
+		`<div data-scope="messages_table"><h4>You replied to Alex</h4><div role="button" aria-label="View original message"><img alt="Voice message" src="blob:https://example.test/v"></div><span dir="auto">Hmm</span></div>`,
+		`<div data-scope="messages_table"><h4>You replied to Alex</h4><div role="button" aria-label="View original message"><div role="button" aria-label="Open video"><img alt="Clip GIF" src="blob:https://example.test/c"></div></div><span dir="auto">Hmm</span></div>`,
+	]) {
+		setMessages(unsafe);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
 	dom.window.close();
 });
 
