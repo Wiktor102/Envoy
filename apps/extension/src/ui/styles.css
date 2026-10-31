@@ -570,9 +570,9 @@ summary .hint {
 #envoy-agent-messages li.tool-call p {
 	margin: 6px 0 0;
 	padding: 8px 10px;
+	border: 1px dashed var(--envoy-control-border);
 	border-radius: 2px 10px 10px 10px;
-	background: var(--envoy-message);
-	color: var(--envoy-text);
+	color: color-mix(in srgb, var(--envoy-text) 80%, var(--envoy-secondary-text));
 	font-size: 13px;
 	font-weight: 400;
 }
