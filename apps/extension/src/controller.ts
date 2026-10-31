@@ -296,6 +296,22 @@ export function createEnvoyController(
 		}
 	}
 
+	// Re-read before starting or attaching, so the request carries exactly the
+	// conversation the user saw and still controls.
+	async function readUnchanged(current: ConversationSnapshot): Promise<ConversationSnapshot> {
+		const fresh = await adapter.readConversation();
+		if (
+			stopped ||
+			suspended ||
+			!controlsAvailable ||
+			identity(fresh) !== identity(current) ||
+			identity(state.snapshot) !== identity(current)
+		) {
+			throw new Error("The conversation changed. Try again once it has loaded.");
+		}
+		return fresh;
+	}
+
 	function disconnectAfterOutstandingWork(): Promise<void> {
 		if (disconnectPromise) return disconnectPromise;
 		const pendingSync = syncPromise;
@@ -343,16 +359,7 @@ export function createEnvoyController(
 			await runAction(async () => {
 				const current = state.snapshot;
 				if (!current) throw new Error("Open a conversation and wait for it to load.");
-				const fresh = await adapter.readConversation();
-				if (
-					stopped ||
-					suspended ||
-					!controlsAvailable ||
-					identity(fresh) !== identity(current) ||
-					identity(state.snapshot) !== identity(current)
-				) {
-					throw new Error("The conversation changed. Try again once it has loaded.");
-				}
+				const fresh = await readUnchanged(current);
 				return transport({ type: "envoy:start", goal, snapshot: fresh });
 			});
 		},
@@ -363,16 +370,7 @@ export function createEnvoyController(
 				if (!current || !task || current.chatId !== task.chatId) {
 					throw new Error("Open the task's conversation before reconnecting.");
 				}
-				const fresh = await adapter.readConversation();
-				if (
-					stopped ||
-					suspended ||
-					!controlsAvailable ||
-					identity(fresh) !== identity(current) ||
-					identity(state.snapshot) !== identity(current)
-				) {
-					throw new Error("The conversation changed. Try again once it has loaded.");
-				}
+				const fresh = await readUnchanged(current);
 				return transport({ type: "envoy:attach", taskId: task.id, snapshot: fresh });
 			});
 		},
