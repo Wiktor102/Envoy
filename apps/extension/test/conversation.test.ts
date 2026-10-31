@@ -2094,13 +2094,50 @@ test("downscales local photos past the max side to JPEG", async () => {
 	}
 });
 
+test("downscales large sources into the byte cap instead of dropping them", async () => {
+	const dom = setup();
+	const big = `data:image/jpeg;base64,${"A".repeat(1_200_004)}`;
+	const wide = `data:image/png;base64,${"B".repeat(1_200_004)}`;
+	const restoreImage = installImageStub({ [big]: { width: 2048, height: 1365 }, [wide]: { width: 800, height: 600 } });
+	const restoreCanvas = installCanvasStub(dom, `data:image/jpeg;base64,${"Q".repeat(64)}`);
+	try {
+		setMessages(photoButton(big) + photoButton(wide));
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(
+			snapshot.messages.map((message) => message.attachments),
+			[
+				[
+					{
+						type: "image",
+						url: null,
+						description: null,
+						media: { mime: "image/jpeg", data: "Q".repeat(64), width: 1568, height: 1045 },
+					},
+				],
+				[
+					{
+						type: "image",
+						url: null,
+						description: null,
+						media: { mime: "image/jpeg", data: "Q".repeat(64), width: 800, height: 600 },
+					},
+				],
+			],
+		);
+	} finally {
+		restoreImage();
+		restoreCanvas();
+		dom.window.close();
+	}
+});
+
 test("keeps local photos presence-only when their bytes cannot be used", async () => {
 	const dom = setup();
 	const restoreImage = installImageStub({ "*": { width: 100, height: 80 } });
 	try {
 		for (const src of [
 			"data:image/gif;base64,AAAA",
-			`data:image/jpeg;base64,${"A".repeat(1_000_004)}`,
+			`data:image/jpeg;base64,${"A".repeat(12_000_004)}`,
 			"data:image/jpeg;base64,!!!",
 			"data:image/jpeg;base64,AAAAA",
 			"blob:https://www.messenger.com/photo",

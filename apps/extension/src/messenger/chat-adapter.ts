@@ -850,6 +850,9 @@ function imageAttachment(image: HTMLImageElement | null): {
 const inlineMimes: readonly InlineImageMime[] = ["image/jpeg", "image/png", "image/webp"];
 const MEDIA_LOAD_TIMEOUT_MS = 5000;
 const MEDIA_JPEG_QUALITY = 0.85;
+// Raw sources decode before the byte cap applies: downscaling is what earns
+// compliance. This only bounces pathological inputs before decoding them.
+const MAX_INLINE_SOURCE_CHARS = 12_000_000;
 
 // Decoded photo bytes keyed by element. Polling re-reads the same nodes, so
 // the cache avoids re-decoding every snapshot. Entries die with their nodes.
@@ -877,12 +880,12 @@ function loadImage(source: string): Promise<HTMLImageElement> {
 	});
 }
 
-// Decode a local data: source within caps, downscaling through canvas when it
-// exceeds the max side. Anything unexpected stays presence-only.
+// Decode a local data: source, downscaling or re-encoding through canvas until
+// it fits the caps. Anything unexpected stays presence-only.
 async function decodeLocalMedia(source: string): Promise<InlineImageMedia | null> {
 	const parsed = parseInlineData(source);
 	if (!parsed || !inlineMimes.includes(parsed.mime as InlineImageMime)) return null;
-	if (parsed.data.length > MAX_INLINE_MEDIA_CHARS) return null;
+	if (parsed.data.length > MAX_INLINE_SOURCE_CHARS) return null;
 	let loaded: HTMLImageElement;
 	try {
 		loaded = await loadImage(source);
@@ -892,10 +895,10 @@ async function decodeLocalMedia(source: string): Promise<InlineImageMedia | null
 	const width = loaded.naturalWidth;
 	const height = loaded.naturalHeight;
 	if (!width || !height) return null;
-	if (width <= MAX_IMAGE_SIDE && height <= MAX_IMAGE_SIDE) {
+	if (width <= MAX_IMAGE_SIDE && height <= MAX_IMAGE_SIDE && parsed.data.length <= MAX_INLINE_MEDIA_CHARS) {
 		return { mime: parsed.mime as InlineImageMime, data: parsed.data, width, height };
 	}
-	const scale = Math.min(MAX_IMAGE_SIDE / width, MAX_IMAGE_SIDE / height);
+	const scale = Math.min(1, MAX_IMAGE_SIDE / width, MAX_IMAGE_SIDE / height);
 	const targetWidth = Math.max(1, Math.floor(width * scale));
 	const targetHeight = Math.max(1, Math.floor(height * scale));
 	try {
