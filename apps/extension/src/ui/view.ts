@@ -1,5 +1,6 @@
 import {
 	DEFAULT_REPLY_SETTINGS,
+	isTaskEnded,
 	MAX_REPLY_DELAY_SECONDS,
 	MIN_REPLY_DELAY_SECONDS,
 	normalizeReplySettings,
@@ -303,7 +304,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		if (destroyed) return;
 		renderConversation();
 		const task = state.task;
-		const active = Boolean(task && task.status !== "completed" && task.status !== "taken_over");
+		const active = Boolean(task && !isTaskEnded(task.status));
 		const owner = Boolean(task && state.isOwner);
 		const currentChat = Boolean(task && state.snapshot?.chatId === task.chatId);
 		if ((task?.id ?? null) !== displayedTaskId || (owner && !displayedTaskOwner)) {

@@ -1,4 +1,4 @@
-import { attachmentIdentity } from "@envoy/contracts";
+import { messageContent } from "@envoy/contracts";
 import type { ConversationSnapshot } from "@envoy/contracts";
 import { ConversationUnavailableError, messengerChatAdapter } from "../messenger/chat-adapter";
 
@@ -52,12 +52,7 @@ export function watchConversation(onUpdate: (snapshot: ConversationSnapshot | nu
 				// would make the old chat appear new during a route transition.
 				// Sender labels are stripped the same way: a loading rename is
 				// not a new conversation.
-				const messages = JSON.stringify(
-					snapshot.messages.map(({ id: _id, sender: _sender, attachments, ...message }) => ({
-						...message,
-						attachments: attachments.map(attachmentIdentity),
-					})),
-				);
+				const messages = JSON.stringify(snapshot.messages.map(messageContent));
 				if (previousMessages && previousMessages !== "[]" && previousMessages === messages) {
 					onUpdate(null, "Loading the selected conversation...");
 					return;

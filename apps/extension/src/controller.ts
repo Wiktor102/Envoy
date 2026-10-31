@@ -1,3 +1,4 @@
+import { isTaskEnded } from "@envoy/contracts";
 import type { ConversationSnapshot, SendReplyCommand, SendResult, TaskControlAction, TaskState } from "@envoy/contracts";
 import { callBackend } from "./messaging";
 import { messengerChatAdapter, type MessengerChatAdapter } from "./messenger/chat-adapter";
@@ -100,13 +101,7 @@ export function createEnvoyController(
 
 	function ownerAvailable(): boolean {
 		return Boolean(
-			!stopped &&
-			!suspended &&
-			controlsAvailable &&
-			state.isOwner &&
-			state.task &&
-			state.task.status !== "completed" &&
-			state.task.status !== "taken_over",
+			!stopped && !suspended && controlsAvailable && state.isOwner && state.task && !isTaskEnded(state.task.status),
 		);
 	}
 

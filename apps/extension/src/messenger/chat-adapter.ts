@@ -1,6 +1,14 @@
 import { isAnimatedPreview, isGifButton, isGifLabel } from "./animated-preview";
 import { isGroupSystemEvent, isThreadIntro } from "./group-events";
-import { attachmentIdentity, MAX_IMAGE_SIDE, MAX_INLINE_MEDIA_CHARS, MAX_SNAPSHOT_IMAGES } from "@envoy/contracts";
+import {
+	hasControlCharacters,
+	INLINE_IMAGE_MIMES,
+	MAX_IMAGE_SIDE,
+	MAX_INLINE_MEDIA_CHARS,
+	MAX_SNAPSHOT_IMAGES,
+	MAX_TASK_TEXT_LENGTH,
+	messageContent,
+} from "@envoy/contracts";
 import type {
 	ConversationMessage,
 	ConversationSnapshot,
@@ -870,7 +878,6 @@ function imageAttachment(image: HTMLImageElement | null): {
 	return { type: "image", url: null, description: null, media: null };
 }
 
-const inlineMimes: readonly InlineImageMime[] = ["image/jpeg", "image/png", "image/webp"];
 const MEDIA_LOAD_TIMEOUT_MS = 5000;
 const MEDIA_JPEG_QUALITY = 0.85;
 // Raw sources decode before the byte cap applies: downscaling is what earns
@@ -907,7 +914,7 @@ function loadImage(source: string): Promise<HTMLImageElement> {
 // it fits the caps. Anything unexpected stays presence-only.
 async function decodeLocalMedia(source: string): Promise<InlineImageMedia | null> {
 	const parsed = parseInlineData(source);
-	if (!parsed || !inlineMimes.includes(parsed.mime as InlineImageMime)) return null;
+	if (!parsed || !INLINE_IMAGE_MIMES.includes(parsed.mime as InlineImageMime)) return null;
 	if (parsed.data.length > MAX_INLINE_SOURCE_CHARS) return null;
 	let loaded: HTMLImageElement;
 	try {
@@ -1156,7 +1163,7 @@ function imageFingerprint(rendered: RenderedMessage[]): string[][] {
 		return [
 			...images.flatMap((viewer) => {
 				const image = viewer.querySelector<HTMLImageElement>("img");
-				return [viewer.getAttribute("href") ?? "", image?.currentSrc || image?.getAttribute("src") || ""];
+				return [viewer.getAttribute("href") ?? "", imageSource(image)];
 			}),
 			...videos.flatMap((viewer) => {
 				const video = viewer.matches("video") ? viewer : viewer.querySelector<HTMLVideoElement>("video");
@@ -1176,15 +1183,7 @@ async function revisionOf(
 	// DOM-node IDs are temporary. Only the ordered message content contributes to the revision.
 	// Inline bytes are transport: the rendered source already feeds the revision
 	// through the fingerprint, so attachments enter stripped of media.
-	const content = messages.map(({ text, direction, replyTo, attachments, reactions, unsent }) => ({
-		text,
-		direction,
-		replyTo,
-		attachments: attachments.map(attachmentIdentity),
-		reactions,
-		unsent,
-	}));
-	const bytes = new TextEncoder().encode(JSON.stringify([chatId, content, imageState]));
+	const bytes = new TextEncoder().encode(JSON.stringify([chatId, messages.map(messageContent), imageState]));
 	const digest = await crypto.subtle.digest("SHA-256", bytes);
 	return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -1230,23 +1229,13 @@ function captureIsCurrent(capture: ConversationCapture): boolean {
 			isAtLatestMessages(capture.main, current) &&
 			current.length === capture.rendered.length &&
 			capture.rendered.every((item, index) => current[index]?.element === item.element) &&
-			JSON.stringify(contentOf(readMessages(current))) === JSON.stringify(contentOf(capture.messages)) &&
+			JSON.stringify(readMessages(current).map(messageContent)) ===
+				JSON.stringify(capture.messages.map(messageContent)) &&
 			JSON.stringify(imageFingerprint(current)) === JSON.stringify(capture.imageState)
 		);
 	} catch {
 		return false;
 	}
-}
-
-function contentOf(messages: ConversationSnapshot["messages"]): unknown[] {
-	return messages.map(({ text, direction, replyTo, attachments, reactions, unsent }) => ({
-		text,
-		direction,
-		replyTo,
-		attachments: attachments.map(attachmentIdentity),
-		reactions,
-		unsent,
-	}));
 }
 
 async function readCapturedConversation(): Promise<{ capture: ConversationCapture; snapshot: ConversationSnapshot }> {
@@ -1370,7 +1359,11 @@ function findOutgoingCandidateIndex(
 		const retained = after.messages.slice(0, index);
 		const removed = before.messages.length - retained.length;
 		if (removed < 0 || (removed > 0 && retained.length === 0)) continue;
-		if (JSON.stringify(contentOf(retained)) !== JSON.stringify(contentOf(before.messages.slice(removed)))) continue;
+		if (
+			JSON.stringify(retained.map(messageContent)) !==
+			JSON.stringify(before.messages.slice(removed).map(messageContent))
+		)
+			continue;
 		candidates.push(index);
 	}
 	// Never confirm on text alone. Zero or ambiguous matches stay uncertain.
@@ -1638,8 +1631,8 @@ export const messengerChatAdapter: MessengerChatAdapter = {
 			!command.chatId ||
 			!command.expectedRevision ||
 			!command.text.trim() ||
-			command.text.length > 4_000 ||
-			/[\u0000-\u001f\u007f\u2028\u2029]/u.test(command.text)
+			command.text.length > MAX_TASK_TEXT_LENGTH ||
+			hasControlCharacters(command.text)
 		)
 			return Promise.resolve("rejected");
 		const signature = JSON.stringify([command.chatId, command.expectedRevision, command.text]);
