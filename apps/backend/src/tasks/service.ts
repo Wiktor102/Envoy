@@ -301,34 +301,19 @@ export class TaskService {
 				this.scheduleRetention(task.id);
 				break;
 			}
-			case "update-goal": {
-				if (isTaskEnded(task.status)) throw new Error("This task has ended.");
-				const goal = checkedText(text);
-				const wasPaused = task.status === "paused";
-				const uncertain = this.invalidate(true);
-				task.goal = goal;
-				task.pendingReply = null;
-				this.appendAgentChat("event", "Instructions updated.");
-				if (uncertain || this.requiresVerification) {
-					task.status = wasPaused ? "paused" : "needs_user";
-					task.detail = "The send may have completed. Check the conversation before resuming.";
-				} else {
-					this.processedRevisions.clear();
-					this.evaluationReason = "instructions_updated";
-					if (task.status !== "paused") {
-						task.status = "waiting";
-						task.detail = null;
-						this.maybeGenerate();
-					}
-				}
-				break;
-			}
+			// New instructions and answers both feed the next evaluation.
+			case "update-goal":
 			case "answer-agent": {
 				if (isTaskEnded(task.status)) throw new Error("This task has ended.");
-				const answer = checkedText(text);
+				const value = checkedText(text);
 				const wasPaused = task.status === "paused";
 				const uncertain = this.invalidate(true);
-				this.appendAgentChat("user", answer);
+				if (action === "update-goal") {
+					task.goal = value;
+					this.appendAgentChat("event", "Instructions updated.");
+				} else {
+					this.appendAgentChat("user", value);
+				}
 				task.pendingReply = null;
 				if (uncertain || this.requiresVerification) {
 					task.status = wasPaused ? "paused" : "needs_user";
