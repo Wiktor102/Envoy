@@ -1370,16 +1370,6 @@ function findOutgoingCandidateIndex(
 	return candidates.length === 1 ? candidates[0]! : null;
 }
 
-function newlyAppendedOutgoing(
-	before: ConversationSnapshot,
-	after: ConversationSnapshot,
-	text: string,
-	previousMessageIds: ReadonlySet<string>,
-	renderedAfter: RenderedMessage[],
-): boolean {
-	return findOutgoingCandidateIndex(before, after, renderedAfter, text, previousMessageIds) !== null;
-}
-
 function messengerMessageId(message: RenderedMessage | undefined): string {
 	return message?.boundary?.getAttribute("data-message-id") ?? "";
 }
@@ -1417,11 +1407,6 @@ function hasSentStatusAt(capture: ConversationCapture, index: number): boolean {
 		boundary.matches('[data-scope="messages_table"][aria-roledescription]') &&
 		/^(?:\d+@msgr\.\d+|mid\.\$[\w-]+)$/.test(id)
 	);
-}
-
-function hasSentStatus(capture: ConversationCapture): boolean {
-	if (capture.rendered.length === 0) return false;
-	return hasSentStatusAt(capture, capture.rendered.length - 1);
 }
 
 function confirmSend(
