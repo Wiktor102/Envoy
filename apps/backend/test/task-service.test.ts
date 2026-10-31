@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AgentDecision, ConversationMessage, ConversationSnapshot } from "@envoy/contracts";
-import type { Agent } from "../src/agent/agent.js";
+import type { Agent, EvaluationReason } from "../src/agent/agent.js";
 import { ExtensionConnector } from "../src/connectors/extension-connector.js";
 import { TaskService } from "../src/tasks/service.js";
 import { allowedOrigin } from "../src/origin.js";
@@ -21,11 +21,17 @@ function snapshot(
 class ControlledAgent implements Agent {
 	calls: {
 		snapshot: ConversationSnapshot;
+		reason: EvaluationReason;
 		signal: AbortSignal | undefined;
 		resolve: (decision: AgentDecision) => void;
 	}[] = [];
-	run(_task: unknown, conversation: ConversationSnapshot, signal?: AbortSignal): Promise<AgentDecision> {
-		return new Promise((resolve) => this.calls.push({ snapshot: conversation, signal, resolve }));
+	run(
+		_task: unknown,
+		conversation: ConversationSnapshot,
+		reason: EvaluationReason,
+		signal?: AbortSignal,
+	): Promise<AgentDecision> {
+		return new Promise((resolve) => this.calls.push({ snapshot: conversation, reason, signal, resolve }));
 	}
 }
 
@@ -459,7 +465,7 @@ test("another tab cannot disconnect, submit snapshots, or control the owner task
 	assert.deepEqual(service.sync("owner", snapshot()).task, before);
 });
 
-test("unknown direction, unsupported content and an outgoing last message do not trigger the model", () => {
+test("unknown direction and unsupported content do not trigger the model", () => {
 	{
 		const { agent, service } = setup();
 		const result = service.start("owner", "Arrange a meeting", snapshot("r1", "Hello", "unknown"));
@@ -480,12 +486,6 @@ test("unknown direction, unsupported content and an outgoing last message do not
 		content.messages[0]!.attachments = [{ type, url: null, description: null }];
 		const result = service.start("owner", "Arrange a meeting", content);
 		assert.equal(result.status, "needs_user");
-		assert.equal(agent.calls.length, 0);
-	}
-	{
-		const { agent, service } = setup();
-		const result = service.start("owner", "Arrange a meeting", snapshot("r1", "Hello", "outgoing"));
-		assert.equal(result.status, "waiting");
 		assert.equal(agent.calls.length, 0);
 	}
 });
@@ -654,10 +654,11 @@ test("a transient unreadable view resumes the agent once the same chat reads aga
 	service.sync("owner", null);
 	assert.equal(service.sync("owner", snapshot()).task?.status, "paused");
 	service.control("owner", task.id, "resume");
+	assert.equal(agent.calls[2]!.reason, "user_resumed");
 	service.sync("owner", null);
 	service.control("owner", task.id, "pause");
 	assert.equal(service.sync("owner", snapshot()).task?.status, "paused");
-	assert.equal(agent.calls.length, 2);
+	assert.equal(agent.calls.length, 3);
 });
 
 test("an unreadable view does not resume a send that may have completed", async () => {
@@ -684,6 +685,10 @@ test("repeated unreadable views recover with a fresh decision and full countdown
 		const initial = status === "waiting" ? snapshot("r1", "I'll check.", "outgoing") : snapshot();
 		service.start("owner", "Arrange a meeting", initial);
 		if (status === "pending") await resolveReply(agent);
+		if (status === "waiting") {
+			agent.calls[0]!.resolve({ action: "wait" });
+			await Promise.resolve();
+		}
 		const original = service.sync("owner", initial).task!;
 		assert.equal(original.status, status);
 		const previousCalls = agent.calls.length;
@@ -812,3 +817,111 @@ for (const status of ["taken_over", "completed"] as const) {
 		assert.notEqual(service.start("owner", "A new goal", snapshot("r4")).id, task.id);
 	});
 }
+
+for (const empty of [false, true]) {
+	test(`task start can initiate in ${empty ? "an empty chat" : "a chat with an outgoing last message"}`, async () => {
+		const { agent, service, advance } = setup();
+		const current = snapshot("r1", "Thanks for yesterday!", "outgoing");
+		if (empty) current.messages = [];
+		service.start("owner", "Ask whether Thursday works for dinner", current);
+		assert.equal(agent.calls.length, 1);
+		assert.equal(agent.calls[0]!.reason, "task_started");
+		service.sync("owner", current);
+		assert.equal(agent.calls.length, 1);
+		await resolveReply(agent, 0, "Would Thursday evening work for dinner?");
+		assert.equal(service.sync("owner", current).task?.pendingReply?.sendAt, 11_000);
+		advance(9_999);
+		assert.equal(service.sync("owner", current).command, null);
+		advance(1);
+		const command = service.sync("owner", current).command!;
+		assert.ok(command);
+		assert.equal(service.sync("owner", current).command, null);
+		assert.equal(service.authorize("owner", command.commandId, "wrong-chat", current.revision), false);
+		assert.equal(service.authorize("owner", command.commandId, current.chatId, current.revision), true);
+		assert.equal(service.authorize("owner", command.commandId, current.chatId, current.revision), false);
+		service.report("owner", command.commandId, "sent");
+		assert.equal(service.sync("owner", current).command, null);
+		assert.equal(agent.calls.length, 1);
+	});
+}
+
+test("a wait stays idle until instructions change, resume, or a new incoming message", async () => {
+	const { agent, service } = setup();
+	const current = snapshot("r1", "Would Thursday evening work for dinner?", "outgoing");
+	const task = service.start("owner", "Ask whether Thursday works for dinner", current);
+	agent.calls[0]!.resolve({ action: "wait" });
+	await Promise.resolve();
+	for (let i = 0; i < 3; i++) assert.equal(service.sync("owner", current).task?.status, "waiting");
+	assert.equal(agent.calls.length, 1);
+	service.control("owner", task.id, "update-goal", "Ask about Friday instead");
+	assert.equal(agent.calls[1]!.reason, "instructions_updated");
+	agent.calls[1]!.resolve({ action: "wait" });
+	await Promise.resolve();
+	service.control("owner", task.id, "pause");
+	service.control("owner", task.id, "update-goal", "Ask about Saturday instead");
+	assert.equal(service.sync("owner", current).task?.status, "paused");
+	assert.equal(agent.calls.length, 2);
+	service.control("owner", task.id, "resume");
+	assert.equal(agent.calls[2]!.reason, "user_resumed");
+	agent.calls[2]!.resolve({ action: "wait" });
+	await Promise.resolve();
+	service.sync("owner", current);
+	assert.equal(agent.calls.length, 3);
+	service.sync("owner", snapshot("r2", "Saturday works"));
+	assert.equal(agent.calls[3]!.reason, "new_message");
+});
+
+test("cancelling an initiated reply suppresses regeneration, including after resume", async () => {
+	const { agent, service } = setup();
+	const current = snapshot("r1", "Thanks!", "outgoing");
+	const task = service.start("owner", "Ask about dinner", current);
+	await resolveReply(agent);
+	service.control("owner", task.id, "cancel");
+	service.control("owner", task.id, "pause");
+	service.control("owner", task.id, "resume");
+	assert.equal(service.sync("owner", current).task?.pendingReply, null);
+	assert.equal(agent.calls.length, 1);
+	const cosmetic = { ...current, revision: "cosmetic" };
+	service.sync("owner", cosmetic);
+	assert.equal(agent.calls.length, 1);
+});
+
+test("new messages invalidate an initiated reply and pause aborts its replacement", async () => {
+	const { agent, service, advance } = setup();
+	const task = service.start("owner", "Ask about dinner", snapshot("r1", "Thanks!", "outgoing"));
+	await resolveReply(agent);
+	const incoming = snapshot("r2", "How about dinner?");
+	assert.equal(service.sync("owner", incoming).task?.pendingReply, null);
+	assert.equal(agent.calls[1]!.reason, "new_message");
+	service.control("owner", task.id, "pause");
+	assert.equal(agent.calls[1]!.signal?.aborted, true);
+	await resolveReply(agent, 1);
+	advance(10_000);
+	assert.equal(service.sync("owner", incoming).task?.status, "paused");
+	assert.equal(service.sync("owner", incoming).command, null);
+});
+
+test("an initiated reply recovers from a temporary unreadable view with its evaluation reason", async () => {
+	const { agent, service } = setup();
+	const current = snapshot("r1", "Thanks!", "outgoing");
+	service.start("owner", "Ask about dinner", current);
+	await resolveReply(agent);
+	service.sync("owner", null);
+	assert.equal(service.sync("owner", current).task?.status, "thinking");
+	assert.equal(agent.calls[1]!.reason, "task_started");
+});
+
+test("instruction updates leave an uncertain paused send paused", async () => {
+	const { agent, service, advance } = setup();
+	const current = snapshot("r1", "Thanks!", "outgoing");
+	const task = service.start("owner", "Ask about dinner", current);
+	await resolveReply(agent);
+	advance(10_000);
+	const command = service.sync("owner", current).command!;
+	assert.equal(service.authorize("owner", command.commandId, current.chatId, current.revision), true);
+	service.control("owner", task.id, "pause");
+	const updated = service.control("owner", task.id, "update-goal", "Ask about lunch instead");
+	assert.equal(updated.status, "paused");
+	assert.match(updated.detail!, /may have completed/);
+	assert.equal(agent.calls.length, 1);
+});

@@ -10,7 +10,7 @@ import type {
 	TaskState,
 } from "@envoy/contracts";
 import { DEFAULT_REPLY_DELAY_SECONDS } from "@envoy/contracts";
-import type { Agent } from "../agent/agent.js";
+import type { Agent, EvaluationReason } from "../agent/agent.js";
 import type { BrowserConnector } from "../connectors/browser-connector.js";
 import { ExtensionConnector } from "../connectors/extension-connector.js";
 
@@ -54,6 +54,8 @@ export class TaskService {
 	private retentionTimer: ReturnType<typeof setTimeout> | undefined;
 	private epoch = 0;
 	private generation: AbortController | null = null;
+	// Retain the event through temporary unreadable views or retired-send checks.
+	private evaluationReason: EvaluationReason = "new_message";
 	private inFlight: Attempt | null = null;
 	private readonly attempts = new Map<string, Attempt>();
 	private readonly processedRevisions = new Set<string>();
@@ -118,6 +120,7 @@ export class TaskService {
 				: null,
 		};
 		this.touch();
+		this.evaluationReason = "task_started";
 		this.maybeGenerate();
 		return this.state()!;
 	}
@@ -244,6 +247,8 @@ export class TaskService {
 				}
 				this.invalidate();
 				this.requiresVerification = false;
+				this.evaluationReason = "user_resumed";
+				this.processedRevisions.delete(snapshot.revision);
 				task.pendingReply = null;
 				task.status = "waiting";
 				task.detail = null;
@@ -266,14 +271,16 @@ export class TaskService {
 			case "update-goal": {
 				if (task.status === "completed" || task.status === "taken_over") throw new Error("This task has ended.");
 				const goal = checkedText(text);
+				const wasPaused = task.status === "paused";
 				const uncertain = this.invalidate(true);
 				task.goal = goal;
 				task.pendingReply = null;
 				if (uncertain || this.requiresVerification) {
-					task.status = "needs_user";
+					task.status = wasPaused ? "paused" : "needs_user";
 					task.detail = "The send may have completed. Check the conversation before resuming.";
 				} else {
 					this.processedRevisions.clear();
+					this.evaluationReason = "instructions_updated";
 					if (task.status !== "paused") {
 						task.status = "waiting";
 						task.detail = null;
@@ -334,6 +341,7 @@ export class TaskService {
 			return { task: this.state(), isOwner: true, command: null };
 		}
 		if (previous && previous.revision !== copy.revision) {
+			if (!["paused", "needs_user"].includes(task.status)) this.evaluationReason = "new_message";
 			// After authorization, a new revision can be the outgoing bubble
 			// itself. Keep the attempt until its explicit report arrives.
 			if (!(task.status === "sending" && this.inFlight?.authorized)) {
@@ -688,20 +696,21 @@ export class TaskService {
 			task.detail = "The latest message was unsent. Check the conversation before resuming.";
 			return;
 		}
-		if (!latest || latest.direction === "outgoing") {
+		if ((!latest || latest.direction === "outgoing") && this.evaluationReason === "new_message") {
 			task.detail = "Waiting for a new incoming message.";
 			return;
 		}
-		if (latest.direction === "unknown") {
+		if (latest?.direction === "unknown") {
 			task.status = "needs_user";
 			task.detail = "The latest message has an unknown sender. Check the conversation before resuming.";
 			return;
 		}
 		if (
-			latest.attachments.length ||
-			!latest.text.trim() ||
-			(latest.replyTo &&
-				(latest.replyTo.attachments.length || !latest.replyTo.text?.trim() || !latest.replyTo.context?.trim()))
+			latest &&
+			(latest.attachments.length ||
+				!latest.text.trim() ||
+				(latest.replyTo &&
+					(latest.replyTo.attachments.length || !latest.replyTo.text?.trim() || !latest.replyTo.context?.trim())))
 		) {
 			task.status = "needs_user";
 			task.detail = "The latest message contains content Envoy cannot interpret.";
@@ -714,7 +723,7 @@ export class TaskService {
 		this.generation = abort;
 		const captured = structuredClone(snapshot);
 		const taskCopy = this.state()!;
-		void this.agent.run(taskCopy, captured, abort.signal).then(
+		void this.agent.run(taskCopy, captured, this.evaluationReason, abort.signal).then(
 			(decision) => this.acceptDecision(epoch, captured, decision),
 			() => {
 				if (this.epoch !== epoch || !this.task || this.task.status !== "thinking") return;

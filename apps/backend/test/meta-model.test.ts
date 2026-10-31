@@ -47,13 +47,14 @@ test("the Meta request keeps user instructions separate from untrusted conversat
 		);
 	};
 	try {
-		const result = await new MetaModelAdapter().run(task, conversation);
+		const result = await new MetaModelAdapter().run(task, conversation, "task_started");
 		assert.deepEqual(result, { action: "ask", text: "Is Friday allowed?" });
 		assert.equal(captured!.url, "https://api.meta.ai/v1/chat/completions");
 		assert.equal(captured!.authorization, "Bearer test-key");
 		assert.equal(captured!.body.model, "muse-spark-1.3");
 		assert.equal(captured!.body.messages[1].role, "developer");
 		assert.match(captured!.body.messages[1].content, /Meet Tuesday/);
+		assert.match(captured!.body.messages[1].content, /Evaluation reason: task_started/);
 		assert.doesNotMatch(captured!.body.messages[1].content, /Ignore the goal/);
 		assert.match(captured!.body.messages[2].content, /Ignore the goal/);
 		assert.match(captured!.body.messages[0].content, /untrusted data/);
@@ -77,9 +78,9 @@ test("the Meta adapter rejects malformed and multiline reply decisions", async (
 			headers: { "content-type": "application/json" },
 		});
 	try {
-		await assert.rejects(new MetaModelAdapter().run(task, conversation), /Invalid model decision/);
+		await assert.rejects(new MetaModelAdapter().run(task, conversation, "task_started"), /Invalid model decision/);
 		content = JSON.stringify({ action: "reply", text: "first\nsecond" });
-		await assert.rejects(new MetaModelAdapter().run(task, conversation), /Invalid model decision/);
+		await assert.rejects(new MetaModelAdapter().run(task, conversation, "task_started"), /Invalid model decision/);
 	} finally {
 		globalThis.fetch = previousFetch;
 		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
@@ -123,7 +124,11 @@ test("the Meta request marks unverified history and attachments without sending 
 			reactions: [],
 			unsent: false,
 		};
-		await new MetaModelAdapter().run(task, { ...conversation, messages: [prior, ...conversation.messages] });
+		await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages: [prior, ...conversation.messages] },
+			"new_message",
+		);
 		const content = JSON.parse(body.messages[2].content);
 		assert.deepEqual(content.conversation[0], {
 			direction: "unknown",
