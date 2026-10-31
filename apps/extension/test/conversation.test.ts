@@ -875,12 +875,12 @@ test("reads image URLs for image-only, mixed, and quoted messages", async () => 
 	assert.deepEqual(
 		snapshot.messages.map((message) => ({ text: message.text, attachments: message.attachments })),
 		[
-			{ text: "", attachments: [{ type: "image", url: "https://example.test/one", description: null }] },
+			{ text: "", attachments: [{ type: "image", url: "https://example.test/one", description: null, media: null }] },
 			{
 				text: "A caption",
 				attachments: [
-					{ type: "image", url: "https://example.test/two", description: null },
-					{ type: "image", url: "https://example.test/three", description: null },
+					{ type: "image", url: "https://example.test/two", description: null, media: null },
+					{ type: "image", url: "https://example.test/three", description: null, media: null },
 				],
 			},
 			{ text: "Nice photo", attachments: [] },
@@ -890,7 +890,7 @@ test("reads image URLs for image-only, mixed, and quoted messages", async () => 
 	assert.deepEqual(snapshot.messages[2]!.replyTo, {
 		text: null,
 		context: "You replied to Alex",
-		attachments: [{ type: "image", url: "https://example.test/preview", description: null }],
+		attachments: [{ type: "image", url: "https://example.test/preview", description: null, media: null }],
 	});
 	assert.equal(snapshot.messages[1]!.reactions.length, 1);
 	assert.ok(!JSON.stringify(snapshot).includes("attachment_id"));
@@ -1230,7 +1230,7 @@ test("reads an animated preview as an unreadable attachment and tracks its blob 
 	assert.deepEqual(
 		snapshot.messages.map(({ text, attachments }) => [text, attachments]),
 		[
-			["", [{ type: "image", url: null, description: null }]],
+			["", [{ type: "gif", url: null, description: null }]],
 			["Hello", []],
 		],
 	);
@@ -1265,7 +1265,7 @@ test("reads the observed GIPHY image link while rejecting ambiguous media", asyn
 			attachments.map(({ type }) => type),
 		]),
 		[
-			["", ["image"]],
+			["", ["gif"]],
 			["", ["sticker"]],
 			["Hello", []],
 		],
@@ -1985,4 +1985,230 @@ test("leaves participants empty without a corroborating region heading", async (
 		);
 	}
 	dom.window.close();
+});
+
+type StubSize = { width: number; height: number } | "error";
+
+function installImageStub(sizes: Record<string, StubSize>): () => void {
+	const previous = (globalThis as Record<string, unknown>).Image;
+	(globalThis as Record<string, unknown>).Image = class {
+		naturalWidth = 0;
+		naturalHeight = 0;
+		onload: (() => void) | null = null;
+		onerror: (() => void) | null = null;
+		set src(value: string) {
+			const size = sizes[value] ?? sizes["*"];
+			queueMicrotask(() => {
+				if (!size || size === "error") this.onerror?.();
+				else {
+					this.naturalWidth = size.width;
+					this.naturalHeight = size.height;
+					this.onload?.();
+				}
+			});
+		}
+	};
+	return () => {
+		if (previous === undefined) delete (globalThis as Record<string, unknown>).Image;
+		else (globalThis as Record<string, unknown>).Image = previous;
+	};
+}
+
+function installCanvasStub(dom: JSDOM, dataUrl: string): () => void {
+	const prototype = dom.window.HTMLCanvasElement.prototype as unknown as Record<string, unknown>;
+	const previousContext = prototype.getContext;
+	const previousDataUrl = prototype.toDataURL;
+	prototype.getContext = () => ({ drawImage() {} });
+	prototype.toDataURL = () => dataUrl;
+	return () => {
+		prototype.getContext = previousContext;
+		prototype.toDataURL = previousDataUrl;
+	};
+}
+
+const photoButton = (src: string, alt = "Otwórz zdjęcie") =>
+	`<div data-scope="messages_table" data-message-id="photo" aria-roledescription="message"><div role="button" tabindex="-1"><img alt="${alt}" src="${src}"></div></div>`;
+
+test("inlines local photo bytes for encrypted photo buttons", async () => {
+	const dom = setup();
+	const restoreImage = installImageStub({ "*": { width: 800, height: 600 } });
+	try {
+		setMessages(
+			photoButton("data:image/jpeg;base64,AAAA") +
+				`<div data-scope="messages_table" data-message-id="two" aria-roledescription="message"><div role="button" tabindex="-1"><img alt="Open photo" src="data:image/png;base64,BBBB"></div><div role="button" tabindex="-1"><img alt="Open image" src="data:image/webp;base64,CCCC"></div></div>`,
+		);
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(
+			snapshot.messages.map((message) => message.attachments),
+			[
+				[
+					{
+						type: "image",
+						url: null,
+						description: null,
+						media: { mime: "image/jpeg", data: "AAAA", width: 800, height: 600 },
+					},
+				],
+				[
+					{
+						type: "image",
+						url: null,
+						description: null,
+						media: { mime: "image/png", data: "BBBB", width: 800, height: 600 },
+					},
+					{
+						type: "image",
+						url: null,
+						description: null,
+						media: { mime: "image/webp", data: "CCCC", width: 800, height: 600 },
+					},
+				],
+			],
+		);
+		assert.ok(JSON.stringify(snapshot).includes("AAAA"));
+	} finally {
+		restoreImage();
+		dom.window.close();
+	}
+});
+
+test("downscales local photos past the max side to JPEG", async () => {
+	const dom = setup();
+	const restoreImage = installImageStub({ "*": { width: 2000, height: 1000 } });
+	const restoreCanvas = installCanvasStub(dom, `data:image/jpeg;base64,${"Q".repeat(64)}`);
+	try {
+		setMessages(photoButton("data:image/png;base64,AAAA"));
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(snapshot.messages[0]!.attachments, [
+			{
+				type: "image",
+				url: null,
+				description: null,
+				media: { mime: "image/jpeg", data: "Q".repeat(64), width: 1568, height: 784 },
+			},
+		]);
+	} finally {
+		restoreImage();
+		restoreCanvas();
+		dom.window.close();
+	}
+});
+
+test("keeps local photos presence-only when their bytes cannot be used", async () => {
+	const dom = setup();
+	const restoreImage = installImageStub({ "*": { width: 100, height: 80 } });
+	try {
+		for (const src of [
+			"data:image/gif;base64,AAAA",
+			`data:image/jpeg;base64,${"A".repeat(1_000_004)}`,
+			"data:image/jpeg;base64,!!!",
+			"data:image/jpeg;base64,AAAAA",
+			"blob:https://www.messenger.com/photo",
+		]) {
+			setMessages(photoButton(src));
+			const snapshot = await messengerChatAdapter.readConversation();
+			assert.deepEqual(snapshot.messages[0]!.attachments, [
+				{ type: "image", url: null, description: null, media: null },
+			]);
+		}
+	} finally {
+		restoreImage();
+		dom.window.close();
+	}
+	const failing = setup();
+	const restoreFailing = installImageStub({ "*": "error" });
+	try {
+		setMessages(photoButton("data:image/jpeg;base64,AAAA"));
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(snapshot.messages[0]!.attachments, [{ type: "image", url: null, description: null, media: null }]);
+	} finally {
+		restoreFailing();
+		failing.window.close();
+	}
+	const unloaded = setup();
+	try {
+		// Without image decoding the reader stays fail-closed, not broken.
+		setMessages(photoButton("data:image/jpeg;base64,AAAA"));
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(snapshot.messages[0]!.attachments, [{ type: "image", url: null, description: null, media: null }]);
+	} finally {
+		unloaded.window.close();
+	}
+});
+
+test("inlines only the newest four photos when more render", async () => {
+	const dom = setup();
+	const restoreImage = installImageStub({ "*": { width: 100, height: 80 } });
+	try {
+		setMessages(
+			["AAAA", "BBBB", "CCCC", "DDDD", "EEEE"].map((data) => photoButton(`data:image/jpeg;base64,${data}`)).join(""),
+		);
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(
+			snapshot.messages.map(
+				(message) =>
+					(message.attachments[0] as { type: string; media: { data: string } | null }).media?.data ?? null,
+			),
+			[null, "BBBB", "CCCC", "DDDD", "EEEE"],
+		);
+	} finally {
+		restoreImage();
+		dom.window.close();
+	}
+});
+
+test("keeps quoted photos type-only while inlining message photos", async () => {
+	const dom = setup();
+	const restoreImage = installImageStub({ "*": { width: 100, height: 80 } });
+	try {
+		setMessages(
+			photoButton("data:image/jpeg;base64,AAAA") +
+				`<div data-scope="messages_table"><h4>You replied to Alex</h4><div role="button" aria-label="Przejdź do wiadomości, na którą odpowiadasz"><img alt="Zdjęcie" src="data:image/jpeg;base64,BBBB"></div><span dir="auto">Nice photo</span></div>`,
+		);
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.equal((snapshot.messages[0]!.attachments[0] as { media: { data: string } | null }).media?.data, "AAAA");
+		assert.deepEqual(snapshot.messages[1]!.replyTo, {
+			text: null,
+			context: "You replied to Alex",
+			attachments: [{ type: "image", url: null, description: null, media: null }],
+		});
+	} finally {
+		restoreImage();
+		dom.window.close();
+	}
+});
+
+test("classifies GIF links as presence-only without bytes", async () => {
+	const dom = setup();
+	const restoreImage = installImageStub({ "*": { width: 100, height: 80 } });
+	try {
+		setMessages(
+			`<div data-scope="messages_table" data-message-id="g1" aria-roledescription="message"><a href="/messenger_media/?attachment_id=1"><img alt="Fish GIF" src="data:image/gif;base64,AAAA"><span>GIPHY</span></a></div>`,
+		);
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(snapshot.messages[0]!.attachments, [{ type: "gif", url: null, description: null }]);
+	} finally {
+		restoreImage();
+		dom.window.close();
+	}
+});
+
+test("keeps the revision independent of inline bytes", async () => {
+	const dom = setup();
+	try {
+		setMessages(photoButton("data:image/jpeg;base64,AAAA"));
+		const withoutBytes = await messengerChatAdapter.readConversation();
+		assert.equal((withoutBytes.messages[0]!.attachments[0] as { media: unknown }).media, null);
+		const restoreImage = installImageStub({ "*": { width: 100, height: 80 } });
+		try {
+			setMessages(photoButton("data:image/jpeg;base64,AAAA"));
+			const withBytes = await messengerChatAdapter.readConversation();
+			assert.equal((withBytes.messages[0]!.attachments[0] as { media: { data: string } | null }).media?.data, "AAAA");
+			assert.equal(withBytes.revision, withoutBytes.revision);
+		} finally {
+			restoreImage();
+		}
+	} finally {
+		dom.window.close();
+	}
 });
