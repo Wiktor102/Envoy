@@ -245,62 +245,38 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		if (!boundary || findReplyButton(boundary)?.contains(button)) continue;
 		images.push(button);
 	}
-	for (const image of images) {
-		const boundary = messageBoundary(image);
+	// Media joins the single text bubble in its boundary, or that boundary's
+	// media-only message. Otherwise it starts a message of its own.
+	function placeMedia(kind: "images" | "videos" | "stickers", element: HTMLElement) {
+		const boundary = messageBoundary(element);
 		const textMatches = messages.filter(
 			(message) => message.boundary === boundary && textElements.includes(message.element),
 		);
-		if (boundary && textMatches.length === 1) {
-			textMatches[0]!.images.push(image);
-			continue;
+		const target =
+			boundary && textMatches.length === 1
+				? textMatches[0]
+				: boundary && textMatches.length === 0
+					? messages.find((message) => message.boundary === boundary && !textElements.includes(message.element))
+					: undefined;
+		if (target) {
+			target[kind].push(element);
+			return;
 		}
-		const imageMessage =
-			boundary && textMatches.length === 0
-				? messages.find((message) => message.boundary === boundary && !textElements.includes(message.element))
-				: undefined;
-		if (imageMessage) imageMessage.images.push(image);
-		else messages.push({ element: image, boundary, images: [image], videos: [], stickers: [], unsent: false });
+		const message: RenderedMessage = { element, boundary, images: [], videos: [], stickers: [], unsent: false };
+		message[kind].push(element);
+		messages.push(message);
 	}
+	for (const image of images) placeMedia("images", image);
 	// An uploaded clip renders as a real <video> inside an expand button with
 	// Video player UI. Neither data-message-type nor data-attachment-type was
 	// observed. Require a video signal beyond a bare tag so unknown media
 	// stays unsupported: playsinline, a src, or player UI in the viewer.
-	for (const viewer of collectVideoViewers(main)) {
-		const boundary = messageBoundary(viewer);
-		const textMatches = messages.filter(
-			(message) => message.boundary === boundary && textElements.includes(message.element),
-		);
-		if (boundary && textMatches.length === 1) {
-			textMatches[0]!.videos.push(viewer);
-			continue;
-		}
-		const videoMessage =
-			boundary && textMatches.length === 0
-				? messages.find((message) => message.boundary === boundary && !textElements.includes(message.element))
-				: undefined;
-		if (videoMessage) videoMessage.videos.push(viewer);
-		else messages.push({ element: viewer, boundary, images: [], videos: [viewer], stickers: [], unsent: false });
-	}
+	for (const viewer of collectVideoViewers(main)) placeMedia("videos", viewer);
 	// A built-in sticker is a bare div with role="img", a label ending in the
 	// standalone word "sticker", and a CSS background image. No attachment
 	// metadata was observed. Keep the shape narrow: unknown, quoted, toolbar,
 	// or hidden graphics stay unsupported, and dimensions alone never qualify.
-	for (const sticker of collectStickerViewers(main)) {
-		const boundary = messageBoundary(sticker);
-		const textMatches = messages.filter(
-			(message) => message.boundary === boundary && textElements.includes(message.element),
-		);
-		if (boundary && textMatches.length === 1) {
-			textMatches[0]!.stickers.push(sticker);
-			continue;
-		}
-		const stickerMessage =
-			boundary && textMatches.length === 0
-				? messages.find((message) => message.boundary === boundary && !textElements.includes(message.element))
-				: undefined;
-		if (stickerMessage) stickerMessage.stickers.push(sticker);
-		else messages.push({ element: sticker, boundary, images: [], videos: [], stickers: [sticker], unsent: false });
-	}
+	for (const sticker of collectStickerViewers(main)) placeMedia("stickers", sticker);
 	// The placeholder may be plain text outside a directional text element.
 	for (const element of main.querySelectorAll<HTMLElement>(
 		'[data-scope="messages_table"] div, [data-scope="messages_table"] span',
