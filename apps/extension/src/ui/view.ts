@@ -57,6 +57,11 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const conversationNotice = element<HTMLElement>("#envoy-conversation-notice");
 	const conversation = element<HTMLOListElement>("#envoy-conversation");
 	const conversationEmpty = element<HTMLElement>("#envoy-conversation-empty");
+	const goalToggle = element<HTMLButtonElement>("#envoy-goal-toggle");
+	const goalText = element<HTMLElement>("#envoy-goal-text");
+	const instructions = element<HTMLElement>("#envoy-instructions");
+	const thread = element<HTMLElement>("#envoy-thread");
+	const footer = element<HTMLElement>("#envoy-footer");
 	const goal = element<HTMLTextAreaElement>("#envoy-goal");
 	const goalHint = element<HTMLElement>("#envoy-goal-hint");
 	const startButton = element<HTMLButtonElement>("#envoy-start");
@@ -66,10 +71,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const taskChat = element<HTMLElement>("#envoy-task-chat");
 	const taskNotice = element<HTMLElement>("#envoy-task-notice");
 	const taskDetail = element<HTMLElement>("#envoy-task-detail");
-	const agentChat = element<HTMLElement>("#envoy-agent-chat");
 	const agentEmpty = element<HTMLElement>("#envoy-agent-empty");
 	const agentMessages = element<HTMLOListElement>("#envoy-agent-messages");
-	const answer = element<HTMLElement>("#envoy-answer");
 	const answerText = element<HTMLTextAreaElement>("#envoy-answer-text");
 	const answerSend = element<HTMLButtonElement>("#envoy-answer-send");
 	const pendingSection = element<HTMLElement>("#envoy-pending");
@@ -82,7 +85,6 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	isolateTextInput(answerText);
 	const saveEditButton = element<HTMLButtonElement>("#envoy-save-edit");
 	const replyControls = element<HTMLElement>("#envoy-reply-controls");
-	const taskControls = element<HTMLElement>("#envoy-task-controls");
 	const sendButton = element<HTMLButtonElement>("#envoy-send-now");
 	const editButton = element<HTMLButtonElement>("#envoy-edit");
 	const cancelButton = element<HTMLButtonElement>("#envoy-cancel");
@@ -109,6 +111,9 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	let displayedTaskId: string | null = null;
 	let displayedTaskOwner = false;
 	let goalDirty = false;
+	let goalEditorOpen = false;
+	let lastChatCount = 0;
+	let lastPendingKey: string | null = null;
 	let editingCommandId: string | null = null;
 	// The backend clears the pending reply once it hands it to the tab.
 	let sendingReply: { taskId: string; text: string } | null = null;
@@ -228,6 +233,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		const currentChat = Boolean(task && state.snapshot?.chatId === task.chatId);
 		if ((task?.id ?? null) !== displayedTaskId || (owner && !displayedTaskOwner)) {
 			displayedTaskId = task?.id ?? null;
+			goalEditorOpen = false;
 			if (task && owner && !goalDirty) goal.value = task.goal;
 		}
 		displayedTaskOwner = owner;
@@ -240,6 +246,12 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		startButton.disabled = busy || !state.snapshot || !goal.value.trim();
 		updateGoalButton.hidden = !active;
 		updateGoalButton.disabled = busy || !owner || !goal.value.trim() || goal.value.trim() === task?.goal;
+		instructions.hidden = Boolean(task) && (!active || !goalEditorOpen);
+		goalToggle.hidden = !task || !owner;
+		goalToggle.disabled = busy || !active;
+		goalToggle.setAttribute("aria-expanded", String(goalEditorOpen));
+		goalText.textContent = task?.goal ?? "";
+		thread.hidden = !task;
 
 		taskStatus.textContent = task
 			? `${statusLabels[task.status]}${active && !owner ? " (not connected to this tab)" : ""}.`
@@ -254,8 +266,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		taskDetail.textContent = owner ? (task?.detail ?? "") : "";
 		taskDetail.hidden = !owner || !task?.detail;
 		const chat = owner && task ? task.agentChat : [];
-		agentChat.hidden = !owner || !task || (!active && chat.length === 0);
-		agentEmpty.hidden = chat.length !== 0;
+		agentEmpty.hidden = chat.length !== 0 || !active || !owner;
 		agentMessages.replaceChildren();
 		for (const message of chat) {
 			const item = document.createElement("li");
@@ -272,14 +283,20 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			item.append(text);
 			agentMessages.append(item);
 		}
-		answer.hidden = !owner || !active;
+		footer.hidden = !owner || !active;
 		answerText.disabled = busy;
-		answerSend.disabled = busy || !owner || !active || !answerText.value.trim();
+		answerSend.disabled = busy || !answerText.value.trim();
 		const pending = owner ? (task?.pendingReply ?? null) : null;
 		if (task && pending) sendingReply = { taskId: task.id, text: pending.text };
 		else if (task?.status !== "sending" || task.id !== sendingReply?.taskId) sendingReply = null;
 		const shownText = pending?.text ?? (owner ? sendingReply?.text : undefined) ?? null;
 		pendingSection.hidden = shownText === null;
+		const pendingKey = pending ? pending.commandId : sendingReply ? `sending:${task?.id}` : null;
+		if (chat.length > lastChatCount || (pendingKey && pendingKey !== lastPendingKey)) {
+			panel.scrollTop = panel.scrollHeight;
+		}
+		lastChatCount = chat.length;
+		lastPendingKey = pendingKey;
 		pendingText.textContent = shownText ?? "";
 		const editing = Boolean(task?.status === "editing" && pending && owner);
 		editor.hidden = !editing;
@@ -291,7 +308,6 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		}
 
 		replyControls.hidden = !owner || !task || !["thinking", "pending", "editing", "sending"].includes(task.status);
-		taskControls.hidden = !task;
 		sendButton.disabled = busy || !owner || !currentChat || task?.status !== "pending" || !pending;
 		editButton.disabled =
 			busy || !owner || !currentChat || !(task?.status === "sending" || (task?.status === "pending" && pending));
@@ -299,12 +315,14 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			busy || !owner || !task || !["thinking", "pending", "editing", "sending"].includes(task.status);
 		saveEditButton.disabled = busy || !editing || !editText.value.trim();
 		editText.disabled = busy;
-		pauseButton.disabled = busy || !owner || !active || task?.status === "paused";
-		resumeButton.disabled =
-			busy || !owner || !currentChat || (task?.status !== "paused" && task?.status !== "needs_user");
+		pauseButton.hidden = !owner || !active || task?.status === "paused";
+		pauseButton.disabled = busy || task?.status === "paused";
+		resumeButton.hidden = !owner || (task?.status !== "paused" && task?.status !== "needs_user");
+		resumeButton.disabled = busy || !currentChat || (task?.status !== "paused" && task?.status !== "needs_user");
 		reconnectButton.hidden = !(task?.status === "paused" && !owner && currentChat);
 		reconnectButton.disabled = busy;
-		takeoverButton.disabled = busy || !owner || !active;
+		takeoverButton.hidden = !owner || !active;
+		takeoverButton.disabled = busy || !active;
 		deleteButton.hidden = !task || active;
 		deleteButton.disabled = busy;
 		deleteHint.hidden = deleteButton.hidden;
@@ -342,10 +360,21 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	});
 	editText.addEventListener("input", render);
 	answerText.addEventListener("input", render);
+	goalToggle.addEventListener("click", () => {
+		if (!state.task || !state.isOwner) return;
+		goalEditorOpen = !goalEditorOpen;
+		if (goalEditorOpen) {
+			goal.value = state.task.goal;
+			goalDirty = false;
+		}
+		render();
+		if (goalEditorOpen) goal.focus();
+	});
 	startButton.addEventListener("click", () => {
 		const value = goal.value.trim();
 		void run(async () => {
 			await controller.start(value);
+			goalEditorOpen = false;
 			if (goal.value.trim() === value) goalDirty = false;
 		});
 	});
@@ -353,6 +382,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		const value = goal.value.trim();
 		void run(async () => {
 			await controller.control("update-goal", value);
+			goalEditorOpen = false;
 			if (goal.value.trim() === value) goalDirty = false;
 		});
 	});
@@ -376,6 +406,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			await controller.clear();
 			goal.value = "";
 			goalDirty = false;
+			goalEditorOpen = false;
 			editText.value = "";
 		});
 	});

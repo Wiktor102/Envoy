@@ -122,10 +122,17 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 	};
 }
 
-test("setup hides inactive control groups and conversation loss clears its preview", (t) => {
+test("setup shows the start form while the thread and footer stay hidden", (t) => {
 	const ui = setup(t);
-	assert.equal(ui.element("task-controls").hidden, true);
+	assert.equal(ui.element("instructions").hidden, false);
+	assert.equal(ui.element("start").hidden, false);
+	assert.equal(ui.element("thread").hidden, true);
+	assert.equal(ui.element("footer").hidden, true);
 	assert.equal(ui.element("reply-controls").hidden, true);
+	assert.equal(ui.element("goal-toggle").hidden, true);
+	for (const id of ["pause", "resume", "reconnect", "take-over", "delete"]) {
+		assert.equal(ui.element(id).hidden, true, id);
+	}
 	assert.equal(ui.element("conversation-empty").hidden, true);
 	ui.update({ snapshot: null });
 	assert.equal(ui.element("conversation-empty").hidden, false);
@@ -251,7 +258,8 @@ test("reply controls keep interruption actions available during thinking and sen
 			isOwner: true,
 		});
 		assert.equal(ui.element("reply-controls").hidden, false, status);
-		assert.equal(ui.element("task-controls").hidden, false, status);
+		assert.equal(ui.element("pause").hidden, false, status);
+		assert.equal(ui.element("take-over").hidden, false, status);
 		assert.equal(ui.element<HTMLButtonElement>("cancel").disabled, false, status);
 		assert.equal(ui.element<HTMLButtonElement>("pause").disabled, false, status);
 		assert.equal(ui.element<HTMLButtonElement>("edit").disabled, status !== "pending" && status !== "sending", status);
@@ -282,7 +290,7 @@ test("the reply text stays visible while it is being sent", (t) => {
 	assert.equal(ui.element("pending").hidden, true);
 });
 
-test("agent chat renders questions, answers, and events as distinct messages", (t) => {
+test("agent thread renders questions, answers, and events without a frame", (t) => {
 	const ui = setup(t);
 	ui.update({
 		task: {
@@ -297,8 +305,9 @@ test("agent chat renders questions, answers, and events as distinct messages", (
 		},
 		isOwner: true,
 	});
-	assert.equal(ui.element("agent-chat").hidden, false);
+	assert.equal(ui.element("thread").hidden, false);
 	assert.equal(ui.element("agent-empty").hidden, true);
+	assert.equal(ui.element("agent-messages").parentElement?.id, "envoy-thread");
 	const items = ui.element("agent-messages").querySelectorAll("li");
 	assert.equal(items.length, 3);
 	assert.equal(items[0]!.dataset.role, "agent");
@@ -316,6 +325,7 @@ test("answers send to the agent without rewriting the goal", async (t) => {
 	ui.update({ task: { ...task, status: "needs_user", detail: "Is Friday allowed?" }, isOwner: true });
 	const goal = ui.element<HTMLTextAreaElement>("goal");
 	assert.equal(goal.value, "Arrange a meeting");
+	assert.equal(ui.element("footer").hidden, false);
 	const send = ui.element<HTMLButtonElement>("answer-send");
 	assert.equal(send.disabled, true);
 	ui.setText("answer-text", "Yes, after 3.");
@@ -328,7 +338,7 @@ test("answers send to the agent without rewriting the goal", async (t) => {
 	assert.equal(goal.value, "Arrange a meeting");
 });
 
-test("agent chat hides from other tabs and stays read-only after the task ends", (t) => {
+test("agent history stays hidden from other tabs and read-only after the task ends", (t) => {
 	const ui = setup(t);
 	const chatting: TaskState = {
 		...task,
@@ -336,29 +346,75 @@ test("agent chat hides from other tabs and stays read-only after the task ends",
 		agentChat: [{ id: "q1", role: "agent", text: "Is Friday allowed?", createdAt: 1 }],
 	};
 	ui.update({ task: chatting, isOwner: false });
-	assert.equal(ui.element("agent-chat").hidden, true);
+	assert.equal(ui.element("agent-messages").querySelectorAll("li").length, 0);
+	assert.equal(ui.element("agent-empty").hidden, true);
+	assert.equal(ui.element("goal-toggle").hidden, true);
+	assert.equal(ui.element("footer").hidden, true);
 	ui.update({ task: { ...chatting, status: "completed" }, isOwner: true });
-	assert.equal(ui.element("agent-chat").hidden, false);
-	assert.equal(ui.element("answer").hidden, true);
+	assert.equal(ui.element("thread").hidden, false);
+	assert.equal(ui.element("footer").hidden, true);
 	ui.update({ task: { ...task, status: "completed" }, isOwner: true });
-	assert.equal(ui.element("agent-chat").hidden, true);
+	assert.equal(ui.element("thread").hidden, false);
+	assert.equal(ui.element("agent-empty").hidden, true);
+	assert.equal(ui.element("footer").hidden, true);
 });
 
-test("paused, ended, and unowned tasks keep recovery controls without reply actions", (t) => {
+test("header shows the goal with icon actions for an active task", (t) => {
+	const ui = setup(t);
+	ui.update({ task: { ...task, status: "waiting" }, isOwner: true });
+	assert.match(ui.element("task-status").textContent ?? "", /Waiting for a new message/);
+	assert.equal(ui.element("goal-toggle").hidden, false);
+	assert.equal(ui.element("goal-text").textContent, "Arrange a meeting");
+	assert.equal(ui.element("goal-toggle").getAttribute("aria-expanded"), "false");
+	assert.equal(ui.element("instructions").hidden, true);
+	assert.equal(ui.element("pause").hidden, false);
+	assert.equal(ui.element("take-over").hidden, false);
+	assert.equal(ui.element("resume").hidden, true);
+	assert.equal(ui.element("reconnect").hidden, true);
+	assert.equal(ui.element("delete").hidden, true);
+});
+
+test("goal toggle opens the editor and updating closes it", async (t) => {
+	const ui = setup(t);
+	ui.update({ task: { ...task, status: "waiting" }, isOwner: true });
+	const toggle = ui.element<HTMLButtonElement>("goal-toggle");
+	toggle.click();
+	assert.equal(toggle.getAttribute("aria-expanded"), "true");
+	assert.equal(ui.element("instructions").hidden, false);
+	assert.equal(ui.element("update-goal").hidden, false);
+	toggle.click();
+	assert.equal(toggle.getAttribute("aria-expanded"), "false");
+	assert.equal(ui.element("instructions").hidden, true);
+	toggle.click();
+	ui.setText("goal", "Arrange a meeting on Thursday");
+	ui.element<HTMLButtonElement>("update-goal").click();
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	assert.deepEqual(ui.actions, ["update-goal"]);
+	assert.deepEqual(ui.texts, ["Arrange a meeting on Thursday"]);
+	assert.equal(toggle.getAttribute("aria-expanded"), "false");
+	assert.equal(ui.element("instructions").hidden, true);
+});
+
+test("paused, ended, and unowned tasks keep recovery actions without reply actions", (t) => {
 	const ui = setup(t);
 	for (const status of ["waiting", "paused", "needs_user", "completed", "taken_over"] satisfies TaskStatus[]) {
 		ui.update({ task: { ...task, status }, isOwner: true });
 		assert.equal(ui.element("reply-controls").hidden, true, status);
-		assert.equal(ui.element("task-controls").hidden, false, status);
+		const runnable = status !== "completed" && status !== "taken_over";
+		assert.equal(ui.element("pause").hidden, !runnable || status === "paused", status);
+		assert.equal(ui.element("resume").hidden, status !== "paused" && status !== "needs_user", status);
 		assert.equal(
 			ui.element<HTMLButtonElement>("resume").disabled,
 			status !== "paused" && status !== "needs_user",
 			status,
 		);
+		assert.equal(ui.element("take-over").hidden, !runnable, status);
 		assert.equal(ui.element("delete").hidden, status !== "completed" && status !== "taken_over", status);
 	}
 	ui.update({ task: { ...task, status: "paused" }, isOwner: false });
 	assert.equal(ui.element("reconnect").hidden, false);
 	assert.equal(ui.element<HTMLButtonElement>("reconnect").disabled, false);
 	assert.equal(ui.element("reply-controls").hidden, true);
+	assert.equal(ui.element("pause").hidden, true);
+	assert.equal(ui.element("footer").hidden, true);
 });
