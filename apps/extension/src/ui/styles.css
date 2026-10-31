@@ -505,6 +505,11 @@ summary .hint {
 	background: var(--envoy-error);
 }
 
+.reconnect-btn {
+	width: 100%;
+	margin-top: 12px;
+}
+
 #envoy-agent-messages {
 	margin: 0;
 	padding: 0;

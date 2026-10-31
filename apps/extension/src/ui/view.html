@@ -46,13 +46,6 @@
 					<polygon points="6 4 20 12 6 20 6 4" />
 				</svg>
 			</button>
-			<button type="button" id="envoy-reconnect" class="icon-btn" aria-label="Reconnect" title="Reconnect" hidden>
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-					<polyline points="23 4 23 10 17 10" />
-					<polyline points="1 20 1 14 7 14" />
-					<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-				</svg>
-			</button>
 			<button type="button" id="envoy-take-over" class="icon-btn" aria-label="Take over" title="Take over" hidden>
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 					<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -115,6 +108,8 @@
 			<button type="button" id="envoy-cancel">Cancel reply</button>
 		</div>
 		<p id="envoy-agent-state" class="agent-state" role="status" hidden></p>
+		<p id="envoy-owner-hint" class="hint" role="status" hidden></p>
+		<button type="button" id="envoy-reconnect" class="primary reconnect-btn" hidden>Reconnect</button>
 		<p id="envoy-delete-hint" class="hint" hidden></p>
 	</section>
 	<footer id="envoy-footer" hidden>

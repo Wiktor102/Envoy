@@ -93,6 +93,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const reconnectButton = element<HTMLButtonElement>("#envoy-reconnect");
 	const takeoverButton = element<HTMLButtonElement>("#envoy-take-over");
 	const deleteButton = element<HTMLButtonElement>("#envoy-delete");
+	const ownerHint = element<HTMLElement>("#envoy-owner-hint");
 	const deleteHint = element<HTMLElement>("#envoy-delete-hint");
 	const error = element<HTMLElement>("#envoy-error");
 	const healthButton = element<HTMLButtonElement>("#envoy-health");
@@ -251,7 +252,6 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		goalToggle.disabled = busy || !active;
 		goalToggle.setAttribute("aria-expanded", String(goalEditorOpen));
 		goalText.textContent = task?.goal ?? "";
-		header.hidden = !task;
 		thread.hidden = !task;
 		thread.dataset.status = task?.status ?? "idle";
 
@@ -320,12 +320,20 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		pauseButton.disabled = busy || task?.status === "paused";
 		resumeButton.hidden = !owner || (task?.status !== "paused" && task?.status !== "needs_user");
 		resumeButton.disabled = busy || !currentChat || (task?.status !== "paused" && task?.status !== "needs_user");
-		reconnectButton.hidden = !(task?.status === "paused" && !owner && currentChat);
+		const showReconnect = task?.status === "paused" && !owner && currentChat;
+		reconnectButton.hidden = !showReconnect;
 		reconnectButton.disabled = busy;
 		takeoverButton.hidden = !owner || !active;
 		takeoverButton.disabled = busy || !active;
 		deleteButton.hidden = !task || active;
 		deleteButton.disabled = busy;
+		header.hidden =
+			!task ||
+			(goalToggle.hidden && pauseButton.hidden && resumeButton.hidden && takeoverButton.hidden && deleteButton.hidden);
+		ownerHint.hidden = !(task && !owner && active);
+		ownerHint.textContent = showReconnect
+			? "This task is paused. Reconnect to control it from this tab."
+			: "This task is controlled by another tab.";
 		deleteHint.hidden = deleteButton.hidden;
 		deleteHint.textContent =
 			"Check the conversation for any unconfirmed send before deleting this task." +

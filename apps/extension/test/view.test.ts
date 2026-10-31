@@ -424,6 +424,23 @@ test("agent state shows once and hides when it repeats the last Envoy message", 
 	assert.equal(ui.element("agent-state").textContent, "Paused. (Not connected to this tab.)");
 });
 
+test("unowned tasks explain who controls them and hide an empty header", (t) => {
+	const ui = setup(t);
+	ui.update({ task: { ...task, status: "paused" }, isOwner: false });
+	assert.equal(ui.element("header").hidden, true);
+	assert.equal(ui.element("owner-hint").hidden, false);
+	assert.equal(ui.element("owner-hint").textContent, "This task is paused. Reconnect to control it from this tab.");
+	assert.equal(ui.element("reconnect").hidden, false);
+	assert.equal(ui.element("reconnect").closest("#envoy-thread") !== null, true);
+	ui.update({ task: { ...task, status: "waiting" }, isOwner: false });
+	assert.equal(ui.element("header").hidden, true);
+	assert.equal(ui.element("owner-hint").hidden, false);
+	assert.equal(ui.element("owner-hint").textContent, "This task is controlled by another tab.");
+	ui.update({ task: { ...task, status: "waiting" }, isOwner: true });
+	assert.equal(ui.element("header").hidden, false);
+	assert.equal(ui.element("owner-hint").hidden, true);
+});
+
 test("paused, ended, and unowned tasks keep recovery actions without reply actions", (t) => {
 	const ui = setup(t);
 	for (const status of ["waiting", "paused", "needs_user", "completed", "taken_over"] satisfies TaskStatus[]) {
@@ -441,6 +458,7 @@ test("paused, ended, and unowned tasks keep recovery actions without reply actio
 		assert.equal(ui.element("delete").hidden, status !== "completed" && status !== "taken_over", status);
 	}
 	ui.update({ task: { ...task, status: "paused" }, isOwner: false });
+	assert.equal(ui.element("header").hidden, true);
 	assert.equal(ui.element("reconnect").hidden, false);
 	assert.equal(ui.element<HTMLButtonElement>("reconnect").disabled, false);
 	assert.equal(ui.element("reply-controls").hidden, true);
