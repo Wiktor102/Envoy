@@ -11,11 +11,13 @@ import type {
 	TaskControlAction,
 } from "@envoy/contracts";
 import {
+	INLINE_IMAGE_MIMES,
 	MAX_IMAGE_SIDE,
 	MAX_INLINE_MEDIA_CHARS,
 	MAX_REPLY_DELAY_SECONDS,
 	MAX_SNAPSHOT_IMAGES,
 	MAX_SNAPSHOT_MEDIA_CHARS,
+	MAX_TASK_TEXT_LENGTH,
 	MIN_REPLY_DELAY_SECONDS,
 } from "@envoy/contracts";
 import { MetaModelAdapter } from "./agent/meta-model.js";
@@ -49,11 +51,9 @@ function array(value: unknown, max: number): unknown[] {
 	return value;
 }
 
-const inlineMimes: readonly InlineImageMime[] = ["image/jpeg", "image/png", "image/webp"];
-
 function inlineMedia(value: unknown): InlineImageMedia {
 	const item = object(value);
-	if (typeof item.mime !== "string" || !inlineMimes.includes(item.mime as InlineImageMime)) return invalid();
+	if (typeof item.mime !== "string" || !INLINE_IMAGE_MIMES.includes(item.mime as InlineImageMime)) return invalid();
 	if (
 		typeof item.data !== "string" ||
 		!item.data.length ||
@@ -190,7 +190,7 @@ function startInput(value: unknown) {
 	const item = object(value);
 	return {
 		connectorId: string(item.connectorId),
-		goal: string(item.goal, 4000),
+		goal: string(item.goal, MAX_TASK_TEXT_LENGTH),
 		snapshot: snapshot(item.snapshot),
 		developerMode: optionalBoolean(item.developerMode),
 		replySettings: optionalReplySettings(item.replySettings),
@@ -205,7 +205,7 @@ function controlInput(value: unknown): { connectorId: string; taskId: string; ac
 		taskId: string(item.taskId),
 		action: item.action as TaskControlAction,
 	};
-	if (item.text !== undefined) result.text = string(item.text, 4000, true);
+	if (item.text !== undefined) result.text = string(item.text, MAX_TASK_TEXT_LENGTH, true);
 	return result;
 }
 

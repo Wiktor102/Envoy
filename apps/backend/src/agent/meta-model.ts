@@ -1,12 +1,11 @@
 import OpenAI from "openai";
 import sharp from "sharp";
 import type { AgentChatMessage, AgentDecision, ConversationSnapshot, ImageAttachment, TaskState } from "@envoy/contracts";
-import { forwardableImageSlots, MAX_IMAGE_SIDE } from "@envoy/contracts";
+import { forwardableImageSlots, hasControlCharacters, MAX_IMAGE_SIDE, MAX_TASK_TEXT_LENGTH } from "@envoy/contracts";
 import type { Agent, EvaluationReason } from "./agent.js";
 
 const MODEL_API_BASE_URL = "https://api.meta.ai/v1";
 const DEFAULT_MODEL = "muse-spark-1.3";
-const MAX_DECISION_TEXT = 4000;
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_FETCH_BYTES = 8_000_000;
 const MAX_REDIRECTS = 3;
@@ -269,10 +268,10 @@ function parseDecision(value: unknown): AgentDecision {
 		throw new Error("Invalid model decision");
 	}
 	if (!("text" in value) || typeof value.text !== "string") throw new Error("Invalid model decision");
-	if (value.action === "reply" && /[\u0000-\u001f\u007f\u2028\u2029]/u.test(value.text)) {
+	if (value.action === "reply" && hasControlCharacters(value.text)) {
 		throw new Error("Invalid model decision");
 	}
 	const text = value.text.trim();
-	if (!text || text.length > MAX_DECISION_TEXT) throw new Error("Invalid model decision");
+	if (!text || text.length > MAX_TASK_TEXT_LENGTH) throw new Error("Invalid model decision");
 	return { action: value.action, text };
 }

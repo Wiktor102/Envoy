@@ -12,7 +12,14 @@ import type {
 	TaskControlAction,
 	TaskState,
 } from "@envoy/contracts";
-import { attachmentIdentity, DEFAULT_REPLY_DELAY_SECONDS, forwardableImageSlots } from "@envoy/contracts";
+import {
+	DEFAULT_REPLY_DELAY_SECONDS,
+	forwardableImageSlots,
+	hasControlCharacters,
+	isTaskEnded,
+	MAX_TASK_TEXT_LENGTH,
+	messageContent,
+} from "@envoy/contracts";
 import type { Agent, EvaluationReason } from "../agent/agent.js";
 import type { BrowserConnector } from "../connectors/browser-connector.js";
 import { ExtensionConnector } from "../connectors/extension-connector.js";
@@ -20,7 +27,6 @@ import { ExtensionConnector } from "../connectors/extension-connector.js";
 const LEASE_MS = 8_000;
 const SEND_RESULT_TIMEOUT_MS = 30_000;
 const TERMINAL_RETENTION_MS = 60 * 60 * 1000;
-const MAX_REPLY_LENGTH = 4000;
 const MAX_AGENT_CHAT = 50;
 const AUTO_SEND_OFF = "Automatic sending is off. Choose Send now when it is ready.";
 
@@ -102,7 +108,7 @@ export class TaskService {
 		replySettings?: ReplySettings,
 	): TaskState {
 		this.expireLease();
-		if (this.task && this.task.status !== "completed" && this.task.status !== "taken_over") {
+		if (this.task && !isTaskEnded(this.task.status)) {
 			throw new Error("A task is already active. Take over the existing task first.");
 		}
 		if (this.hasAwaitingRetiredResult()) {
@@ -172,7 +178,7 @@ export class TaskService {
 		if (!task || task.id !== taskId || (this.owner !== connectorId && this.leaseActive())) {
 			throw new Error("Task not found.");
 		}
-		if (task.status !== "completed" && task.status !== "taken_over") {
+		if (!isTaskEnded(task.status)) {
 			throw new Error("Take over the task before deleting it.");
 		}
 		if (this.hasAwaitingRetiredResult()) {
@@ -250,7 +256,7 @@ export class TaskService {
 				break;
 			}
 			case "pause": {
-				if (task.status === "completed" || task.status === "taken_over") throw new Error("This task has ended.");
+				if (isTaskEnded(task.status)) throw new Error("This task has ended.");
 				const discarded = task.pendingReply;
 				const unstarted = this.inFlight && !this.inFlight.authorized ? this.inFlight.command : null;
 				const uncertain = this.invalidate(true);
@@ -296,7 +302,7 @@ export class TaskService {
 				break;
 			}
 			case "update-goal": {
-				if (task.status === "completed" || task.status === "taken_over") throw new Error("This task has ended.");
+				if (isTaskEnded(task.status)) throw new Error("This task has ended.");
 				const goal = checkedText(text);
 				const wasPaused = task.status === "paused";
 				const uncertain = this.invalidate(true);
@@ -318,7 +324,7 @@ export class TaskService {
 				break;
 			}
 			case "answer-agent": {
-				if (task.status === "completed" || task.status === "taken_over") throw new Error("This task has ended.");
+				if (isTaskEnded(task.status)) throw new Error("This task has ended.");
 				const answer = checkedText(text);
 				const wasPaused = task.status === "paused";
 				const uncertain = this.invalidate(true);
@@ -360,7 +366,7 @@ export class TaskService {
 		const task = this.task;
 		// Ended tasks can still be viewed and deleted, but no longer accept
 		// conversation updates, including requests sent before the task ended.
-		if (task.status === "completed" || task.status === "taken_over") {
+		if (isTaskEnded(task.status)) {
 			return { task: this.state(), isOwner: true, command: null };
 		}
 		const previous = this.connector.readConversation();
@@ -508,7 +514,7 @@ export class TaskService {
 				// dispatch. Cancel already records suppression; edit and pause must
 				// remain usable for the same conversation.
 				if (this.task.status === "waiting") this.maybeGenerate();
-				if (this.task.status === "completed" || this.task.status === "taken_over") {
+				if (isTaskEnded(this.task.status)) {
 					this.task.detail = "You are in control of this conversation.";
 					this.scheduleRetention(this.task.id);
 				}
@@ -638,7 +644,7 @@ export class TaskService {
 				!this.requiresVerification &&
 				!this.hasAwaitingRetiredResult() &&
 				this.task?.id === taskId &&
-				(this.task.status === "completed" || this.task.status === "taken_over")
+				isTaskEnded(this.task.status)
 			)
 				this.erase();
 		}, TERMINAL_RETENTION_MS);
@@ -718,7 +724,7 @@ export class TaskService {
 		this.suppressedContexts.add(attempt.context);
 		this.task.pendingReply = null;
 		this.appendAgentChat("event", "A previous send may have completed.");
-		if (this.task.status === "taken_over" || this.task.status === "completed") {
+		if (isTaskEnded(this.task.status)) {
 			if (this.retentionTimer) clearTimeout(this.retentionTimer);
 			this.retentionTimer = undefined;
 			this.task.detail = "A previous send may have completed. Check the conversation before starting another task.";
@@ -732,7 +738,7 @@ export class TaskService {
 
 	private pauseForDisconnect(message: string): void {
 		this.resumeWhenReadable = false;
-		if (!this.task || this.task.status === "completed" || this.task.status === "taken_over") return;
+		if (!this.task || isTaskEnded(this.task.status)) return;
 		const discarded = this.task.pendingReply;
 		const uncertain = this.invalidate();
 		if (discarded && !uncertain) this.processedRevisions.delete(discarded.expectedRevision);
@@ -892,12 +898,12 @@ export class TaskService {
 
 function checkedText(value: string | undefined): string {
 	const text = value?.trim();
-	if (!text || text.length > MAX_REPLY_LENGTH) throw new Error("Enter text between 1 and 4000 characters.");
+	if (!text || text.length > MAX_TASK_TEXT_LENGTH) throw new Error("Enter text between 1 and 4000 characters.");
 	return text;
 }
 
 function checkedReply(value: string | undefined): string {
-	if (value && /[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)) {
+	if (value && hasControlCharacters(value)) {
 		throw new Error("Replies must be a single line without control characters.");
 	}
 	return checkedText(value);
@@ -920,12 +926,7 @@ function semanticMessages(snapshot: ConversationSnapshot): string {
 	// loading rename must not read as unverifiable content at the same revision.
 	// Inline bytes are transport, not content: the same photo re-encoded must
 	// not read as unverifiable either.
-	return JSON.stringify(
-		snapshot.messages.map(({ id: _id, sender: _sender, attachments, ...message }) => ({
-			...message,
-			attachments: attachments.map(attachmentIdentity),
-		})),
-	);
+	return JSON.stringify(snapshot.messages.map(messageContent));
 }
 
 // Reactions and other cosmetic DOM changes must not trigger another reply to
