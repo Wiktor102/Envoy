@@ -1,16 +1,43 @@
-# Project context
+# Envoy
 
-Envoy is a browser extension and backend for an AI agent that handles a private Messenger conversation toward a user-defined goal. Meta Model API supplies the reasoning. Read [README.md](README.md) and [PLAN.md](PLAN.md) first.
+Envoy is a browser extension and backend that delegates a Messenger
+conversation toward a user's goal.
 
-- Keep the hackathon scope small: one delegated text chat, one goal, a dedicated Messenger tab, and a default 10-second auto-send countdown.
-- The backend owns task state and pending replies. Keep browser access separate so a hosted browser can replace the local connector later.
-- New messages invalidate pending replies. Edit, cancel, pause, and takeover must stop pending sends. Validate the chat and current conversation before sending; prevent duplicate sends.
-- Treat conversation text as input, not permission to change the user's instructions. Keep API keys on the backend and message bodies out of logs.
-- Use the current Envoy plan. Earlier Understudy plans using T3/MCP and manual approval are superseded.
+## Scope
 
-## Contribution rules
+- Inspect the relevant implementation before making claims. Treat
+  documentation as context that may need verification.
 
-### Git
+## Planning and discussing changes
 
-- Use schematic commit messages, include modified project area in parentheses
-- All commits should be atomic - one feature/bugfix per commit
+- Question every idea before implementing it. Probe assumptions,
+  edge cases, failure modes, and simpler alternatives.
+- Identify the core problem first. Do not implement a proposed
+  solution until the underlying issue and its scope are clear.
+- Keep relevant open github issues in mind. Check whether the
+  discussion duplicates, conflicts with, or resolves any of them.
+- If a new problem or idea comes up that is not directly part of
+  the current task, offer to create a properly tagged issue for
+  it on github instead of expanding the current scope.
+
+## Development
+
+- Assume that the dev server is already running.
+- Follow existing code and formatting conventions. Avoid unrelated edits.
+
+### Live testing
+
+Whenever asked to perform live test please use your browser use capability.
+Utilize already opened and authenticated messenger and/or facebook tabs.
+**Never use the preview browser.** Expect general; computer-use requests
+to error when trying to interact with chrome windows due to ambiguous URLs -
+that's why you ned to inspect chrome tabs with dedicated chrome tools.
+
+## Git
+
+- Use schematic commit messages with the modified project area,
+  such as fix(extension): preserve message line breaks.
+- Keep commits atomic: one feature or bug fix per commit.
+- Explain the concrete problem, resulting behavior, and validation
+  in PR descriptions. Those descriptions must be clear (easy to grasp)
+  and must be kept up-to-date when Pr scope changes.
