@@ -874,6 +874,59 @@ function readDirection(boundary: Element): ConversationMessage["direction"] {
 	return directions.size === 1 ? [...directions][0]! : "unknown";
 }
 
+// A 1-1 header name is an unverified display string, never an identity proof.
+// An unaccepted message request matches this shape exactly, so the name stays
+// attribution-only metadata: shown as-is, sent to the model as context, and
+// never part of the revision or pre-send validation.
+function readParticipantName(main: HTMLElement): string | null {
+	// The header lives outside the message table, inside the conversation
+	// region that contains it. Never read names from message-table content:
+	// the profile card at the start of scrollable history is unstable.
+	const regions = [...main.querySelectorAll<HTMLElement>('[role="region"]')].filter(
+		(region) => isVisible(region) && region.querySelector('[data-scope="messages_table"]'),
+	);
+	if (regions.length !== 1) return null;
+	const region = regions[0]!;
+	const candidates = [...region.querySelectorAll<HTMLElement>('a[role="link"] h3')].filter(
+		(candidate) => !candidate.closest('[data-scope="messages_table"]') && isVisible(candidate),
+	);
+	if (candidates.length !== 1) return null;
+	const name = normalizedText(candidates[0]!.textContent);
+	if (!name || name.length > 200) return null;
+	// Corroborate against the region-label heading, a sibling of the region
+	// referenced via aria-labelledby. The heading level differs by site (h3 on
+	// Facebook, h2 on Messenger), so match the text pattern, never the level.
+	// Generated IDs are resolved, never matched by value.
+	const labelledby = region.getAttribute("aria-labelledby")?.trim().split(/\s+/) ?? [];
+	for (const id of labelledby) {
+		if (!id) continue;
+		const heading = document.getElementById(id);
+		if (
+			!heading ||
+			!main.contains(heading) ||
+			heading.parentElement !== region.parentElement ||
+			!heading.matches("h1, h2, h3, h4, h5, h6, [role='heading']") ||
+			!isVisible(heading as HTMLElement)
+		)
+			continue;
+		// The labelled name must equal the header name exactly. Nicknames and
+		// renames show whatever Messenger shows; a mismatch stays empty.
+		const labelled = normalizedText(heading.textContent).match(/^(?:Conversation with|Konwersacja z:)\s+(.+)$/);
+		if (labelled?.[1] === name) return name;
+	}
+	return null;
+}
+
+// A missing or unreadable header must never break message reading.
+function readParticipantHeader(main: HTMLElement): readonly string[] {
+	try {
+		const name = readParticipantName(main);
+		return name ? [name] : [];
+	} catch {
+		return [];
+	}
+}
+
 function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messages"] {
 	const boundaries = rendered.map((message) => message.boundary);
 	const texts = rendered.map(({ element, images, videos, stickers, unsent, standaloneLike }) =>
@@ -901,6 +954,11 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 			id: messageId(element),
 			text: texts[index]!,
 			direction: boundary && (unique || matchesLabel) ? readDirection(boundary) : "unknown",
+			// The raw boundary label, kept only where direction is attributed.
+			// Same gate, no You/Ty normalization: direction already carries
+			// that, and the label is viewer-relative. Null where the gate fails
+			// or the label is missing or malformed.
+			sender: boundary && (unique || matchesLabel) ? (readLabeledMessage(boundary)?.sender ?? null) : null,
 			replyTo: unique ? readReply(boundary) : null,
 			attachments: [
 				...images.map((image) => imageAttachment(image.querySelector<HTMLImageElement>("img"))),
@@ -961,6 +1019,9 @@ interface ConversationCapture {
 	rendered: RenderedMessage[];
 	messages: ConversationSnapshot["messages"];
 	imageState: string[][];
+	// Attribution-only metadata. A rename must not invalidate a pending reply,
+	// so participants stay out of the revision and the currency check below.
+	participants: readonly string[];
 }
 
 function captureConversation(): ConversationCapture {
@@ -970,18 +1031,30 @@ function captureConversation(): ConversationCapture {
 	const main = getMessageMain();
 	const rendered = getRenderedMessages(main);
 	if (!isAtLatestMessages(main, rendered)) throw new ConversationUnavailableError("not-latest");
-	return { chatId, main, rendered, messages: readMessages(rendered), imageState: imageFingerprint(rendered) };
+	return {
+		chatId,
+		main,
+		rendered,
+		messages: readMessages(rendered),
+		imageState: imageFingerprint(rendered),
+		participants: readParticipantHeader(main),
+	};
 }
 
 function captureIsCurrent(capture: ConversationCapture): boolean {
 	try {
 		if (documentHasNavigated() || getChatId() !== capture.chatId || getMessageMain() !== capture.main) return false;
 		const current = getRenderedMessages(capture.main);
+		// Participants are deliberately not compared: a display-name change is
+		// not a conversation change, and must neither invalidate a pending
+		// reply nor fail this check. Sender labels are stripped the same way:
+		// a loading rename must not fail this check either. Element identity
+		// above already covers what node IDs would add.
 		return (
 			isAtLatestMessages(capture.main, current) &&
 			current.length === capture.rendered.length &&
 			capture.rendered.every((item, index) => current[index]?.element === item.element) &&
-			JSON.stringify(readMessages(current)) === JSON.stringify(capture.messages) &&
+			JSON.stringify(contentOf(readMessages(current))) === JSON.stringify(contentOf(capture.messages)) &&
 			JSON.stringify(imageFingerprint(current)) === JSON.stringify(capture.imageState)
 		);
 	} catch {
@@ -1006,7 +1079,15 @@ async function readCapturedConversation(): Promise<{ capture: ConversationCaptur
 	if (!captureIsCurrent(capture)) {
 		throw new ConversationUnavailableError(documentHasNavigated() ? "navigated" : "changed");
 	}
-	return { capture, snapshot: { chatId: capture.chatId, revision, messages: capture.messages } };
+	return {
+		capture,
+		snapshot: {
+			chatId: capture.chatId,
+			revision,
+			messages: capture.messages,
+			participants: capture.participants,
+		},
+	};
 }
 
 function isVisible(element: HTMLElement): boolean {

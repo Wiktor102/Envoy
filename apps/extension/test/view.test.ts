@@ -25,7 +25,18 @@ assets.deregister();
 const snapshot: NonNullable<ControllerState["snapshot"]> = {
 	chatId: "chat-1",
 	revision: "revision-1",
-	messages: [{ id: "message-1", direction: "incoming", text: "Hello", attachments: [], reactions: [], replyTo: null }],
+	messages: [
+		{
+			id: "message-1",
+			direction: "incoming",
+			sender: null,
+			text: "Hello",
+			attachments: [],
+			reactions: [],
+			replyTo: null,
+		},
+	],
+	participants: [],
 };
 
 const task: TaskState = {
@@ -126,6 +137,42 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 		},
 	};
 }
+
+test("diagnostics show the chat name and use it for incoming preview senders", (t) => {
+	const ui = setup(t);
+	const senders = () => [...ui.element("conversation").querySelectorAll("li strong")].map((sender) => sender.textContent);
+	assert.equal(ui.element("chat-name").hidden, true);
+	assert.deepEqual(senders(), ["Other person"]);
+	ui.update({ snapshot: { ...snapshot, participants: ["Wiktor Golicz"] } });
+	assert.equal(ui.element("chat-name").hidden, false);
+	assert.equal(ui.element("chat-name").textContent, "Chat name: Wiktor Golicz");
+	assert.deepEqual(senders(), ["Wiktor Golicz"]);
+	ui.update({ snapshot: { ...snapshot, participants: [] } });
+	assert.equal(ui.element("chat-name").hidden, true);
+	assert.equal(ui.element("chat-name").textContent, "");
+	assert.deepEqual(senders(), ["Other person"]);
+	ui.update({ snapshot: null });
+	assert.equal(ui.element("chat-name").hidden, true);
+});
+
+test("incoming preview shows the per-message sender where known", (t) => {
+	const ui = setup(t);
+	const senders = () => [...ui.element("conversation").querySelectorAll("li strong")].map((sender) => sender.textContent);
+	const first = snapshot.messages[0]!;
+	ui.update({
+		snapshot: {
+			...snapshot,
+			revision: "revision-2",
+			participants: ["Chat Name"],
+			messages: [
+				{ ...first, id: "message-1", sender: "Wiktor testowy" },
+				{ ...first, id: "message-2", direction: "outgoing", text: "Hi", sender: "Ty" },
+				{ ...first, id: "message-3", direction: "unknown", text: "?", sender: null },
+			],
+		},
+	});
+	assert.deepEqual(senders(), ["Wiktor testowy", "You", "Unknown sender"]);
+});
 
 test("setup shows the start form while the thread and footer stay hidden", (t) => {
 	const ui = setup(t);

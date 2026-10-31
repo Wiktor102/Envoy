@@ -857,7 +857,9 @@ function checkedReply(value: string | undefined): string {
 }
 
 function semanticMessages(snapshot: ConversationSnapshot): string {
-	return JSON.stringify(snapshot.messages.map(({ id: _id, ...message }) => message));
+	// Sender labels are attribution-only metadata outside the revision. A
+	// loading rename must not read as unverifiable content at the same revision.
+	return JSON.stringify(snapshot.messages.map(({ id: _id, sender: _sender, ...message }) => message));
 }
 
 // Reactions and other cosmetic DOM changes must not trigger another reply to

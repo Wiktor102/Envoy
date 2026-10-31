@@ -20,6 +20,7 @@ function deferred<T>() {
 const initialSnapshot: ConversationSnapshot = {
 	chatId: "chat-1",
 	revision: "revision-1",
+	participants: [],
 	messages: [
 		{
 			id: "message-1",

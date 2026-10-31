@@ -53,6 +53,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const developerToggle = element<HTMLButtonElement>("#envoy-developer-mode");
 	const developerDetails = element<HTMLElement>("#envoy-developer-details");
 	const chatId = element<HTMLElement>("#envoy-chat-id");
+	const chatName = element<HTMLElement>("#envoy-chat-name");
 	const conversationStatus = element<HTMLElement>("#envoy-conversation-status");
 	const conversationNotice = element<HTMLElement>("#envoy-conversation-notice");
 	const conversation = element<HTMLOListElement>("#envoy-conversation");
@@ -181,16 +182,26 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	function renderConversation() {
 		const snapshot = state.snapshot;
 		chatId.textContent = snapshot ? `Chat: ${snapshot.chatId}` : "No conversation selected.";
+		// Unverified header display string. Hidden when the header is missing
+		// or ambiguous; never a verified-person claim.
+		const name = snapshot?.participants[0] ?? null;
+		chatName.textContent = name ? `Chat name: ${name}` : "";
+		chatName.hidden = !name;
 		conversationStatus.textContent = state.conversationStatus;
 		conversationNotice.textContent = snapshot ? "" : state.conversationStatus;
 		conversationNotice.hidden = Boolean(snapshot);
 		conversationEmpty.hidden = Boolean(snapshot?.messages.length);
-		const key = snapshot ? JSON.stringify([snapshot.chatId, snapshot.revision]) : null;
+		const key = snapshot ? JSON.stringify([snapshot.chatId, snapshot.revision, snapshot.participants]) : null;
 		if (key === renderedConversation) return;
 		renderedConversation = key;
 		conversation.replaceChildren();
 		if (!snapshot) return;
 
+		// In a 1-1 chat the incoming side is the single named participant.
+		// Groups and ambiguous headers leave participants empty, keeping the
+		// generic label. A known per-message label names that bubble's sender
+		// instead; it is display data, never a verified identity.
+		const incomingLabel = snapshot.participants[0] ?? "Other person";
 		for (const message of snapshot.messages.slice(-5)) {
 			const item = document.createElement("li");
 			item.dataset.direction = message.direction;
@@ -199,7 +210,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 				message.direction === "outgoing"
 					? "You"
 					: message.direction === "incoming"
-						? "Other person"
+						? (message.sender ?? incomingLabel)
 						: message.direction === "system"
 							? "System"
 							: "Unknown sender";
