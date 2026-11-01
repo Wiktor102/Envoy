@@ -636,8 +636,16 @@ function isMessengerPhotoLink(anchor: HTMLAnchorElement): boolean {
 // glyph instead.
 function isGifLink(viewer: HTMLElement): boolean {
 	if (!viewer.matches("a[href]") || !isMessengerPhotoLink(viewer as HTMLAnchorElement)) return false;
-	const image = viewer.querySelector("img[alt]");
+	const image = gifLinkImage(viewer);
 	return image !== null && isGifLabel(image.getAttribute("alt") ?? "");
+}
+
+// A GIF link can render several images, e.g. a static preview beside the
+// animated render. Prefer the image whose alt names the format so the
+// classification and the forwarded URL never depend on DOM order.
+function gifLinkImage(viewer: HTMLElement): HTMLImageElement | null {
+	const images = [...viewer.querySelectorAll("img")];
+	return images.find((image) => isGifLabel(image.getAttribute("alt") ?? "")) ?? images[0] ?? null;
 }
 
 function isGifViewer(viewer: HTMLElement): boolean {
@@ -1011,7 +1019,8 @@ function gifAttachment(viewer: HTMLElement): {
 } {
 	// An https render identifies the GIF for the backend fetch. Local renders
 	// inline below; animated previews forward their opening frame as a still.
-	const image = viewer.querySelector("img");
+	// Multi-image links resolve to the GIF render, never DOM order.
+	const image = gifLinkImage(viewer) ?? viewer.querySelector("img");
 	const url = remoteSourceUrl(image?.currentSrc) ?? remoteSourceUrl(image?.getAttribute("src"));
 	return { type: "gif", url, description: null, media: null };
 }
@@ -1240,13 +1249,14 @@ async function attachInlineMedia(rendered: RenderedMessage[], messages: Conversa
 		let position = 0;
 		for (const viewer of images) {
 			const slot = position++;
-			const image = viewer.querySelector("img");
+			const gif = isGifViewer(viewer);
+			const image = gif ? (gifLinkImage(viewer) ?? viewer.querySelector("img")) : viewer.querySelector("img");
 			if (!image) continue;
 			const source = imageSource(image);
 			// Animated GIF buttons and previews inline their local renders
 			// below; only photos skipped GIF handling before.
 			if (!isRemoteSource(source) && !parseInlineData(source) && !source.startsWith("blob:")) continue;
-			candidates.push({ message, position: slot, kind: isGifViewer(viewer) ? "gif" : "image", image });
+			candidates.push({ message, position: slot, kind: gif ? "gif" : "image", image });
 		}
 		for (const viewer of videos) {
 			const slot = position++;
@@ -1462,8 +1472,10 @@ function imageFingerprint(rendered: RenderedMessage[]): string[][] {
 		const reply = boundary && findReplyButton(boundary);
 		return [
 			...images.flatMap((viewer) => {
-				const image = viewer.querySelector<HTMLImageElement>("img");
-				return [viewer.getAttribute("href") ?? "", imageSource(image)];
+				// A GIF link can render several images; track each so swapping
+				// the animated render invalidates even when the others stay.
+				const rendered = isGifViewer(viewer) ? [...viewer.querySelectorAll("img")] : [viewer.querySelector("img")];
+				return [viewer.getAttribute("href") ?? "", ...rendered.map((image) => imageSource(image))];
 			}),
 			...videos.flatMap((viewer) => {
 				const video = viewer.matches("video") ? viewer : viewer.querySelector<HTMLVideoElement>("video");

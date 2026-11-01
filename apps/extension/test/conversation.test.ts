@@ -2485,6 +2485,30 @@ test("keeps quoted photos type-only while inlining message photos", async () => 
 	}
 });
 
+test("prefers the GIF render in multi-image links regardless of order", async () => {
+	const dom = setup();
+	try {
+		const cat = (id: string) =>
+			`<div data-scope="messages_table" data-message-id="${id}" aria-roledescription="wiadomość" aria-label="O 21:29, Alex"><a href="/messenger_media/?attachment_id=1"><img alt="" src="https://example.test/static"><img alt="Cat Fall GIF cat, fall" src="https://example.test/cat"></a></div>`;
+		const reversed = (id: string) =>
+			`<div data-scope="messages_table" data-message-id="${id}" aria-roledescription="wiadomość" aria-label="O 21:29, Alex"><a href="/messenger_media/?attachment_id=1"><img alt="Cat Fall GIF cat, fall" src="https://example.test/cat"><img alt="" src="https://example.test/static"></a></div>`;
+		for (const fixture of [cat("g1"), reversed("g1")]) {
+			setMessages(fixture);
+			const snapshot = await messengerChatAdapter.readConversation();
+			assert.deepEqual(snapshot.messages[0]!.attachments, [
+				{ type: "gif", url: "https://example.test/cat", description: null, media: null },
+			]);
+		}
+		// Swapping the animated render invalidates even when the static one stays.
+		setMessages(cat("g1"));
+		const before = await messengerChatAdapter.readConversation();
+		setMessages(cat("g1").replace("https://example.test/cat", "https://example.test/other-cat"));
+		assert.notEqual((await messengerChatAdapter.readConversation()).revision, before.revision);
+	} finally {
+		dom.window.close();
+	}
+});
+
 test("inlines local GIF renders while keeping remote GIF links fetchable", async () => {
 	const dom = setup();
 	const restoreImage = installImageStub({ "*": { width: 100, height: 80 } });
