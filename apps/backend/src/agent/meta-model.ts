@@ -110,17 +110,24 @@ export class MetaModelAdapter implements Agent {
 		try {
 			completion = await complete();
 		} catch (error) {
-			// Status, class, and network cause only: bodies may include
-			// request data.
+			// Status, class, and network cause chain only: bodies may include
+			// request data. Transports nest: undici's outer "fetch failed"
+			// carries the specific error in its own cause.
 			const failure = error as {
 				status?: number;
-				cause?: { code?: string; message?: string };
+				cause?: unknown;
 				constructor?: { name?: string };
 			};
 			const status = failure?.status ?? "unknown";
 			const kind = failure?.constructor?.name ?? "unknown";
-			const cause = failure?.cause;
-			const causedBy = cause ? ` caused by ${cause.code ?? "?"}: ${(cause.message ?? "?").slice(0, 160)}` : "";
+			const chain: string[] = [];
+			let current: unknown = failure?.cause;
+			while (current instanceof Error && chain.length < 3) {
+				const code = (current as { code?: string }).code ?? "?";
+				chain.push(`${code}: ${current.message.slice(0, 160)}`);
+				current = (current as { cause?: unknown }).cause;
+			}
+			const causedBy = chain.length ? ` caused by ${chain.join("; caused by ")}` : "";
 			debugMedia(`request failed: status ${status} (${kind})${causedBy}`);
 			// The chat endpoint may not accept video blocks. Fall back to
 			// evaluating with the clips presence-only instead of failing the

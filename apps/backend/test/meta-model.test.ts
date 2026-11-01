@@ -856,7 +856,11 @@ test("the media debug log records the connection cause without request data", as
 	console.info = (line: string) => {
 		lines.push(line);
 	};
-	const socketError = Object.assign(new Error("socket hang up"), { code: "UND_ERR_SOCKET" });
+	// Undici wraps the transport error: an outer "fetch failed" whose cause
+	// carries the specific network code.
+	const socketError = Object.assign(new Error("fetch failed"), {
+		cause: Object.assign(new Error("socket hang up"), { code: "UND_ERR_SOCKET" }),
+	});
 	globalThis.fetch = (async (input: any) => {
 		const url = String(input instanceof Request ? input.url : input);
 		if (url === "https://api.meta.ai/v1/chat/completions") throw socketError;
