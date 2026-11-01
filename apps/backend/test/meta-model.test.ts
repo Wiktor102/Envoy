@@ -209,6 +209,7 @@ test("the Meta request marks unverified history and attachments without sending 
 			sender: null,
 			text: "What about this?",
 			unsent: false,
+			edited: null,
 			attachments: [{ type: "image" }, { type: "video" }, { type: "sticker" }],
 			replyTo: { text: null, context: null, attachments: [{ type: "image" }, { type: "sticker" }] },
 		});
@@ -517,6 +518,62 @@ test("the Meta request includes the agent conversation alongside instructions", 
 		assert.doesNotMatch(body.messages[2].content, /Is Friday allowed\?/);
 		assert.doesNotMatch(body.messages[2].content, /Yes, after 3\./);
 		assert.match(body.messages[0].content, /do not repeat answered questions/);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the Meta request marks edited messages and explains corrections", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	let body: any;
+	globalThis.fetch = async (input, init) => {
+		body = await new Request(input, init).json();
+		return new Response(
+			JSON.stringify({ choices: [{ message: { role: "assistant", content: '{"action":"wait"}' } }] }),
+			{
+				status: 200,
+				headers: { "content-type": "application/json" },
+			},
+		);
+	};
+	try {
+		await new MetaModelAdapter().run(
+			{
+				...task,
+				agentChat: [
+					{
+						id: "edit-1",
+						role: "event",
+						text: "An incoming message was corrected (not a new message).",
+						body: "Previous text: alpha\nCurrent text: beta",
+						createdAt: 1,
+					},
+				],
+			},
+			{
+				...conversation,
+				messages: [
+					{ ...conversation.messages[0], edited: true },
+					{ ...conversation.messages[0], id: "node-2", edited: false },
+					{ ...conversation.messages[0], id: "node-3", edited: null },
+				],
+			},
+			"message_edited",
+		);
+		const content = JSON.parse(body.messages[2].content);
+		assert.deepEqual(
+			content.conversation.map(({ edited }: { edited: boolean | null }) => edited),
+			[true, false, null],
+		);
+		assert.match(body.messages[1].content, /Evaluation reason: message_edited/);
+		assert.match(body.messages[1].content, /Previous text: alpha/);
+		assert.match(body.messages[1].content, /Current text: beta/);
+		assert.match(body.messages[0].content, /correction to one existing message, not a new message/);
+		assert.match(body.messages[0].content, /previous text is unknown, so do not guess it/);
 	} finally {
 		globalThis.fetch = previousFetch;
 		if (previousKey === undefined) delete process.env.MODEL_API_KEY;

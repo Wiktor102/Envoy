@@ -73,6 +73,10 @@ export class TaskService {
 	private generation: AbortController | null = null;
 	// Retain the event through temporary unreadable views or retired-send checks.
 	private evaluationReason: EvaluationReason = "new_message";
+	// Last-seen plain texts by stable ID, for edit detection. Dies with the
+	// task; cleared on delete/expire. Entries for scrolled-out messages are
+	// kept; ambiguous duplicates are dropped fail-closed.
+	private readonly lastSeenTexts = new Map<string, string>();
 	private inFlight: Attempt | null = null;
 	private readonly attempts = new Map<string, Attempt>();
 	private readonly processedRevisions = new Set<string>();
@@ -148,6 +152,8 @@ export class TaskService {
 			agentChat: [],
 		};
 		this.touch();
+		this.lastSeenTexts.clear();
+		recordSeenTexts(this.lastSeenTexts, snapshot);
 		this.evaluationReason = "task_started";
 		this.maybeGenerate();
 		return this.state()!;
@@ -164,6 +170,9 @@ export class TaskService {
 		this.resumeWhenReadable = false;
 		this.owner = connectorId;
 		this.connector.updateConversation(structuredClone(snapshot));
+		// Refresh the baseline without emitting: edits made while disconnected
+		// surface as current text on resume, not as new corrections.
+		recordSeenTexts(this.lastSeenTexts, snapshot);
 		this.touch();
 		// Preserve a warning about an uncertain send until the user has seen it.
 		this.task.detail = this.requiresVerification
@@ -392,8 +401,15 @@ export class TaskService {
 			this.leaseUntil = 0;
 			return { task: this.state(), isOwner: true, command: null };
 		}
+		// Diff plain texts by stable ID before recording this snapshot. Each
+		// observed correction is emitted once, as an agent-chat event carrying
+		// before/after text; first sight of an already-edited message has no
+		// previous version and is labeled by its edited flag alone.
+		const edits = findEdits(this.lastSeenTexts, copy);
+		for (const edit of edits) this.appendEditEvent(edit);
 		if (previous && previous.revision !== copy.revision) {
-			if (!["paused", "needs_user"].includes(task.status)) this.evaluationReason = "new_message";
+			if (!["paused", "needs_user"].includes(task.status))
+				this.evaluationReason = edits.length ? "message_edited" : "new_message";
 			// After authorization, a new revision can be the outgoing bubble
 			// itself. Keep the attempt until its explicit report arrives.
 			if (!(task.status === "sending" && this.inFlight?.authorized)) {
@@ -410,6 +426,7 @@ export class TaskService {
 			}
 		}
 		this.connector.updateConversation(copy);
+		recordSeenTexts(this.lastSeenTexts, copy);
 		if (this.resumeWhenReadable) {
 			this.resumeWhenReadable = false;
 			if (task.status === "paused" && !this.requiresVerification && !this.inFlight) {
@@ -577,6 +594,28 @@ export class TaskService {
 		}
 	}
 
+	private appendEditEvent(edit: ObservedEdit): void {
+		const who =
+			edit.direction === "incoming"
+				? edit.sender
+					? `incoming message from ${edit.sender}`
+					: "incoming message"
+				: edit.direction === "outgoing"
+					? "outgoing message"
+					: edit.direction === "unknown"
+						? "message with unknown sender"
+						: "message";
+		const article = /^[aeiou]/i.test(who) ? "An" : "A";
+		// Untrusted conversation history, like the conversation itself. The
+		// current text in the snapshot is the sender's statement; the previous
+		// text is only what it said before.
+		this.appendAgentChat(
+			"event",
+			`${article} ${who} was corrected (not a new message).`,
+			`Previous text: ${edit.before}\nCurrent text: ${edit.after}`,
+		);
+	}
+
 	private erase(): void {
 		this.invalidate();
 		if (this.leaseTimer) clearTimeout(this.leaseTimer);
@@ -594,6 +633,7 @@ export class TaskService {
 		this.processedRevisions.clear();
 		this.suppressedRevisions.clear();
 		this.suppressedContexts.clear();
+		this.lastSeenTexts.clear();
 		this.requiresVerification = false;
 		this.resumeWhenReadable = false;
 		this.autoCountdown = null;
@@ -922,4 +962,65 @@ function textContext(snapshot: ConversationSnapshot): string {
 		snapshot.messages.map(({ direction, text, replyTo, unsent }) => ({ direction, text, replyTo, unsent })),
 	);
 	return createHash("sha256").update(contents).digest("hex");
+}
+
+type ObservedEdit = {
+	before: string;
+	after: string;
+	direction: ConversationMessage["direction"];
+	sender: string | null;
+};
+
+function stableKey(message: ConversationMessage): string | null {
+	const stable = message.stableId?.trim();
+	return stable ? stable : null;
+}
+
+// Plain text messages only. Captions and attachment edits were not tested,
+// so messages with attachments, withdrawals, and system events are never
+// matched for before/after text.
+function trackable(message: ConversationMessage): string | null {
+	const stable = stableKey(message);
+	if (!stable || message.attachments.length || message.unsent || message.direction === "system") return null;
+	return stable;
+}
+
+function stableCounts(snapshot: ConversationSnapshot): Map<string, number> {
+	const counts = new Map<string, number>();
+	for (const message of snapshot.messages) {
+		const stable = stableKey(message);
+		if (!stable) continue;
+		counts.set(stable, (counts.get(stable) ?? 0) + 1);
+	}
+	return counts;
+}
+
+function findEdits(lastSeen: ReadonlyMap<string, string>, snapshot: ConversationSnapshot): ObservedEdit[] {
+	const counts = stableCounts(snapshot);
+	const edits: ObservedEdit[] = [];
+	for (const message of snapshot.messages) {
+		const stable = trackable(message);
+		if (!stable || counts.get(stable) !== 1) continue;
+		const before = lastSeen.get(stable);
+		if (before === undefined || before === message.text) continue;
+		edits.push({ before, after: message.text, direction: message.direction, sender: message.sender ?? null });
+	}
+	return edits;
+}
+
+function recordSeenTexts(lastSeen: Map<string, string>, snapshot: ConversationSnapshot): void {
+	const counts = stableCounts(snapshot);
+	for (const message of snapshot.messages) {
+		const stable = stableKey(message);
+		if (!stable || counts.get(stable) !== 1) {
+			if (stable) lastSeen.delete(stable);
+			continue;
+		}
+		const tracked = trackable(message);
+		if (!tracked) {
+			lastSeen.delete(stable);
+			continue;
+		}
+		lastSeen.set(tracked, message.text);
+	}
 }

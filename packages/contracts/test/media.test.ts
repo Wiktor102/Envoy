@@ -8,6 +8,8 @@ const media = { mime: "image/jpeg" as const, data: "AAAA", width: 4, height: 4 }
 function message(attachments: MessageAttachment[]): ConversationMessage {
 	return {
 		id: "node",
+		stableId: null,
+		edited: false,
 		text: "",
 		direction: "incoming",
 		sender: null,
@@ -65,7 +67,13 @@ test("attachment identity strips inline bytes but keeps the source", () => {
 });
 
 test("message content drops the node ID, sender label, and inline bytes", () => {
-	const content = messageContent({ ...message([local()]), id: "other-node", sender: "Alex", text: "Hi" });
+	const content = messageContent({
+		...message([local()]),
+		id: "other-node",
+		stableId: "stable-other",
+		sender: "Alex",
+		text: "Hi",
+	});
 	assert.deepEqual(content, messageContent({ ...message([local()]), text: "Hi" }));
 	assert.deepEqual(content, {
 		text: "Hi",
@@ -74,5 +82,6 @@ test("message content drops the node ID, sender label, and inline bytes", () => 
 		attachments: [{ type: "image", url: null, description: null, media: null }],
 		reactions: [],
 		unsent: false,
+		edited: false,
 	});
 });

@@ -96,9 +96,15 @@ function message(value: unknown): ConversationMessage {
 	if (direction !== "incoming" && direction !== "outgoing" && direction !== "unknown" && direction !== "system")
 		return invalid();
 	if (typeof item.unsent !== "boolean") return invalid();
+	if (item.edited !== undefined && item.edited !== null && typeof item.edited !== "boolean") return invalid();
+	if (item.stableId !== undefined && item.stableId !== null && typeof item.stableId !== "string") return invalid();
 	const reply = item.replyTo === null ? null : object(item.replyTo);
 	return {
 		id: string(item.id),
+		// Stable matching key and edited marker. Older extension versions send
+		// no field; both default to unknown.
+		stableId: item.stableId === undefined || item.stableId === null ? null : string(item.stableId, 512, true) || null,
+		edited: item.edited === undefined ? null : (item.edited as boolean | null),
 		text: string(item.text, 20_000, true),
 		direction,
 		// Per-message display label. Older extension versions send no field.

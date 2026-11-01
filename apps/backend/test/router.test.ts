@@ -113,6 +113,27 @@ test("connector sync accepts per-message sender labels and older messages withou
 	}
 });
 
+test("connector sync accepts edited state and stable IDs, defaulting legacy messages to unknown", async () => {
+	for (const edited of [true, false, null]) {
+		const result = await caller.connector.sync({
+			connectorId: "owner",
+			snapshot: { ...snapshot, messages: [{ ...message, stableId: "mid.$abc", edited }] },
+		});
+		assert.equal(result.task, null);
+	}
+	const legacy = await caller.connector.sync({ connectorId: "owner", snapshot });
+	assert.equal(legacy.task, null);
+	for (const fields of [{ edited: "yes" }, { edited: 1 }, { stableId: 42 }, { stableId: "x".repeat(513) }]) {
+		await assert.rejects(
+			caller.connector.sync({
+				connectorId: "owner",
+				snapshot: { ...snapshot, messages: [{ ...message, ...fields }] },
+			} as never),
+			(error: unknown) => (error as { code: string }).code === "BAD_REQUEST",
+		);
+	}
+});
+
 test("connector sync accepts bounded inline photo bytes and older images without them", async () => {
 	const media = { mime: "image/jpeg", data: "AAAA".repeat(256), width: 1568, height: 900 };
 	const accepted = await caller.connector.sync({

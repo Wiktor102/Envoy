@@ -691,6 +691,51 @@ function findReplyButton(boundary: Element): HTMLElement | undefined {
 	});
 }
 
+function readStableId(boundary: Element | null): string | null {
+	const value = boundary?.getAttribute("data-message-id")?.trim();
+	return value ? value : null;
+}
+
+// Live evidence (single text message, EN + PL): the edited marker is a
+// separate button inside the message's h4 heading, outside the body text.
+// The heading structure of an edited reply was not captured, so no strip
+// rule is guessed here.
+function headingButtons(boundary: Element): HTMLElement[] {
+	return [
+		...boundary.querySelectorAll<HTMLElement>(
+			'h4 button, h4 [role="button"], [role="heading"] button, [role="heading"] [role="button"]',
+		),
+	].filter((button) => !button.closest('[role="toolbar"]') && isVisible(button));
+}
+
+function isEditedLabel(value: string | null): boolean {
+	const label = value?.trim().toLowerCase();
+	return label === "edited" || label === "edytowano";
+}
+
+function hasHeadingButton(boundary: Element): boolean {
+	return headingButtons(boundary).length > 0;
+}
+
+function hasEditedMarker(boundary: Element): boolean {
+	return headingButtons(boundary).some((button) => isEditedLabel(button.getAttribute("aria-label")));
+}
+
+// Plain text messages only. Captions and attachment edits were not tested,
+// so anything with attachments stays unknown rather than inferred.
+function readEdited(
+	boundary: Element | null,
+	unique: boolean | Element | null,
+	attachments: number,
+	unsent: boolean,
+	standaloneLike: boolean | undefined,
+): boolean | null {
+	if (!boundary || !unique || unsent || standaloneLike || attachments > 0 || isGroupSystemEvent(boundary)) return null;
+	if (hasEditedMarker(boundary)) return true;
+	if (hasHeadingButton(boundary)) return null;
+	return false;
+}
+
 function readReply(boundary: Element): ConversationSnapshot["messages"][number]["replyTo"] {
 	const button = findReplyButton(boundary);
 	if (!button) return null;
@@ -698,6 +743,10 @@ function readReply(boundary: Element): ConversationSnapshot["messages"][number][
 	const text = quote ? readInlineText(quote) : "";
 	const context = boundary.querySelector<HTMLElement>('h4, [role="heading"]');
 	const quoteText = normalizedText(quote?.textContent);
+	// An edited reply may put the marker in the same h4 that supplies the
+	// context. Its heading structure is unknown, so a co-occurring heading
+	// button makes the context uncertain instead of guessed.
+	const uncertainContext = hasHeadingButton(boundary);
 	return {
 		text:
 			!quote || unsentPlaceholder.test(quoteText) || unavailableQuote.test(quoteText)
@@ -705,7 +754,7 @@ function readReply(boundary: Element): ConversationSnapshot["messages"][number][
 				: text.trim()
 					? text
 					: null,
-		context: context?.textContent?.trim() || null,
+		context: uncertainContext ? null : context?.textContent?.trim() || null,
 		attachments: getQuotedImages(button).map((image) =>
 			isGifLabel(quotedImageLabel(image)) ? gifAttachment() : imageAttachment(image),
 		),
@@ -1094,7 +1143,7 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 				? "👍"
 				: readInlineText(element),
 	);
-	return rendered.map(({ element, boundary, images, videos, stickers, unsent }, index) => {
+	return rendered.map(({ element, boundary, images, videos, stickers, unsent, standaloneLike }, index) => {
 		// A shared boundary cannot safely assign metadata to one message.
 		const unique = boundary && boundaries.indexOf(boundary) === boundaries.lastIndexOf(boundary);
 		// A fresh bubble can share its container with a rendered delivery status.
@@ -1105,8 +1154,17 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 			labeled?.text &&
 			texts[index]!.trim() === labeled.text &&
 			rendered.filter((message, i) => message.boundary === boundary && texts[i]!.trim() === labeled.text).length === 1;
+		const attachments = [
+			...images.map((image) =>
+				isGifViewer(image) ? gifAttachment() : imageAttachment(image.querySelector<HTMLImageElement>("img")),
+			),
+			...videos.map(() => videoAttachment()),
+			...stickers.map(() => stickerAttachment()),
+		];
 		return {
 			id: messageId(element),
+			stableId: readStableId(boundary),
+			edited: readEdited(boundary, unique, attachments.length, unsent, standaloneLike),
 			text: texts[index]!,
 			direction: boundary && (unique || matchesLabel) ? readDirection(boundary) : "unknown",
 			// The raw boundary label, kept only where direction is attributed.
@@ -1115,13 +1173,7 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 			// or the label is missing or malformed.
 			sender: boundary && (unique || matchesLabel) ? (readLabeledMessage(boundary)?.sender ?? null) : null,
 			replyTo: unique ? readReply(boundary) : null,
-			attachments: [
-				...images.map((image) =>
-					isGifViewer(image) ? gifAttachment() : imageAttachment(image.querySelector<HTMLImageElement>("img")),
-				),
-				...videos.map(() => videoAttachment()),
-				...stickers.map(() => stickerAttachment()),
-			],
+			attachments,
 			reactions: unique ? readReactions(boundary) : [],
 			unsent,
 		};
