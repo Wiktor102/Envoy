@@ -845,6 +845,56 @@ test("the media debug log marks unparsable model decisions without their text", 
 	}
 });
 
+test("the media debug log records the connection cause without request data", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	const previousFlag = process.env.ENVOY_DEBUG_MEDIA;
+	const previousInfo = console.info;
+	process.env.MODEL_API_KEY = "test-key";
+	process.env.ENVOY_DEBUG_MEDIA = "1";
+	const lines: string[] = [];
+	console.info = (line: string) => {
+		lines.push(line);
+	};
+	const socketError = Object.assign(new Error("socket hang up"), { code: "UND_ERR_SOCKET" });
+	globalThis.fetch = (async (input: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") throw socketError;
+		throw new Error("unexpected fetch");
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "clip",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Watch this",
+				replyTo: null,
+				attachments: [{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null }],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		await assert.rejects(
+			new MetaModelAdapter().run(
+				task,
+				{ ...conversation, messages } as unknown as ConversationSnapshot,
+				"new_message",
+			),
+		);
+		assert.ok(lines.some((line) => line.includes("APIConnectionError")));
+		assert.ok(lines.some((line) => line.includes("UND_ERR_SOCKET") && line.includes("socket hang up")));
+		assert.ok(!lines.join("\n").includes("Watch this"));
+	} finally {
+		console.info = previousInfo;
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+		if (previousFlag === undefined) delete process.env.ENVOY_DEBUG_MEDIA;
+		else process.env.ENVOY_DEBUG_MEDIA = previousFlag;
+	}
+});
+
 test("the Meta request includes the agent conversation alongside instructions", async () => {
 	const previousKey = process.env.MODEL_API_KEY;
 	const previousFetch = globalThis.fetch;

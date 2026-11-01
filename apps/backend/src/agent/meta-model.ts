@@ -110,10 +110,18 @@ export class MetaModelAdapter implements Agent {
 		try {
 			completion = await complete();
 		} catch (error) {
-			// Status and class only: error bodies may include request data.
-			const status = (error as { status?: number })?.status ?? "unknown";
-			const kind = (error as { constructor?: { name?: string } })?.constructor?.name ?? "unknown";
-			debugMedia(`request failed: status ${status} (${kind})`);
+			// Status, class, and network cause only: bodies may include
+			// request data.
+			const failure = error as {
+				status?: number;
+				cause?: { code?: string; message?: string };
+				constructor?: { name?: string };
+			};
+			const status = failure?.status ?? "unknown";
+			const kind = failure?.constructor?.name ?? "unknown";
+			const cause = failure?.cause;
+			const causedBy = cause ? ` caused by ${cause.code ?? "?"}: ${(cause.message ?? "?").slice(0, 160)}` : "";
+			debugMedia(`request failed: status ${status} (${kind})${causedBy}`);
 			// The chat endpoint may not accept video blocks. Fall back to
 			// evaluating with the clips presence-only instead of failing the
 			// whole decision.
