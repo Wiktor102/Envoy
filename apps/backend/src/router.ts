@@ -75,19 +75,33 @@ function inlineMedia(value: unknown): InlineImageMedia {
 
 function attachment(value: unknown, allowMedia: boolean): MessageAttachment {
 	const item = object(value);
-	if (item.type === "video" || item.type === "sticker" || item.type === "gif") {
-		if (item.url !== null || item.description !== null) return invalid();
-		return { type: item.type, url: null, description: null };
+	// Files stay presence-only. Their bytes never reach the backend.
+	if (item.type === "file") {
+		if (item.url !== undefined && item.url !== null) return invalid();
+		if (item.description !== undefined && item.description !== null) return invalid();
+		if (item.media !== undefined && item.media !== null) return invalid();
+		return { type: "file" };
 	}
-	if (item.type !== "image") return invalid();
-	// Reply quotes stay type-only: their bytes never reach the backend.
-	const media = item.media === undefined || item.media === null ? null : allowMedia ? inlineMedia(item.media) : invalid();
-	return {
-		type: "image",
-		url: optionalText(item.url, 8192),
-		description: optionalText(item.description, 4000),
-		media,
-	};
+	if (item.type === "image") {
+		// Reply quotes stay type-only: their bytes never reach the backend.
+		const media =
+			item.media === undefined || item.media === null ? null : allowMedia ? inlineMedia(item.media) : invalid();
+		return {
+			type: "image",
+			url: optionalText(item.url, 8192),
+			description: optionalText(item.description, 4000),
+			media,
+		};
+	}
+	if (item.type === "video" || item.type === "sticker" || item.type === "gif") {
+		const type = item.type as "video" | "sticker" | "gif";
+		// Reply quotes stay type-only: their bytes never reach the backend.
+		const media =
+			item.media === undefined || item.media === null ? null : allowMedia ? inlineMedia(item.media) : invalid();
+		if (item.description !== null && item.description !== undefined) return invalid();
+		return { type, url: optionalText(item.url, 8192), description: null, media };
+	}
+	return invalid();
 }
 
 function message(value: unknown): ConversationMessage {
@@ -138,7 +152,10 @@ function snapshot(value: unknown): ConversationSnapshot {
 	let mediaChars = 0;
 	for (const message of messages) {
 		for (const entry of message.attachments) {
-			if (entry.type === "image" && entry.media) {
+			if (
+				(entry.type === "image" || entry.type === "video" || entry.type === "gif" || entry.type === "sticker") &&
+				entry.media
+			) {
 				mediaCount++;
 				mediaChars += entry.media.data.length;
 			}

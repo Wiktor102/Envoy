@@ -586,10 +586,16 @@ test("unknown direction and unsupported content do not trigger the model", () =>
 		assert.equal(result.status, "needs_user");
 		assert.equal(agent.calls.length, 0);
 	}
-	for (const type of ["video", "sticker"] as const) {
+	for (const attachments of [
+		[{ type: "video", url: null, description: null, media: null }],
+		[{ type: "sticker", url: null, description: null, media: null }],
+		[{ type: "gif", url: null, description: null, media: null }],
+		[{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null }],
+		[{ type: "file" }],
+	]) {
 		const { agent, service } = setup();
 		const content = snapshot();
-		content.messages[0]!.attachments = [{ type, url: null, description: null }];
+		content.messages[0]!.attachments = attachments as never;
 		const result = service.start("owner", "Arrange a meeting", content);
 		assert.equal(result.status, "needs_user");
 		assert.equal(agent.calls.length, 0);
@@ -618,6 +624,32 @@ test("readable photos trigger the model, including photo-only latest messages", 
 		const result = service.start("owner", "Arrange a meeting", content);
 		assert.equal(result.status, "thinking");
 		assert.equal(agent.calls.length, 1);
+	}
+});
+
+test("readable GIFs, stickers, and framed videos trigger the model, files do not", () => {
+	const media = { mime: "image/jpeg" as const, data: "AAAA", width: 4, height: 4 };
+	for (const attachments of [
+		[{ type: "gif", url: "https://example.test/clip", description: null, media: null }],
+		[{ type: "sticker", url: "https://example.test/sticker", description: null, media: null }],
+		[{ type: "gif", url: null, description: null, media }],
+		[{ type: "sticker", url: null, description: null, media }],
+		[{ type: "video", url: null, description: null, media }],
+	]) {
+		const { agent, service } = setup();
+		const content = snapshot("r1", "");
+		content.messages[0]!.attachments = attachments as never;
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "thinking");
+		assert.equal(agent.calls.length, 1);
+	}
+	for (const attachments of [[{ type: "file" }], [{ type: "video", url: null, description: null, media: null }]]) {
+		const { agent, service } = setup();
+		const content = snapshot("r1", "See this");
+		content.messages[0]!.attachments = attachments as never;
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "needs_user");
+		assert.equal(agent.calls.length, 0);
 	}
 });
 
@@ -672,7 +704,7 @@ test("a quoted photo pauses with a specific message", () => {
 		const { agent, service } = setup();
 		const content = snapshot("r1", "What word is on this?");
 		content.messages[0]!.replyTo = { text: null, context: null, attachments: [] };
-		content.messages[0]!.attachments = [{ type: "video", url: null, description: null }];
+		content.messages[0]!.attachments = [{ type: "video", url: null, description: null, media: null }];
 		const result = service.start("owner", "Arrange a meeting", content);
 		assert.equal(result.status, "needs_user");
 		assert.equal(result.detail, "The latest message contains content Envoy cannot interpret.");
@@ -685,6 +717,19 @@ test("a quoted photo pauses with a specific message", () => {
 		const result = service.start("owner", "Arrange a meeting", content);
 		assert.equal(result.status, "needs_user");
 		assert.equal(result.detail, "The latest message quotes an image Envoy cannot read. Take over to reply yourself.");
+		assert.equal(agent.calls.length, 0);
+	}
+	{
+		const { agent, service } = setup();
+		const content = snapshot("r1", "Funny, right?");
+		content.messages[0]!.replyTo = {
+			text: null,
+			context: "Reply",
+			attachments: [{ type: "gif", url: null, description: null, media: null }],
+		};
+		const result = service.start("owner", "Arrange a meeting", content);
+		assert.equal(result.status, "needs_user");
+		assert.equal(result.detail, "The latest message quotes media Envoy cannot read. Take over to reply yourself.");
 		assert.equal(agent.calls.length, 0);
 	}
 });

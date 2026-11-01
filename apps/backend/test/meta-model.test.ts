@@ -183,16 +183,17 @@ test("the Meta request marks unverified history and attachments without sending 
 			sender: null,
 			text: "What about this?",
 			attachments: [
-				{ type: "image" as const, url: "https://private.example/photo", description: null },
-				{ type: "video" as const, url: null, description: null },
-				{ type: "sticker" as const, url: null, description: null },
+				{ type: "image" as const, url: "https://private.example/photo", description: null, media: null },
+				{ type: "video" as const, url: null, description: null, media: null },
+				{ type: "sticker" as const, url: null, description: null, media: null },
+				{ type: "file" as const },
 			],
 			replyTo: {
 				text: null,
 				context: null,
 				attachments: [
-					{ type: "image" as const, url: null, description: null },
-					{ type: "sticker" as const, url: null, description: null },
+					{ type: "image" as const, url: null, description: null, media: null },
+					{ type: "sticker" as const, url: null, description: null, media: null },
 				],
 			},
 			reactions: [],
@@ -210,7 +211,7 @@ test("the Meta request marks unverified history and attachments without sending 
 			text: "What about this?",
 			unsent: false,
 			edited: null,
-			attachments: [{ type: "image" }, { type: "video" }, { type: "sticker" }],
+			attachments: [{ type: "image" }, { type: "video" }, { type: "sticker" }, { type: "file" }],
 			replyTo: { text: null, context: null, attachments: [{ type: "image" }, { type: "sticker" }] },
 		});
 		assert.doesNotMatch(body.messages[2].content, /private\.example/);
@@ -390,9 +391,13 @@ test("the Meta request keeps photos past the cap and failed fetches presence-onl
 		);
 		assert.deepEqual(result, { action: "wait" });
 		const content = body.messages[2].content;
-		// Newest-first selection takes the last four; only the fetchable one resolves.
-		assert.equal(content.length, 2);
+		// Newest-first selection takes the last four; the GIF and the photo
+		// resolve while oversized, downgraded, and failed fetches stay behind.
+		assert.equal(content.length, 3);
 		assert.equal(content[1].type, "image_url");
+		assert.equal(content[2].type, "image_url");
+		assert.match(content[1].image_url.url, /^data:image\/gif;base64,/);
+		assert.match(content[2].image_url.url, /^data:image\/jpeg;base64,/);
 		const payload = JSON.parse(content[0].text);
 		assert.deepEqual(payload.conversation[0].attachments, [{ type: "image" }]);
 		assert.deepEqual(payload.conversation[1].attachments, [
@@ -400,8 +405,8 @@ test("the Meta request keeps photos past the cap and failed fetches presence-onl
 			{ type: "image" },
 			{ type: "image" },
 			{ type: "image" },
-			{ type: "image" },
 			{ type: "image", imageIndex: 0 },
+			{ type: "image", imageIndex: 1 },
 		]);
 	} finally {
 		globalThis.fetch = previousFetch;
@@ -476,6 +481,79 @@ test("the Meta request never fetches or forwards quoted photos", async () => {
 		assert.equal(typeof body.messages[2].content, "string");
 		const payload = JSON.parse(body.messages[2].content);
 		assert.deepEqual(payload.conversation[0].replyTo.attachments, [{ type: "image" }]);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the Meta request forwards GIFs, stickers, and video stills as image blocks", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	const bytes = await photo();
+	const frame = (await photo(60, 40)).toString("base64");
+	const fetched: string[] = [];
+	let body: any;
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			body = await new Request(input, init).json();
+			return modelResponse();
+		}
+		fetched.push(url);
+		return new Response(bytes as unknown as BodyInit, { status: 200, headers: { "content-type": "image/jpeg" } });
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "media",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Look",
+				replyTo: null,
+				attachments: [
+					{ type: "gif", url: "https://example.test/clip", description: null, media: null },
+					{ type: "sticker", url: "https://example.test/sticker", description: null, media: null },
+					{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null },
+					{
+						type: "video",
+						url: null,
+						description: null,
+						media: { mime: "image/jpeg", data: frame, width: 60, height: 40 },
+					},
+					{ type: "file" },
+				],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		const content = body.messages[2].content;
+		// The GIF, the sticker, and the framed video resolve. A bare video URL
+		// is never fetched and the file stays presence-only.
+		assert.deepEqual(fetched.sort(), ["https://example.test/clip", "https://example.test/sticker"]);
+		assert.equal(content.length, 4);
+		assert.deepEqual(
+			content.slice(1).map(({ type }: { type: string }) => type),
+			["image_url", "image_url", "image_url"],
+		);
+		assert.equal(content[3].image_url.url, `data:image/jpeg;base64,${frame}`);
+		const payload = JSON.parse(content[0].text);
+		assert.deepEqual(payload.conversation[0].attachments, [
+			{ type: "gif", imageIndex: 0 },
+			{ type: "sticker", imageIndex: 1 },
+			{ type: "video" },
+			{ type: "video", imageIndex: 2 },
+			{ type: "file" },
+		]);
+		assert.doesNotMatch(JSON.stringify(body), /example\.test/);
+		assert.match(body.messages[0].content, /video stills/);
 	} finally {
 		globalThis.fetch = previousFetch;
 		if (previousKey === undefined) delete process.env.MODEL_API_KEY;

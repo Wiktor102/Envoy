@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import sharp from "sharp";
-import type { AgentChatMessage, AgentDecision, ConversationSnapshot, ImageAttachment, TaskState } from "@envoy/contracts";
-import { forwardableImageSlots, hasControlCharacters, MAX_IMAGE_SIDE, MAX_TASK_TEXT_LENGTH } from "@envoy/contracts";
+import type { AgentChatMessage, AgentDecision, ConversationSnapshot, MessageAttachment, TaskState } from "@envoy/contracts";
+import { forwardableMediaSlots, hasControlCharacters, MAX_IMAGE_SIDE, MAX_TASK_TEXT_LENGTH } from "@envoy/contracts";
 import type { Agent, EvaluationReason } from "./agent.js";
 
 const MODEL_API_BASE_URL = "https://api.meta.ai/v1";
@@ -65,8 +65,8 @@ export class MetaModelAdapter implements Agent {
 							"Only the currently visible portion of the chat is available; do not assume unseen history. " +
 							"Some earlier messages may have unknown authors, unreadable attachments, empty text, or incomplete reply previews. " +
 							"Do not guess their authors or missing contents. Ask the user if that information matters to the decision. " +
-							"Attached photos arrive as image blocks after the conversation text; an attachment's imageIndex numbers its block. " +
-							"An image without an imageIndex is present but unreadable; do not guess what it shows. " +
+							"Attached photos, video stills, GIFs, and stickers arrive as image blocks after the conversation text; an attachment's imageIndex numbers its block. " +
+							"An attachment without an imageIndex is present but unreadable; do not guess what it shows. " +
 							"A message marked unsent was withdrawn by its sender; its contents are unavailable. " +
 							"A message marked edited was changed by its sender; without an observed correction event its previous text is unknown, so do not guess it. " +
 							"An unknown edited state means Messenger's marker could not be read; treat it as unknown, never as not edited. " +
@@ -116,20 +116,18 @@ export class MetaModelAdapter implements Agent {
 	}
 }
 
-// Resolve the newest forwarded photos to data URLs in document order. Every
+// Resolve the newest forwarded media to data URLs in document order. Every
 // failure falls back to presence-only: the attachment keeps its bare type.
 async function collectImages(
 	conversation: ConversationSnapshot,
 	signal?: AbortSignal,
 ): Promise<{ payload: string; images: string[] }> {
-	const slots = forwardableImageSlots(conversation.messages);
+	const slots = forwardableMediaSlots(conversation.messages);
 	const resolved = await Promise.all(
 		conversation.messages.map((message, index) =>
 			Promise.all(
 				message.attachments.map((attachment, position) =>
-					slots[index]?.[position] && attachment.type === "image"
-						? resolveImage(attachment, signal)
-						: Promise.resolve(null),
+					slots[index]?.[position] ? resolveMedia(attachment, signal) : Promise.resolve(null),
 				),
 			),
 		),
@@ -152,12 +150,10 @@ async function collectImages(
 				text,
 				unsent,
 				edited: edited ?? null,
-				// Do not send attachment URLs; the agent inspects images through blocks.
+				// Do not send attachment URLs; the agent inspects media through blocks.
 				attachments: attachments.map((attachment, position) => {
 					const imageIndex = indexes[index]?.[position];
-					return attachment.type === "image" && imageIndex != null
-						? { type: attachment.type, imageIndex }
-						: { type: attachment.type };
+					return imageIndex != null ? { type: attachment.type, imageIndex } : { type: attachment.type };
 				}),
 				replyTo: replyTo
 					? {
@@ -172,17 +168,36 @@ async function collectImages(
 	return { payload, images };
 }
 
-async function resolveImage(attachment: ImageAttachment, signal?: AbortSignal): Promise<string | null> {
+async function resolveMedia(attachment: MessageAttachment, signal?: AbortSignal): Promise<string | null> {
 	try {
-		if (attachment.media) {
-			const bytes = Buffer.from(attachment.media.data, "base64");
-			if (!bytes.length || bytes.length > MAX_FETCH_BYTES) return null;
-			return imageDataUrl(bytes, attachment.media.mime);
-		}
-		if (attachment.url) {
-			const bytes = await fetchImageBytes(attachment.url, signal);
-			if (!bytes) return null;
-			return imageDataUrl(bytes, null);
+		switch (attachment.type) {
+			case "image":
+			case "gif":
+			case "sticker": {
+				if (attachment.media) {
+					const bytes = Buffer.from(attachment.media.data, "base64");
+					if (!bytes.length || bytes.length > MAX_FETCH_BYTES) return null;
+					return imageDataUrl(bytes, attachment.media.mime);
+				}
+				if (attachment.url) {
+					const bytes = await fetchImageBytes(attachment.url, signal);
+					if (!bytes) return null;
+					return imageDataUrl(bytes, null);
+				}
+				break;
+			}
+			case "video": {
+				// Video URLs are never fetched: the backend cannot make stills
+				// from video bytes. Only a captured poster frame qualifies.
+				if (attachment.media) {
+					const bytes = Buffer.from(attachment.media.data, "base64");
+					if (!bytes.length || bytes.length > MAX_FETCH_BYTES) return null;
+					return imageDataUrl(bytes, attachment.media.mime);
+				}
+				break;
+			}
+			case "file":
+				break;
 		}
 	} catch {
 		// Unreadable bytes stay presence-only.
@@ -190,8 +205,8 @@ async function resolveImage(attachment: ImageAttachment, signal?: AbortSignal): 
 	return null;
 }
 
-// Photos only: GIF sources stay presence-only even when mislabeled, and bytes
-// already within caps pass through untouched instead of re-encoding.
+// Stills only: video arrives as a captured poster frame, and bytes already
+// within caps pass through untouched instead of re-encoding.
 async function imageDataUrl(bytes: Buffer, mime: string | null): Promise<string | null> {
 	let meta;
 	try {
@@ -199,7 +214,12 @@ async function imageDataUrl(bytes: Buffer, mime: string | null): Promise<string 
 	} catch {
 		return null;
 	}
-	const formats: Record<string, string> = { jpeg: "image/jpeg", png: "image/png", webp: "image/webp" };
+	const formats: Record<string, string> = {
+		jpeg: "image/jpeg",
+		png: "image/png",
+		webp: "image/webp",
+		gif: "image/gif",
+	};
 	const format = meta.format ? formats[meta.format] : undefined;
 	if (!format || !meta.width || !meta.height) return null;
 	if (mime && mime !== format) return null;
