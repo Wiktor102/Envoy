@@ -24,7 +24,7 @@ The hackathon scope is one delegated text conversation, one goal, a dedicated Me
 - [x] Add synthetic checks for the Messenger adapter and task lifecycle.
 - [ ] Verify Messenger DOM selectors, sender attribution, scroll position, and sending in a real signed-in session. The current adapter fails closed when it cannot establish the needed state.
 - [ ] Verify the Meta Model API with a real key and run the full demo with willing participants: agree on a meeting, revise or cancel a reply, and escalate a decision outside the brief.
-- [ ] Design authenticated hosting, HTTPS, encryption at rest, and a short retention policy before exposing the backend beyond the local machine.
+- [ ] Design authenticated hosting, HTTPS, encryption at rest, a short retention policy, and updated Terms of Use before exposing the backend beyond the local machine.
 
 ## Later and undecided
 
