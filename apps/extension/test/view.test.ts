@@ -126,6 +126,12 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 			details.open = open;
 			details.dispatchEvent(new dom.window.Event("toggle"));
 		},
+		dispatchKey(target: HTMLElement, key: string) {
+			target.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key, bubbles: true, composed: true }));
+		},
+		dispatchPointerDown(target: HTMLElement) {
+			target.dispatchEvent(new dom.window.PointerEvent("pointerdown", { bubbles: true, composed: true }));
+		},
 		selectTab(showEnvoy: boolean) {
 			view.selectTab(showEnvoy);
 		},
@@ -219,11 +225,57 @@ test("developer mode hides history and diagnostics by default but keeps actionab
 	assert.equal(ui.element("task-notice").closest("#envoy-developer-details"), null);
 });
 
+test("settings popover holds the reply settings and the developer switch", async (t) => {
+	const ui = setup(t);
+	await flushPreferences();
+	const settings = ui.element<HTMLButtonElement>("settings");
+	assert.equal(settings.getAttribute("aria-controls"), "envoy-settings-popover");
+	assert.equal(settings.getAttribute("aria-expanded"), "false");
+	assert.equal(settings.textContent?.includes("Envoy settings"), true);
+	assert.equal(settings.querySelector("svg") !== null, true);
+	assert.equal(settings.closest(".toolbar") !== null, true);
+	assert.equal(settings.closest('[role="tablist"]'), null);
+	const popover = ui.element("settings-popover");
+	assert.equal(popover.getAttribute("role"), "dialog");
+	assert.equal(popover.hidden, true);
+	for (const id of ["auto-send", "delay", "delay-min", "delay-max", "delay-hint", "developer-mode"]) {
+		assert.equal(popover.contains(ui.element(id)), true, id);
+	}
+	settings.click();
+	assert.equal(popover.hidden, false);
+	assert.equal(settings.getAttribute("aria-expanded"), "true");
+	settings.click();
+	assert.equal(popover.hidden, true);
+	assert.equal(settings.getAttribute("aria-expanded"), "false");
+	settings.click();
+	ui.dispatchKey(ui.element("panel"), "Escape");
+	assert.equal(popover.hidden, true);
+	settings.click();
+	ui.dispatchPointerDown(document.body);
+	assert.equal(popover.hidden, true);
+	settings.click();
+	ui.dispatchPointerDown(ui.element("delay-max"));
+	assert.equal(popover.hidden, false);
+	ui.dispatchPointerDown(settings);
+	assert.equal(popover.hidden, false);
+	ui.dispatchPointerDown(ui.element("goal"));
+	assert.equal(popover.hidden, true);
+	settings.click();
+	assert.equal(popover.hidden, false);
+	ui.selectTab(false);
+	assert.equal(settings.hidden, true);
+	assert.equal(popover.hidden, true);
+	ui.selectTab(true);
+	assert.equal(ui.element("settings").hidden, false);
+	assert.equal(ui.element("settings-popover").hidden, true);
+});
+
 test("developer switch remembers both choices across remounts and stays outside tab navigation", async (t) => {
 	const storage = preferenceStorage();
 	const ui = setup(t, storage);
 	const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 	await flush();
+	ui.element<HTMLButtonElement>("settings").click();
 	const toggle = ui.element<HTMLButtonElement>("developer-mode");
 	assert.equal(toggle.getAttribute("role"), "switch");
 	assert.equal(toggle.getAttribute("aria-checked"), "false");
@@ -237,9 +289,10 @@ test("developer switch remembers both choices across remounts and stays outside 
 	await flush();
 	assert.equal(ui.element("developer-details").hidden, false);
 	ui.selectTab(false);
-	assert.equal(ui.element("developer-mode").hidden, true);
+	assert.equal(ui.element("settings").hidden, true);
 	ui.selectTab(true);
-	assert.equal(ui.element("developer-mode").hidden, false);
+	assert.equal(ui.element("settings").hidden, false);
+	ui.element<HTMLButtonElement>("settings").click();
 	ui.element<HTMLButtonElement>("developer-mode").click();
 	assert.equal(ui.element("developer-details").hidden, true);
 	await flush();

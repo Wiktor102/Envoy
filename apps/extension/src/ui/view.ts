@@ -59,6 +59,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const chatsTab = element<HTMLButtonElement>("#chats-tab");
 	const envoyTab = element<HTMLButtonElement>("#envoy-tab");
 	const panel = element<HTMLElement>("#envoy-panel");
+	const settingsButton = element<HTMLButtonElement>("#envoy-settings");
+	const settingsPopover = element<HTMLElement>("#envoy-settings-popover");
 	const developerToggle = element<HTMLButtonElement>("#envoy-developer-mode");
 	const developerDetails = element<HTMLElement>("#envoy-developer-details");
 	const chatId = element<HTMLElement>("#envoy-chat-id");
@@ -151,6 +153,42 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		developerDetails.hidden = !enabled;
 	}
 
+	let settingsOpen = false;
+
+	function setSettingsOpen(open: boolean) {
+		settingsOpen = open;
+		settingsPopover.hidden = !open;
+		settingsButton.setAttribute("aria-expanded", String(open));
+	}
+
+	settingsButton.addEventListener("click", () => {
+		setSettingsOpen(!settingsOpen);
+	});
+
+	container.addEventListener("keydown", (event) => {
+		if ((event as KeyboardEvent).key !== "Escape" || !settingsOpen) return;
+		setSettingsOpen(false);
+		settingsButton.focus();
+	});
+
+	// Pointer down precedes the toggle click; the button and popover are
+	// excluded so opening still works. Closed shadow roots hide their
+	// internals from outside listeners, so inside clicks are classified
+	// from within the shadow tree and only host-external clicks here.
+	container.addEventListener("pointerdown", (event) => {
+		if (!settingsOpen) return;
+		const path = event.composedPath();
+		if (path.includes(settingsPopover) || path.includes(settingsButton)) return;
+		setSettingsOpen(false);
+	});
+
+	function closeSettingsOnOutsidePointer(event: Event) {
+		if (!settingsOpen || event.composedPath().includes(host)) return;
+		setSettingsOpen(false);
+	}
+
+	document.addEventListener("pointerdown", closeSettingsOnOutsidePointer);
+
 	// Field values change only here, so a render during typing keeps the draft.
 	function setReplySettings(next: ReplySettings) {
 		replySettings = next;
@@ -224,7 +262,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		chatsTab.tabIndex = showEnvoy ? -1 : 0;
 		envoyTab.tabIndex = showEnvoy ? 0 : -1;
 		panel.hidden = !showEnvoy;
-		developerToggle.hidden = !showEnvoy;
+		settingsButton.hidden = !showEnvoy;
+		if (!showEnvoy) setSettingsOpen(false);
 		onSelectionChange();
 	}
 
@@ -559,6 +598,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			destroyed = true;
 			themeObserver.disconnect();
 			unsubscribe();
+			document.removeEventListener("pointerdown", closeSettingsOnOutsidePointer);
 			window.clearInterval(countdownTimer);
 		},
 	};

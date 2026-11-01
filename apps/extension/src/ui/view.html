@@ -5,18 +5,80 @@
 	</div>
 	<button
 		type="button"
-		id="envoy-developer-mode"
-		class="developer-toggle"
-		role="switch"
-		aria-label="Developer mode"
-		aria-checked="false"
-		aria-controls="envoy-developer-details"
+		id="envoy-settings"
+		class="settings-button"
+		aria-expanded="false"
+		aria-controls="envoy-settings-popover"
 		hidden
 	>
-		Dev mode <span class="switch-track" aria-hidden="true"></span>
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+			<circle cx="12" cy="12" r="3" />
+			<path
+				d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+			/>
+		</svg>
+		Envoy settings
 	</button>
 </div>
 <div id="envoy-panel" role="tabpanel" aria-labelledby="envoy-tab" tabindex="0" hidden>
+	<div id="envoy-settings-popover" role="dialog" aria-label="Envoy settings" hidden>
+		<fieldset class="reply-settings" aria-describedby="envoy-delay-hint">
+			<legend>Reply sending</legend>
+			<div class="settings-card">
+				<button
+					type="button"
+					id="envoy-auto-send"
+					class="setting-row setting-switch"
+					role="switch"
+					aria-checked="true"
+				>
+					Auto-send replies <span class="switch-track" aria-hidden="true"></span>
+				</button>
+				<div id="envoy-delay" class="setting-row delay-range" role="group" aria-labelledby="envoy-delay-label">
+					<span id="envoy-delay-label">Send after</span>
+					<span class="delay-inputs">
+						<input
+							type="number"
+							id="envoy-delay-min"
+							min="1"
+							max="600"
+							step="1"
+							inputmode="numeric"
+							aria-label="Shortest delay in seconds"
+						/>
+						<span aria-hidden="true">–</span>
+						<input
+							type="number"
+							id="envoy-delay-max"
+							min="1"
+							max="600"
+							step="1"
+							inputmode="numeric"
+							aria-label="Longest delay in seconds"
+						/>
+						<span aria-hidden="true">s</span>
+					</span>
+				</div>
+			</div>
+			<p id="envoy-delay-hint" class="hint"></p>
+		</fieldset>
+		<fieldset class="developer-settings">
+			<legend>Developer</legend>
+			<div class="settings-card">
+				<button
+					type="button"
+					id="envoy-developer-mode"
+					class="setting-row setting-switch"
+					role="switch"
+					aria-label="Developer mode"
+					aria-checked="false"
+					aria-controls="envoy-developer-details"
+				>
+					Dev mode <span class="switch-track" aria-hidden="true"></span>
+				</button>
+			</div>
+		</fieldset>
+	</div>
 	<header id="envoy-header">
 		<div class="header-main">
 			<button
@@ -82,46 +144,6 @@
 			placeholder="Arrange a coffee next week. I’m free Tuesday or Thursday after 3 pm. Ask me before confirming a place."
 		></textarea>
 		<p id="envoy-goal-hint" class="hint"></p>
-		<fieldset class="reply-settings" aria-describedby="envoy-delay-hint">
-			<legend>Reply sending</legend>
-			<div class="settings-card">
-				<button
-					type="button"
-					id="envoy-auto-send"
-					class="setting-row setting-switch"
-					role="switch"
-					aria-checked="true"
-				>
-					Auto-send replies <span class="switch-track" aria-hidden="true"></span>
-				</button>
-				<div id="envoy-delay" class="setting-row delay-range" role="group" aria-labelledby="envoy-delay-label">
-					<span id="envoy-delay-label">Send after</span>
-					<span class="delay-inputs">
-						<input
-							type="number"
-							id="envoy-delay-min"
-							min="1"
-							max="600"
-							step="1"
-							inputmode="numeric"
-							aria-label="Shortest delay in seconds"
-						/>
-						<span aria-hidden="true">–</span>
-						<input
-							type="number"
-							id="envoy-delay-max"
-							min="1"
-							max="600"
-							step="1"
-							inputmode="numeric"
-							aria-label="Longest delay in seconds"
-						/>
-						<span aria-hidden="true">s</span>
-					</span>
-				</div>
-			</div>
-			<p id="envoy-delay-hint" class="hint"></p>
-		</fieldset>
 		<div class="controls goal-controls">
 			<button type="button" id="envoy-start" class="primary">Start task</button>
 			<button type="button" id="envoy-update-goal" class="primary" hidden>Update instructions</button>
