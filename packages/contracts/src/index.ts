@@ -94,6 +94,15 @@ export type MessageAttachment = ImageAttachment | VideoAttachment | StickerAttac
 export interface ConversationMessage {
 	// Temporary identifier for a rendered node; it can change on reload or remount.
 	id: string;
+	// Stable matching key from the message boundary's data-message-id, within
+	// one account's view. Null when absent. Never part of the revision:
+	// identity, not content.
+	stableId: string | null;
+	// Messenger's edited marker for plain text messages. True when the marker
+	// is present, false when confidently absent, null when unknown (including
+	// captions, attachments, and unrecognized heading buttons). Older clients
+	// omit this field; treat a missing value as unknown.
+	edited: boolean | null;
 	text: string;
 	// Unknown must never be treated as an incoming message.
 	direction: "incoming" | "outgoing" | "unknown" | "system";
@@ -208,10 +217,19 @@ export function attachmentIdentity(attachment: MessageAttachment): MessageAttach
 	return attachment.type === "image" && attachment.media ? { ...attachment, media: null } : attachment;
 }
 
-// The content a revision covers. Node IDs are temporary, sender labels are
-// attribution-only, and inline bytes are transport.
-export function messageContent({ text, direction, replyTo, attachments, reactions, unsent }: ConversationMessage) {
-	return { text, direction, replyTo, attachments: attachments.map(attachmentIdentity), reactions, unsent };
+// The content a revision covers. Node IDs and stable IDs are identity,
+// sender labels are attribution-only, and inline bytes are transport. The
+// edited marker is observable content state: a flag change invalidates.
+export function messageContent({ text, direction, replyTo, attachments, reactions, unsent, edited }: ConversationMessage) {
+	return {
+		text,
+		direction,
+		replyTo,
+		attachments: attachments.map(attachmentIdentity),
+		reactions,
+		unsent,
+		edited: edited ?? null,
+	};
 }
 
 function fetchableImageUrl(url: string | null): boolean {

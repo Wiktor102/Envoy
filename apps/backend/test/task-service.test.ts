@@ -10,11 +10,53 @@ function snapshot(
 	revision = "r1",
 	text = "Can we meet?",
 	direction: ConversationMessage["direction"] = "incoming",
+	stableId: string | null = null,
+	edited: boolean | null = false,
 ): ConversationSnapshot {
 	return {
 		chatId: "chat-1",
 		revision,
-		messages: [{ id: "node-1", text, direction, replyTo: null, attachments: [], reactions: [], unsent: false }],
+		messages: [
+			{
+				id: "node-1",
+				stableId,
+				edited,
+				text,
+				direction,
+				replyTo: null,
+				attachments: [],
+				reactions: [],
+				unsent: false,
+			},
+		],
+		participants: [],
+	};
+}
+
+function stableSnapshot(
+	revision: string,
+	entries: Array<{
+		stableId: string;
+		text: string;
+		direction?: ConversationMessage["direction"];
+		edited?: boolean | null;
+	}>,
+): ConversationSnapshot {
+	return {
+		chatId: "chat-1",
+		revision,
+		messages: entries.map(({ stableId, text, direction = "incoming", edited = false }, index) => ({
+			id: `node-${index}`,
+			stableId,
+			edited,
+			text,
+			direction,
+			sender: null,
+			replyTo: null,
+			attachments: [],
+			reactions: [],
+			unsent: false,
+		})),
 		participants: [],
 	};
 }
@@ -1216,4 +1258,122 @@ test("a sender display rename at the same revision does not pause verification",
 	const { task } = service.sync("owner", named("Mikołaj"));
 	assert.notEqual(task?.status, "paused");
 	assert.doesNotMatch(task?.detail ?? "", /could not be verified/);
+});
+
+test("observed edits reach the agent once with before/after text, including repeated edits", async () => {
+	const { agent, service } = setup();
+	service.start("owner", "Arrange a meeting", stableSnapshot("r1", [{ stableId: "m1", text: "alpha" }]));
+	agent.calls[0]!.resolve({ action: "wait" });
+	await Promise.resolve();
+	service.sync("owner", stableSnapshot("r1", [{ stableId: "m1", text: "alpha" }]));
+	assert.equal(agent.calls.length, 1);
+
+	const beta = stableSnapshot("r2", [{ stableId: "m1", text: "beta", edited: true }]);
+	service.sync("owner", beta);
+	assert.equal(agent.calls.length, 2);
+	assert.equal(agent.calls[1]!.reason, "message_edited");
+	const first = agent.calls[1]!.task.agentChat.at(-1)!;
+	assert.equal(first.role, "event");
+	assert.match(first.text, /corrected.*not a new message/);
+	assert.match(first.body!, /alpha/);
+	assert.match(first.body!, /beta/);
+
+	// Same revision never re-emits.
+	service.sync("owner", beta);
+	assert.equal(agent.calls.length, 2);
+
+	// Repeated edit chains from the last observed text.
+	const gamma = stableSnapshot("r3", [{ stableId: "m1", text: "gamma", edited: true }]);
+	service.sync("owner", gamma);
+	assert.equal(agent.calls.length, 3);
+	assert.equal(agent.calls[2]!.reason, "message_edited");
+	const second = agent.calls[2]!.task.agentChat.at(-1)!;
+	assert.match(second.body!, /beta/);
+	assert.match(second.body!, /gamma/);
+	assert.doesNotMatch(second.body!, /alpha/);
+});
+
+test("edits stop a pending reply and trigger even when the latest message is outgoing", async () => {
+	const { agent, service, advance } = setup();
+	const initial = stableSnapshot("r1", [
+		{ stableId: "m1", text: "Tuesday works" },
+		{ stableId: "m2", text: "Great, see you then.", direction: "outgoing" },
+	]);
+	service.start("owner", "Arrange a meeting", initial);
+	await resolveReply(agent);
+	assert.equal(service.sync("owner", initial).task?.status, "pending");
+
+	// Edit to the older incoming message during the countdown.
+	const edited = stableSnapshot("r2", [
+		{ stableId: "m1", text: "Thursday works", edited: true },
+		{ stableId: "m2", text: "Great, see you then.", direction: "outgoing" },
+	]);
+	const result = service.sync("owner", edited);
+	assert.equal(result.task?.pendingReply, null);
+	assert.equal(result.command, null);
+	assert.equal(agent.calls.length, 2);
+	assert.equal(agent.calls[1]!.reason, "message_edited");
+	assert.match(agent.calls[1]!.task.agentChat.at(-1)!.body!, /Tuesday works/);
+	assert.match(agent.calls[1]!.task.agentChat.at(-1)!.body!, /Thursday works/);
+
+	// Outgoing latest alone still waits; the edit was the trigger.
+	advance(10_000);
+	assert.equal(service.sync("owner", edited).command, null);
+});
+
+test("remounts, partial history, and already-edited messages never invent edits", async () => {
+	const { agent, service } = setup();
+	const full = stableSnapshot("r1", [
+		{ stableId: "m1", text: "First" },
+		{ stableId: "m2", text: "Second" },
+	]);
+	service.start("owner", "Arrange a meeting", full);
+	agent.calls[0]!.resolve({ action: "wait" });
+	await Promise.resolve();
+	service.sync("owner", full);
+	assert.equal(agent.calls.length, 1);
+
+	const editedReasons = () => agent.calls.filter((call) => call.reason === "message_edited").length;
+	const correctionsIn = (task: TaskState | null) =>
+		(task?.agentChat ?? []).filter(({ text }) => /corrected/.test(text)).length;
+
+	// Remount keeps the content revision: same texts, new node IDs, no edits.
+	const remounted = stableSnapshot("r1", [
+		{ stableId: "m1", text: "First" },
+		{ stableId: "m2", text: "Second" },
+	]);
+	remounted.messages[0]!.id = "new-node-0";
+	remounted.messages[1]!.id = "new-node-1";
+	assert.equal(correctionsIn(service.sync("owner", remounted).task), 0);
+	assert.equal(editedReasons(), 0);
+
+	// Partial history then the full window: newly seen messages are not edits.
+	const partial = stableSnapshot("r1b", [{ stableId: "m2", text: "Second" }]);
+	assert.equal(correctionsIn(service.sync("owner", partial).task), 0);
+	assert.equal(correctionsIn(service.sync("owner", full).task), 0);
+	assert.equal(editedReasons(), 0);
+
+	// First sight of an already-edited message has no previous version.
+	const alreadyEdited = stableSnapshot("r2", [
+		{ stableId: "m1", text: "First" },
+		{ stableId: "m2", text: "Second" },
+		{ stableId: "m3", text: "Corrected text", edited: true },
+	]);
+	assert.equal(correctionsIn(service.sync("owner", alreadyEdited).task), 0);
+	assert.equal(editedReasons(), 0);
+	assert.equal(agent.calls.at(-1)!.snapshot.messages.at(-1)!.edited, true);
+
+	// Duplicate stable IDs never match fail-closed.
+	const duplicated = stableSnapshot("r3", [
+		{ stableId: "m1", text: "First changed" },
+		{ stableId: "m1", text: "First changed" },
+	]);
+	assert.equal(correctionsIn(service.sync("owner", duplicated).task), 0);
+	assert.equal(editedReasons(), 0);
+
+	// Captions and attachment edits stay unsupported rather than inferred.
+	const captioned = stableSnapshot("r4", [{ stableId: "m1", text: "First edited caption" }]);
+	captioned.messages[0]!.attachments = [{ type: "image", url: null, description: null, media: null }];
+	assert.equal(correctionsIn(service.sync("owner", captioned).task), 0);
+	assert.equal(editedReasons(), 0);
 });

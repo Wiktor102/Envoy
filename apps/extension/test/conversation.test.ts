@@ -2327,3 +2327,84 @@ test("keeps the revision independent of inline bytes", async () => {
 		dom.window.close();
 	}
 });
+
+test("reads the edited marker and stable ID for plain text without polluting the body", async () => {
+	const dom = setup();
+	try {
+		const editedMessage = (marker: string, stableId = "mid.$abc") =>
+			`<div data-scope="messages_table" data-message-id="${stableId}" aria-roledescription="message" aria-label="At 11:12, Alex: Updated text">` +
+			`<h4 dir="auto">Wysłano${marker}</h4><div><span dir="auto">Updated text</span></div></div>`;
+		const marker = (label: string) =>
+			`<div role="button" aria-label="${label}" tabindex="-1"><span>${label}</span></div>`;
+
+		for (const label of ["Edited", "Edytowano", "EDITED", "edytowano"]) {
+			setMessages(editedMessage(marker(label)));
+			const [message] = (await messengerChatAdapter.readConversation()).messages;
+			assert.equal(message!.text, "Updated text");
+			assert.equal(message!.edited, true);
+			assert.equal(message!.stableId, "mid.$abc");
+		}
+		// Any other heading button state is unknown, never "not edited".
+		for (const label of ["Hide edits", "Ukryj zmiany", "Something else"]) {
+			setMessages(editedMessage(marker(label)));
+			assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.edited, null);
+		}
+		// No heading button means confidently not edited.
+		setMessages(editedMessage(""));
+		const plain = await messengerChatAdapter.readConversation();
+		assert.equal(plain.messages[0]!.edited, false);
+		assert.equal(plain.messages[0]!.stableId, "mid.$abc");
+
+		// The marker changes the revision; the stable ID does not.
+		setMessages(editedMessage(marker("Edited")));
+		assert.notEqual((await messengerChatAdapter.readConversation()).revision, plain.revision);
+		setMessages(editedMessage("", "mid.$other"));
+		assert.equal((await messengerChatAdapter.readConversation()).revision, plain.revision);
+
+		// Captions and attachments stay unknown rather than inferred.
+		setMessages(
+			`<div data-scope="messages_table" data-message-id="photo" aria-roledescription="message" aria-label="At 11:12, Alex: A caption">` +
+				`<h4 dir="auto">Alex${marker("Edited")}</h4><span dir="auto">A caption</span>` +
+				`<a href="/messenger_media/?attachment_id=1"><img alt="" src="https://example.test/photo"></a></div>`,
+		);
+		const captioned = await messengerChatAdapter.readConversation();
+		assert.equal(captioned.messages[0]!.attachments.length, 1);
+		assert.equal(captioned.messages[0]!.edited, null);
+	} finally {
+		dom.window.close();
+	}
+});
+
+test("marks a reply context uncertain when a heading button co-occurs with the reply", async () => {
+	const dom = setup();
+	try {
+		const reply = (heading: string) =>
+			`<div data-scope="messages_table" data-message-id="reply-1">` +
+			`<h4 dir="auto">${heading}</h4>` +
+			`<div role="button" aria-label="View original message"><span dir="auto">Original text</span></div>` +
+			`<span dir="auto">My answer</span></div>`;
+		const marker = `<div role="button" aria-label="Edytowano" tabindex="-1"><span>Edytowano</span></div>`;
+
+		setMessages(reply("You replied to Alex"));
+		const certain = await messengerChatAdapter.readConversation();
+		assert.equal(certain.messages[0]!.replyTo?.context, "You replied to Alex");
+		assert.equal(certain.messages[0]!.edited, false);
+
+		// No strip rule is guessed: an edited or unrecognized heading button
+		// makes the context uncertain.
+		for (const heading of [
+			`You replied to Alex${marker}`,
+			`You replied to Alex<div role="button" aria-label="Hide edits"><span>Hide</span></div>`,
+		]) {
+			setMessages(reply(heading));
+			const [message] = (await messengerChatAdapter.readConversation()).messages;
+			assert.equal(message!.text, "My answer");
+			assert.equal(message!.replyTo?.text, "Original text");
+			assert.equal(message!.replyTo?.context, null);
+		}
+		setMessages(reply(`You replied to Alex${marker}`));
+		assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.edited, true);
+	} finally {
+		dom.window.close();
+	}
+});
