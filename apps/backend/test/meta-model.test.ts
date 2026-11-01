@@ -760,7 +760,7 @@ test("the media debug log narrates fetches and blocks without URLs or text", asy
 		);
 		assert.ok(lines.some((line) => line.includes("fetch video/mp4")));
 		assert.ok(lines.some((line) => line.includes("media video url -> video block")));
-		assert.ok(lines.some((line) => line.includes("0 image blocks, 1 video blocks")));
+		assert.ok(lines.some((line) => line.includes("0 image blocks [], 1 video blocks [14B]")));
 		assert.ok(!lines.join("\n").includes("example.test"));
 		assert.ok(!lines.join("\n").includes("Watch this"));
 	} finally {
@@ -795,8 +795,46 @@ test("the media debug log records request failures by status only", async () => 
 		await assert.rejects(
 			new MetaModelAdapter().run(task, conversation as unknown as ConversationSnapshot, "new_message"),
 		);
-		assert.ok(lines.some((line) => line.includes("request failed: status 500")));
+		assert.ok(lines.some((line) => line.includes("request failed: status 500 (InternalServerError)")));
 		assert.ok(!lines.join("\n").includes("busy"));
+	} finally {
+		console.info = previousInfo;
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+		if (previousFlag === undefined) delete process.env.ENVOY_DEBUG_MEDIA;
+		else process.env.ENVOY_DEBUG_MEDIA = previousFlag;
+	}
+});
+
+test("the media debug log marks unparsable model decisions without their text", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	const previousFlag = process.env.ENVOY_DEBUG_MEDIA;
+	const previousInfo = console.info;
+	process.env.MODEL_API_KEY = "test-key";
+	process.env.ENVOY_DEBUG_MEDIA = "1";
+	const lines: string[] = [];
+	console.info = (line: string) => {
+		lines.push(line);
+	};
+	globalThis.fetch = (async (input: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			return new Response(JSON.stringify({ choices: [{ message: { content: "not json" } }] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}
+		throw new Error("unexpected fetch");
+	}) as typeof fetch;
+	try {
+		await assert.rejects(
+			new MetaModelAdapter().run(task, conversation as unknown as ConversationSnapshot, "new_message"),
+			(error: unknown) => (error as Error).message === "Invalid model decision",
+		);
+		assert.ok(lines.some((line) => line.includes("model decision unparsable")));
+		assert.ok(!lines.join("\n").includes("not json"));
 	} finally {
 		console.info = previousInfo;
 		globalThis.fetch = previousFetch;

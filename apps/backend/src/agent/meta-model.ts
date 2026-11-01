@@ -100,12 +100,20 @@ export class MetaModelAdapter implements Agent {
 				{ signal },
 			);
 		let completion: Awaited<ReturnType<typeof complete>>;
-		debugMedia(`request ${images.length} image blocks, ${pendingVideos.length} video blocks`);
+		const blockBytes = (dataUrl: string) => {
+			const comma = dataUrl.indexOf(",");
+			return comma < 0 ? 0 : Buffer.byteLength(dataUrl.slice(comma + 1), "base64");
+		};
+		debugMedia(
+			`request ${images.length} image blocks [${images.map((url) => `${blockBytes(url)}B`).join(", ")}], ${pendingVideos.length} video blocks [${pendingVideos.map((url) => `${blockBytes(url)}B`).join(", ")}]`,
+		);
 		try {
 			completion = await complete();
 		} catch (error) {
-			// Status only: error bodies may include request data.
-			debugMedia(`request failed: status ${(error as { status?: number })?.status ?? "unknown"}`);
+			// Status and class only: error bodies may include request data.
+			const status = (error as { status?: number })?.status ?? "unknown";
+			const kind = (error as { constructor?: { name?: string } })?.constructor?.name ?? "unknown";
+			debugMedia(`request failed: status ${status} (${kind})`);
 			// The chat endpoint may not accept video blocks. Fall back to
 			// evaluating with the clips presence-only instead of failing the
 			// whole decision.
@@ -117,9 +125,12 @@ export class MetaModelAdapter implements Agent {
 		}
 
 		let parsed: unknown;
+		const decisionText = completion.choices[0]?.message.content ?? "";
 		try {
-			parsed = JSON.parse(completion.choices[0]?.message.content ?? "");
+			parsed = JSON.parse(decisionText);
 		} catch {
+			// Length only: model output may echo conversation text.
+			debugMedia(`model decision unparsable (choices ${completion.choices.length}, ${decisionText.length} chars)`);
 			throw new Error("Invalid model decision");
 		}
 		return parseDecision(parsed);
