@@ -1230,7 +1230,7 @@ test("reads an animated preview as an unreadable attachment and tracks its blob 
 	assert.deepEqual(
 		snapshot.messages.map(({ text, attachments }) => [text, attachments]),
 		[
-			["", [{ type: "gif", url: null, description: null }]],
+			["", [{ type: "gif", url: null, description: null, media: null }]],
 			["Hello", []],
 		],
 	);
@@ -1292,8 +1292,8 @@ test("reads encrypted GIF buttons as presence-only without blocking the chat", a
 	assert.deepEqual(
 		snapshot.messages.map(({ text, attachments }) => [text, attachments]),
 		[
-			["", [{ type: "gif", url: null, description: null }]],
-			["", [{ type: "gif", url: null, description: null }]],
+			["", [{ type: "gif", url: null, description: null, media: null }]],
+			["", [{ type: "gif", url: null, description: null, media: null }]],
 			["Hello", []],
 		],
 	);
@@ -1327,13 +1327,13 @@ test("reads quoted GIFs as type-only without blocking the chat", async () => {
 			{
 				text: null,
 				context: "You replied to Alex",
-				attachments: [{ type: "gif", url: null, description: null }],
+				attachments: [{ type: "gif", url: null, description: null, media: null }],
 			},
 			{
 				text: null,
 				context: "You replied to Sam",
 				attachments: [
-					{ type: "gif", url: null, description: null },
+					{ type: "gif", url: null, description: null, media: null },
 					{ type: "image", url: "https://example.test/photo", description: null, media: null },
 				],
 			},
@@ -1711,22 +1711,39 @@ test("reads a recognized video as unavailable media without blocking later text"
 	// <video> inside an expand button with Video player UI. A caption typed
 	// with the clip and a later follow-up each arrive as separate text scopes.
 	const videoMessage = `<div data-scope="messages_table" data-message-id="v1" aria-roledescription="wiadomość" aria-label="O 21:35, Wiktor testowy"><div role="presentation"><div aria-label="Rozwiń okno z filmem" role="button" tabindex="-1"><div><video playsinline src="blob:https://example.test/video"></video><div><div aria-label="Video player" role="group"><div aria-label="Odtwórz film" role="button" tabindex="-1"></div><div>0:02</div></div></div></div></div></div></div>`;
+	const remoteVideo = `<div data-scope="messages_table" data-message-id="v2" aria-roledescription="wiadomość" aria-label="O 21:35, Wiktor testowy"><div role="presentation"><div aria-label="Rozwiń okno z filmem" role="button" tabindex="-1"><div><video playsinline src="https://example.test/clip.mp4"></video><div><div aria-label="Video player" role="group"><div aria-label="Odtwórz film" role="button" tabindex="-1"></div><div>0:02</div></div></div></div></div></div></div>`;
 	const followup = `<div data-scope="messages_table" data-message-id="t1" aria-roledescription="wiadomość" aria-label="O 21:36, Wiktor testowy: Video follow-up test"><span><div><div dir="auto">Video follow-up test</div></div></span></div>`;
-	setMessages(`${videoMessage}${followup}`);
+	// jsdom never loads video data; report unloaded dimensions so the frame
+	// capture stays presence-only without waiting out its load timeout.
+	const stallVideos = () => {
+		for (const video of document.querySelectorAll("video")) {
+			Object.defineProperty(video, "readyState", { configurable: true, value: 4 });
+			Object.defineProperty(video, "videoWidth", { configurable: true, value: 0 });
+			Object.defineProperty(video, "videoHeight", { configurable: true, value: 0 });
+		}
+	};
+	setMessages(`${videoMessage}${remoteVideo}${followup}`);
+	stallVideos();
 	const snapshot = await messengerChatAdapter.readConversation();
 	assert.deepEqual(
 		snapshot.messages.map(({ text, direction, attachments }) => ({ text, direction, attachments })),
 		[
-			{ text: "", direction: "incoming", attachments: [{ type: "video", url: null, description: null }] },
+			{ text: "", direction: "incoming", attachments: [{ type: "video", url: null, description: null, media: null }] },
+			{
+				text: "",
+				direction: "incoming",
+				attachments: [{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null }],
+			},
 			{ text: "Video follow-up test", direction: "incoming", attachments: [] },
 		],
 	);
 	// A latest video stays readable but carries an attachment, so the task
 	// layer can pause or ask instead of treating it as text.
 	setMessages(videoMessage);
+	stallVideos();
 	const latest = await messengerChatAdapter.readConversation();
 	assert.equal(latest.messages.length, 1);
-	assert.deepEqual(latest.messages[0]!.attachments, [{ type: "video", url: null, description: null }]);
+	assert.deepEqual(latest.messages[0]!.attachments, [{ type: "video", url: null, description: null, media: null }]);
 	dom.window.close();
 });
 
@@ -1737,14 +1754,28 @@ test("reads recognized stickers as unavailable media without blocking later text
 	// image. Avatar, toolbar, and sender headings are not the sticker.
 	const incomingSticker = `<div data-scope="messages_table" data-message-id="s1" aria-roledescription="wiadomość" aria-label="O 21:29, Alex"><h4 dir="auto"><span dir="auto">Alex</span></h4><div aria-hidden="true"><img alt="Alex"></div><div><div role="img" tabindex="-1" aria-label="Animated banana with googly eyes, bouncing happily. sticker" style="background-image: url(blob:https://example.test/banana); height: 96px; width: 96px;"></div></div><div role="toolbar"><div role="presentation"></div></div></div>`;
 	const outgoingSticker = `<div data-scope="messages_table" data-message-id="s2" aria-roledescription="wiadomość" aria-label="O 22:33, Ty"><div><div role="img" tabindex="-1" aria-label="Mollusk waving a pearl with one hand sticker" style="background-image: url(blob:https://example.test/mollusk); height: 96px; width: 96px;"></div></div></div>`;
+	const remoteSticker = `<div data-scope="messages_table" data-message-id="s3" aria-roledescription="wiadomość" aria-label="O 22:33, Alex"><div><div role="img" tabindex="-1" aria-label="Cat in a hat sticker" style="background-image: url(https://example.test/cat); height: 96px; width: 96px;"></div></div></div>`;
 	const followup = `<div data-scope="messages_table" data-message-id="t1" aria-roledescription="wiadomość" aria-label="O 22:34, Alex: Sounds good"><span><div><div dir="auto">Sounds good</div></div></span></div>`;
-	setMessages(`${incomingSticker}${outgoingSticker}${followup}`);
+	setMessages(`${incomingSticker}${outgoingSticker}${remoteSticker}${followup}`);
 	const snapshot = await messengerChatAdapter.readConversation();
 	assert.deepEqual(
 		snapshot.messages.map(({ text, direction, attachments }) => ({ text, direction, attachments })),
 		[
-			{ text: "", direction: "incoming", attachments: [{ type: "sticker", url: null, description: null }] },
-			{ text: "", direction: "outgoing", attachments: [{ type: "sticker", url: null, description: null }] },
+			{
+				text: "",
+				direction: "incoming",
+				attachments: [{ type: "sticker", url: null, description: null, media: null }],
+			},
+			{
+				text: "",
+				direction: "outgoing",
+				attachments: [{ type: "sticker", url: null, description: null, media: null }],
+			},
+			{
+				text: "",
+				direction: "incoming",
+				attachments: [{ type: "sticker", url: "https://example.test/cat", description: null, media: null }],
+			},
 			{ text: "Sounds good", direction: "incoming", attachments: [] },
 		],
 	);
@@ -1760,7 +1791,7 @@ test("reads recognized stickers as unavailable media without blocking later text
 	setMessages(incomingSticker);
 	const latest = await messengerChatAdapter.readConversation();
 	assert.equal(latest.messages.length, 1);
-	assert.deepEqual(latest.messages[0]!.attachments, [{ type: "sticker", url: null, description: null }]);
+	assert.deepEqual(latest.messages[0]!.attachments, [{ type: "sticker", url: null, description: null, media: null }]);
 	dom.window.close();
 });
 
@@ -1777,7 +1808,7 @@ test("keeps sticker detection narrow and fail-closed", async () => {
 		snapshot.messages.map(({ text, attachments }) => ({ text, attachments })),
 		[
 			{ text: "Send a sticker tomorrow", attachments: [] },
-			{ text: "", attachments: [{ type: "sticker", url: null, description: null }] },
+			{ text: "", attachments: [{ type: "sticker", url: null, description: null, media: null }] },
 		],
 	);
 	for (const scope of [
@@ -1797,6 +1828,165 @@ test("keeps sticker detection narrow and fail-closed", async () => {
 		);
 	}
 	dom.window.close();
+});
+
+test("reads file rows as presence-only without failing the snapshot", async () => {
+	const dom = setup();
+	const blobFile = `<div data-scope="messages_table" data-message-id="f1" aria-roledescription="wiadomość" aria-label="O 21:40, Alex"><div><a download="notes.txt" href="blob:https://example.test/notes"><span dir="auto">notes.txt</span><span dir="auto">34 B</span></a></div></div>`;
+	const remoteFile = `<div data-scope="messages_table" data-message-id="f2" aria-roledescription="wiadomość" aria-label="O 21:41, Alex"><div><a download="deck.pdf" href="https://example.test/deck"><span dir="auto">deck.pdf</span></a></div></div>`;
+	const followup = `<div data-scope="messages_table" data-message-id="t1" aria-roledescription="wiadomość" aria-label="O 21:42, Alex: See attached"><span><div><div dir="auto">See attached</div></div></span></div>`;
+	setMessages(`${blobFile}${remoteFile}${followup}`);
+	const snapshot = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		snapshot.messages.map(({ text, attachments }) => ({ text, attachments })),
+		[
+			{ text: "", attachments: [{ type: "file" }] },
+			{ text: "", attachments: [{ type: "file" }] },
+			{ text: "See attached", attachments: [] },
+		],
+	);
+	// The href never leaves the extension, but a replaced row invalidates.
+	assert.ok(!JSON.stringify(snapshot).includes("example.test"));
+	document.querySelector("a[download]")!.setAttribute("href", "blob:https://example.test/changed");
+	assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
+	// A latest file stays readable but carries an attachment for the pause.
+	setMessages(blobFile);
+	const latest = await messengerChatAdapter.readConversation();
+	assert.deepEqual(latest.messages[0]!.attachments, [{ type: "file" }]);
+	dom.window.close();
+});
+
+test("keeps file detection narrow and fail-closed", async () => {
+	const dom = setup();
+	// A quoted download row never qualifies as an attachment; the quote
+	// stays text so the reader keeps working.
+	setMessages(
+		`<div data-scope="messages_table" data-message-id="q1" aria-roledescription="wiadomość" aria-label="O 21:31, Alex: Thanks"><div role="button" aria-label="Przejdź do wiadomości, na którą odpowiadasz"><a download="x" href="blob:https://example.test/x">x</a></div><span><div><div dir="auto">Thanks</div></div></span></div>`,
+	);
+	const quoted = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		quoted.messages.map((message) => message.attachments),
+		[[]],
+	);
+	assert.equal(quoted.messages[0]!.text, "Thanks");
+	for (const scope of [
+		// Toolbar, hidden, and boundary-less download rows never qualify.
+		`<div data-scope="messages_table" data-message-id="f1" aria-roledescription="wiadomość"><div role="toolbar"><a download="x" href="blob:https://example.test/x">x</a></div></div>`,
+		`<div data-scope="messages_table" data-message-id="f1" aria-roledescription="wiadomość"><div aria-hidden="true"><a download="x" href="blob:https://example.test/x">x</a></div></div>`,
+		`<div data-scope="messages_table"><a download="x" href="blob:https://example.test/x">x</a></div>`,
+		// A recognized file beside unrecognized bare media.
+		`<div data-scope="messages_table" data-message-id="f1" aria-roledescription="wiadomość"><a download="x" href="blob:https://example.test/x">x</a></div><div data-scope="messages_table"><span dir="auto"><video></video></span></div>`,
+	]) {
+		setMessages(scope);
+		await assert.rejects(
+			messengerChatAdapter.readConversation(),
+			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
+		);
+	}
+	dom.window.close();
+});
+
+test("reads quoted video, sticker, GIF, and file previews as type-only", async () => {
+	const dom = setup();
+	setMessages(
+		`<div data-scope="messages_table" data-message-id="q1" aria-roledescription="wiadomość"><h4>You replied to Alex</h4><div role="button" aria-label="View original message"><img alt="" src="https://example.test/thumb"></div><span dir="auto">That clip</span></div>` +
+			`<div data-scope="messages_table" data-message-id="q2" aria-roledescription="wiadomość"><h4>You replied to Sam</h4><div role="button" aria-label="Przejdź do wiadomości, na którą odpowiadasz"><img alt="Dancing banana" src="https://example.test/sticker"></div><span dir="auto">Cute</span></div>` +
+			`<div data-scope="messages_table" data-message-id="q3" aria-roledescription="wiadomość"><h4>You replied to Alex</h4><div role="button" aria-label="View original message"><a role="link" aria-disabled="true" aria-label="Otwórz GIF"><img alt="" src="blob:https://example.test/g1"><img alt="" src="https://example.test/g2"></a><span>GIPHY</span></div><span dir="auto">Funny</span></div>` +
+			`<div data-scope="messages_table" data-message-id="q4" aria-roledescription="wiadomość"><h4>You replied to Alex</h4><div role="button" aria-label="View original message"><span dir="auto">Oryginalna wiadomość: Załącznik</span></div><span dir="auto">Got it</span></div>`,
+	);
+	const snapshot = await messengerChatAdapter.readConversation();
+	assert.deepEqual(
+		snapshot.messages.map((message) => message.replyTo),
+		[
+			{
+				text: null,
+				context: "You replied to Alex",
+				attachments: [{ type: "video", url: "https://example.test/thumb", description: null, media: null }],
+			},
+			{
+				text: null,
+				context: "You replied to Sam",
+				attachments: [{ type: "sticker", url: "https://example.test/sticker", description: null, media: null }],
+			},
+			{
+				text: null,
+				context: "You replied to Alex",
+				attachments: [
+					{ type: "gif", url: null, description: null, media: null },
+					{ type: "gif", url: "https://example.test/g2", description: null, media: null },
+				],
+			},
+			{ text: "Oryginalna wiadomość: Załącznik", context: "You replied to Alex", attachments: [] },
+		],
+	);
+	assert.deepEqual(
+		snapshot.messages.map((message) => message.attachments),
+		[[], [], [], []],
+	);
+	dom.window.close();
+});
+
+test("inlines a video poster frame for local clips", async () => {
+	const dom = setup();
+	const restoreCanvas = installCanvasStub(dom, `data:image/jpeg;base64,${"V".repeat(64)}`);
+	try {
+		setMessages(
+			`<div data-scope="messages_table" data-message-id="v1" aria-roledescription="wiadomość" aria-label="O 21:35, Alex"><div role="presentation"><div aria-label="Rozwiń okno z filmem" role="button" tabindex="-1"><div><video playsinline src="blob:https://example.test/video"></video><div><div aria-label="Video player" role="group"><div aria-label="Odtwórz film" role="button" tabindex="-1"></div></div></div></div></div></div>`,
+		);
+		const video = document.querySelector("video")!;
+		Object.defineProperty(video, "readyState", { configurable: true, value: 4 });
+		Object.defineProperty(video, "videoWidth", { configurable: true, value: 640 });
+		Object.defineProperty(video, "videoHeight", { configurable: true, value: 480 });
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(snapshot.messages[0]!.attachments, [
+			{
+				type: "video",
+				url: null,
+				description: null,
+				media: { mime: "image/jpeg", data: "V".repeat(64), width: 640, height: 480 },
+			},
+		]);
+	} finally {
+		restoreCanvas();
+		dom.window.close();
+	}
+});
+
+test("inlines the newest four media across photos, GIFs, stickers, and clips", async () => {
+	const dom = setup();
+	const restoreImage = installImageStub({ "*": { width: 100, height: 80 } });
+	const restoreCanvas = installCanvasStub(dom, `data:image/jpeg;base64,${"V".repeat(64)}`);
+	try {
+		setMessages(
+			photoButton("data:image/jpeg;base64,AAAA") +
+				`<div data-scope="messages_table" data-message-id="g1" aria-roledescription="message"><a href="/messenger_media/?attachment_id=1"><img alt="Fish GIF" src="data:image/gif;base64,BBBB"><span>GIPHY</span></a></div>` +
+				`<div data-scope="messages_table" data-message-id="s1" aria-roledescription="message"><div role="button" tabindex="-1"><img alt="Open photo" src="data:image/png;base64,CCCC"></div></div>` +
+				`<div data-scope="messages_table" data-message-id="v1" aria-roledescription="wiadomość"><div role="presentation"><div aria-label="Rozwiń okno z filmem" role="button" tabindex="-1"><div><video playsinline src="blob:https://example.test/video"></video><div><div aria-label="Video player" role="group"><div aria-label="Odtwórz film" role="button" tabindex="-1"></div></div></div></div></div></div>` +
+				photoButton("data:image/jpeg;base64,EEEE"),
+		);
+		const video = document.querySelector("video")!;
+		Object.defineProperty(video, "readyState", { configurable: true, value: 4 });
+		Object.defineProperty(video, "videoWidth", { configurable: true, value: 640 });
+		Object.defineProperty(video, "videoHeight", { configurable: true, value: 480 });
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(
+			snapshot.messages.map(
+				(message) =>
+					(message.attachments[0] as { type: string; media: { data: string } | null }).media?.data ?? null,
+			),
+			// Five local renders, one shared cap: the oldest photo keeps its
+			// type but loses the inline race.
+			[null, "BBBB", "CCCC", "V".repeat(64), "EEEE"],
+		);
+		assert.deepEqual(
+			snapshot.messages.map((message) => (message.attachments[0] as { type: string }).type),
+			["image", "gif", "image", "video", "image"],
+		);
+	} finally {
+		restoreImage();
+		restoreCanvas();
+		dom.window.close();
+	}
 });
 
 test("reads the 1-1 chat name from the header in English and Polish", async () => {
@@ -2214,10 +2404,10 @@ test("keeps local photos presence-only when their bytes cannot be used", async (
 	const restoreImage = installImageStub({ "*": { width: 100, height: 80 } });
 	try {
 		for (const src of [
-			"data:image/gif;base64,AAAA",
 			`data:image/jpeg;base64,${"A".repeat(12_000_004)}`,
 			"data:image/jpeg;base64,!!!",
 			"data:image/jpeg;base64,AAAAA",
+			"data:image/svg+xml;base64,AAAA",
 			"blob:https://www.messenger.com/photo",
 		]) {
 			setMessages(photoButton(src));
@@ -2293,15 +2483,26 @@ test("keeps quoted photos type-only while inlining message photos", async () => 
 	}
 });
 
-test("classifies GIF links as presence-only without bytes", async () => {
+test("inlines local GIF renders while keeping remote GIF links fetchable", async () => {
 	const dom = setup();
 	const restoreImage = installImageStub({ "*": { width: 100, height: 80 } });
 	try {
 		setMessages(
-			`<div data-scope="messages_table" data-message-id="g1" aria-roledescription="message"><a href="/messenger_media/?attachment_id=1"><img alt="Fish GIF" src="data:image/gif;base64,AAAA"><span>GIPHY</span></a></div>`,
+			`<div data-scope="messages_table" data-message-id="g1" aria-roledescription="message"><a href="/messenger_media/?attachment_id=1"><img alt="Fish GIF" src="data:image/gif;base64,AAAA"><span>GIPHY</span></a></div>` +
+				`<div data-scope="messages_table" data-message-id="g2" aria-roledescription="message"><a href="/messenger_media/?attachment_id=2"><img alt="Cat GIF" src="https://example.test/animated"><span>GIPHY</span></a></div>`,
 		);
 		const snapshot = await messengerChatAdapter.readConversation();
-		assert.deepEqual(snapshot.messages[0]!.attachments, [{ type: "gif", url: null, description: null }]);
+		assert.deepEqual(snapshot.messages[0]!.attachments, [
+			{
+				type: "gif",
+				url: null,
+				description: null,
+				media: { mime: "image/gif", data: "AAAA", width: 100, height: 80 },
+			},
+		]);
+		assert.deepEqual(snapshot.messages[1]!.attachments, [
+			{ type: "gif", url: "https://example.test/animated", description: null, media: null },
+		]);
 	} finally {
 		restoreImage();
 		dom.window.close();
