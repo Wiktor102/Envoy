@@ -145,7 +145,7 @@ summary:focus-visible,
 	color: var(--envoy-tab-selected-text);
 }
 
-.developer-toggle {
+.settings-button {
 	display: flex;
 	align-items: center;
 	gap: 6px;
@@ -154,7 +154,19 @@ summary:focus-visible,
 	background: transparent;
 	color: var(--envoy-secondary-text);
 	font-size: 12px;
+	font-weight: 600;
 	white-space: nowrap;
+}
+
+.settings-button svg {
+	width: 16px;
+	height: 16px;
+	flex: none;
+}
+
+.settings-button span {
+	text-box-trim: trim-both;
+	text-box-edge: cap alphabetic;
 }
 
 .switch-track {
@@ -384,18 +396,41 @@ textarea:disabled {
 	cursor: not-allowed;
 }
 
-.reply-settings {
+.reply-settings,
+.developer-settings {
 	min-width: 0;
-	margin: 16px 0 0;
+	margin: 0;
 	padding: 0;
 	border: 0;
 }
 
-.reply-settings legend {
+.reply-settings legend,
+.developer-settings legend {
 	margin-bottom: 6px;
 	padding: 0;
 	font-size: 12px;
 	font-weight: 600;
+}
+
+#envoy-settings-popover {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	z-index: 10;
+	width: min(300px, calc(100% - 16px));
+	padding: 14px;
+	border: 1px solid var(--envoy-divider);
+	border-radius: 12px;
+	background: var(--envoy-surface);
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+:host([data-facebook]) #envoy-settings-popover {
+	background: var(--envoy-facebook-surface);
+}
+
+#envoy-settings-popover .developer-settings {
+	margin-top: 14px;
 }
 
 .settings-card {
