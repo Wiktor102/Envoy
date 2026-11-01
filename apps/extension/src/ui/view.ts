@@ -2,6 +2,7 @@ import {
 	DEFAULT_REPLY_SETTINGS,
 	isTaskEnded,
 	MAX_REPLY_DELAY_SECONDS,
+	MAX_TASK_TEXT_LENGTH,
 	MIN_REPLY_DELAY_SECONDS,
 	normalizeReplySettings,
 	type ReplySettings,
@@ -86,12 +87,14 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const agentEmpty = element<HTMLElement>("#envoy-agent-empty");
 	const agentMessages = element<HTMLOListElement>("#envoy-agent-messages");
 	const answerText = element<HTMLTextAreaElement>("#envoy-answer-text");
+	const answerHint = element<HTMLElement>("#envoy-answer-hint");
 	const answerSend = element<HTMLButtonElement>("#envoy-answer-send");
 	const pendingSection = element<HTMLElement>("#envoy-pending");
 	const pendingText = element<HTMLElement>("#envoy-pending-text");
 	const countdown = element<HTMLElement>("#envoy-countdown");
 	const editor = element<HTMLElement>("#envoy-editor");
 	const editText = element<HTMLTextAreaElement>("#envoy-reply-edit");
+	const editHint = element<HTMLElement>("#envoy-edit-hint");
 	isolateTextInput(goal);
 	isolateTextInput(editText);
 	isolateTextInput(answerText);
@@ -339,6 +342,16 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		}
 	}
 
+	// Each limited input has its own bound. The backend trims before checking,
+	// so the count matches the text that would actually be sent.
+	function countText(value: string): string {
+		const length = value.trim().length;
+		return (
+			`${length} / ${MAX_TASK_TEXT_LENGTH} characters` +
+			(length > MAX_TASK_TEXT_LENGTH ? ". Too long, shorten the text." : "")
+		);
+	}
+
 	function render() {
 		if (destroyed) return;
 		renderConversation();
@@ -356,8 +369,10 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		displayedTaskOwner = owner;
 
 		goal.disabled = busy || Boolean(active && !owner);
-		goalHint.textContent = "Changes apply after you choose Update instructions.";
-		goalHint.hidden = !active;
+		goalHint.textContent =
+			(active ? "Changes apply after you choose Update instructions. " : "") + countText(goal.value);
+		goalHint.hidden = false;
+		const goalOverLimit = goal.value.trim().length > MAX_TASK_TEXT_LENGTH;
 		const { autoSend, minDelaySeconds, maxDelaySeconds } = replySettings;
 		autoSendToggle.setAttribute("aria-checked", String(autoSend));
 		delayRange.setAttribute("aria-disabled", String(!autoSend));
@@ -371,9 +386,10 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 					: `Replies send after a random ${minDelaySeconds}–${maxDelaySeconds}-second countdown.`) +
 			(active ? " Changes apply right away." : "");
 		startButton.hidden = active;
-		startButton.disabled = busy || !state.snapshot || !goal.value.trim();
+		startButton.disabled = busy || !state.snapshot || !goal.value.trim() || goalOverLimit;
 		updateGoalButton.hidden = !active;
-		updateGoalButton.disabled = busy || !owner || !goal.value.trim() || goal.value.trim() === task?.goal;
+		updateGoalButton.disabled =
+			busy || !owner || !goal.value.trim() || goal.value.trim() === task?.goal || goalOverLimit;
 		instructions.hidden = Boolean(task) && (!active || !goalEditorOpen);
 		goalToggle.hidden = !task || !owner;
 		goalToggle.disabled = busy || !active;
@@ -435,7 +451,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		}
 		footer.hidden = !owner || !active;
 		answerText.disabled = busy;
-		answerSend.disabled = busy || !answerText.value.trim();
+		answerHint.textContent = countText(answerText.value);
+		answerSend.disabled = busy || !answerText.value.trim() || answerText.value.trim().length > MAX_TASK_TEXT_LENGTH;
 		const pending = owner ? (task?.pendingReply ?? null) : null;
 		if (task && pending) sendingReply = { taskId: task.id, text: pending.text };
 		else if (task?.status !== "sending" || task.id !== sendingReply?.taskId) sendingReply = null;
@@ -465,7 +482,9 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			busy || !owner || !currentChat || !(task?.status === "sending" || (task?.status === "pending" && pending));
 		cancelButton.disabled =
 			busy || !owner || !task || !["thinking", "pending", "editing", "sending"].includes(task.status);
-		saveEditButton.disabled = busy || !editing || !editText.value.trim();
+		editHint.textContent = `Saving keeps the reply paused. Use Send now when it is ready. ${countText(editText.value)}`;
+		saveEditButton.disabled =
+			busy || !editing || !editText.value.trim() || editText.value.trim().length > MAX_TASK_TEXT_LENGTH;
 		editText.disabled = busy;
 		pauseButton.hidden = !owner || !active || task?.status === "paused";
 		pauseButton.disabled = busy || task?.status === "paused";
