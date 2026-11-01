@@ -590,7 +590,6 @@ test("unknown direction and unsupported content do not trigger the model", () =>
 		[{ type: "video", url: null, description: null, media: null }],
 		[{ type: "sticker", url: null, description: null, media: null }],
 		[{ type: "gif", url: null, description: null, media: null }],
-		[{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null }],
 		[{ type: "file" }],
 	]) {
 		const { agent, service } = setup();
@@ -635,6 +634,7 @@ test("readable GIFs, stickers, and framed videos trigger the model, files do not
 		[{ type: "gif", url: null, description: null, media }],
 		[{ type: "sticker", url: null, description: null, media }],
 		[{ type: "video", url: null, description: null, media }],
+		[{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null }],
 	]) {
 		const { agent, service } = setup();
 		const content = snapshot("r1", "");

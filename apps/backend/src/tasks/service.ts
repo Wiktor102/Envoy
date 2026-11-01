@@ -940,8 +940,8 @@ function checkedReply(value: string | undefined): string {
 
 function readableLatest(messages: readonly ConversationMessage[], latest: ConversationMessage): boolean {
 	// Only forwarded media reads as content. Anything else attached (files,
-	// unframed video, sourceless media), or media past the per-snapshot cap,
-	// still pauses for the user.
+	// sourceless media), or media past the per-snapshot cap, still pauses for
+	// the user.
 	const slots = forwardableMediaSlots(messages);
 	const index = messages.indexOf(latest);
 	if (

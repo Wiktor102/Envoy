@@ -535,9 +535,14 @@ test("the Meta request forwards GIFs, stickers, and video stills as image blocks
 			"new_message",
 		);
 		const content = body.messages[2].content;
-		// The GIF, the sticker, and the framed video resolve. A bare video URL
-		// is never fetched and the file stays presence-only.
-		assert.deepEqual(fetched.sort(), ["https://example.test/clip", "https://example.test/sticker"]);
+		// The GIF, the sticker, and the framed video resolve. The bare video
+		// URL is attempted but rejected on content type here, and the file
+		// stays presence-only.
+		assert.deepEqual(fetched.sort(), [
+			"https://example.test/clip",
+			"https://example.test/clip.mp4",
+			"https://example.test/sticker",
+		]);
 		assert.equal(content.length, 4);
 		assert.deepEqual(
 			content.slice(1).map(({ type }: { type: string }) => type),
@@ -554,6 +559,109 @@ test("the Meta request forwards GIFs, stickers, and video stills as image blocks
 		]);
 		assert.doesNotMatch(JSON.stringify(body), /example\.test/);
 		assert.match(body.messages[0].content, /video stills/);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the Meta request attempts a video_url block for clip URLs", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	const clipBytes = Buffer.from("fake-mp4-bytes");
+	const clipDataUrl = `data:video/mp4;base64,${clipBytes.toString("base64")}`;
+	let body: any;
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			body = await new Request(input, init).json();
+			return modelResponse();
+		}
+		return new Response(clipBytes as unknown as BodyInit, {
+			status: 200,
+			headers: { "content-type": "video/mp4" },
+		});
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "clip",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Watch this",
+				replyTo: null,
+				attachments: [{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null }],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		const content = body.messages[2].content;
+		assert.equal(content.length, 2);
+		assert.equal(content[1].type, "video_url");
+		assert.equal(content[1].video_url.url, clipDataUrl);
+		const payload = JSON.parse(content[0].text);
+		assert.deepEqual(payload.conversation[0].attachments, [{ type: "video", videoIndex: 0 }]);
+		assert.doesNotMatch(JSON.stringify(body), /example\.test\/clip\.mp4/);
+		assert.match(body.messages[0].content, /videoIndex/);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the Meta request falls back to presence-only when video blocks are rejected", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	const clipBytes = Buffer.from("fake-mp4-bytes");
+	const bodies: any[] = [];
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			const body = await new Request(input, init).json();
+			bodies.push(body);
+			if (JSON.stringify(body).includes("video_url")) {
+				return new Response(JSON.stringify({ error: { message: "unknown part" } }), { status: 400 });
+			}
+			return modelResponse('{"action":"reply","text":"Got it"}');
+		}
+		return new Response(clipBytes as unknown as BodyInit, {
+			status: 200,
+			headers: { "content-type": "video/mp4" },
+		});
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "clip",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Watch this",
+				replyTo: null,
+				attachments: [{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null }],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		const decision = await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		assert.equal(bodies.length, 2);
+		const retry = bodies[1].messages[2].content;
+		assert.equal(typeof retry, "string");
+		const payload = JSON.parse(retry);
+		assert.deepEqual(payload.conversation[0].attachments, [{ type: "video" }]);
+		assert.equal(decision.action, "reply");
 	} finally {
 		globalThis.fetch = previousFetch;
 		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
