@@ -883,7 +883,8 @@ export class TaskService {
 
 function checkedText(value: string | undefined): string {
 	const text = value?.trim();
-	if (!text || text.length > MAX_TASK_TEXT_LENGTH) throw new Error("Enter text between 1 and 4000 characters.");
+	if (!text || text.length > MAX_TASK_TEXT_LENGTH)
+		throw new Error(`Enter text between 1 and ${MAX_TASK_TEXT_LENGTH} characters.`);
 	return text;
 }
 

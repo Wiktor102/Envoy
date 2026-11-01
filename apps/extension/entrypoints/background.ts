@@ -1,5 +1,5 @@
 import { defineBackground } from "wxt/utils/define-background";
-import { normalizeReplySettings } from "@envoy/contracts";
+import { MAX_TASK_TEXT_LENGTH, normalizeReplySettings } from "@envoy/contracts";
 import type { BackendRequest } from "../src/messaging";
 import { createBackendClient } from "../src/backend-client";
 import { OWNER_HEARTBEAT_PORT, startBackgroundHeartbeat } from "../src/heartbeat";
@@ -14,7 +14,7 @@ const safeErrors = new Set([
 	"Reconnect the agent tab to the original conversation first.",
 	"The agent tab is disconnected.",
 	"Take over the task before deleting it.",
-	"Enter text between 1 and 4000 characters.",
+	`Enter text between 1 and ${MAX_TASK_TEXT_LENGTH} characters.`,
 	"Replies must be a single line without control characters.",
 	"Task not found.",
 	"Task or conversation not found.",
