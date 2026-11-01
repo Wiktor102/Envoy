@@ -104,6 +104,8 @@ export class MetaModelAdapter implements Agent {
 		try {
 			completion = await complete();
 		} catch (error) {
+			// Status only: error bodies may include request data.
+			debugMedia(`request failed: status ${(error as { status?: number })?.status ?? "unknown"}`);
 			// The chat endpoint may not accept video blocks. Fall back to
 			// evaluating with the clips presence-only instead of failing the
 			// whole decision.
