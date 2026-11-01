@@ -43,15 +43,18 @@ export interface HealthResponse {
 	service: "envoy-backend";
 }
 
-// Photos only. Video, GIF, stickers, and files stay presence-only.
+// Photos, video stills, GIFs, and stickers reach the model as image blocks.
+// Files stay presence-only: the reader captures them so they pause instead of
+// failing the whole snapshot.
 export const MAX_IMAGE_SIDE = 1568;
+// One shared cap across every forwardable media type, newest first.
 export const MAX_SNAPSHOT_IMAGES = 4;
 // Base64 characters per inline image and per snapshot. Both stay well under
 // the backend socket payload limit.
 export const MAX_INLINE_MEDIA_CHARS = 1_000_000;
 export const MAX_SNAPSHOT_MEDIA_CHARS = 3_000_000;
 
-export const INLINE_IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp"] as const;
+export const INLINE_IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 export type InlineImageMime = (typeof INLINE_IMAGE_MIMES)[number];
 
 export interface InlineImageMedia {
@@ -73,23 +76,39 @@ export interface ImageAttachment {
 
 export interface VideoAttachment {
 	type: "video";
-	url: null;
+	url: string | null;
 	description: null;
+	// Poster frame for local sources the backend cannot fetch. Null for remote
+	// sources (the backend cannot make stills from video bytes) and when
+	// extraction failed. Older clients omit this field.
+	media: InlineImageMedia | null;
 }
 
 export interface StickerAttachment {
 	type: "sticker";
-	url: null;
+	url: string | null;
 	description: null;
+	// Inline bytes for local sources the backend cannot fetch. Null for remote
+	// sources and when extraction failed. Older clients omit this field.
+	media: InlineImageMedia | null;
 }
 
 export interface GifAttachment {
 	type: "gif";
-	url: null;
+	url: string | null;
 	description: null;
+	// Inline bytes for local sources the backend cannot fetch. Null for remote
+	// sources and when extraction failed. Older clients omit this field.
+	media: InlineImageMedia | null;
 }
 
-export type MessageAttachment = ImageAttachment | VideoAttachment | StickerAttachment | GifAttachment;
+// Presence-only. A file's bytes never reach the model; capturing the row
+// keeps the reader fail-closed without failing the whole snapshot.
+export interface FileAttachment {
+	type: "file";
+}
+
+export type MessageAttachment = ImageAttachment | VideoAttachment | StickerAttachment | GifAttachment | FileAttachment;
 
 export interface ConversationMessage {
 	// Temporary identifier for a rendered node; it can change on reload or remount.
@@ -213,8 +232,19 @@ export type HealthReply = { ok: true; health: HealthResponse } | { ok: false; er
 
 // Transport bytes never identify content. The rendered source already feeds
 // the revision through the fingerprint; hashing base64 would only churn.
+// Sticker URLs rotate across reloads and may be sensitive, so the graphic
+// label in the DOM fingerprint identifies the sticker instead.
 export function attachmentIdentity(attachment: MessageAttachment): MessageAttachment {
-	return attachment.type === "image" && attachment.media ? { ...attachment, media: null } : attachment;
+	switch (attachment.type) {
+		case "image":
+		case "video":
+		case "gif":
+			return attachment.media ? { ...attachment, media: null } : attachment;
+		case "sticker":
+			return { ...attachment, url: null, media: null };
+		case "file":
+			return attachment;
+	}
 }
 
 // The content a revision covers. Node IDs and stable IDs are identity,
@@ -232,27 +262,46 @@ export function messageContent({ text, direction, replyTo, attachments, reaction
 	};
 }
 
-function fetchableImageUrl(url: string | null): boolean {
+function fetchableMediaUrl(url: string | null): boolean {
 	// Prefix only; the backend parses strictly before fetching. A malformed
 	// URL merely fails there and stays presence-only.
 	return !!url && url.startsWith("https://");
 }
 
-// Newest-first selection of the images the model may see, one flag per
+function forwardableAttachment(attachment: MessageAttachment): boolean {
+	switch (attachment.type) {
+		case "image":
+		case "gif":
+		case "sticker":
+			return fetchableMediaUrl(attachment.url) || !!attachment.media;
+		case "video":
+			// The backend cannot make stills from video bytes, so only a
+			// captured poster frame qualifies. A bare video URL stays
+			// presence-only.
+			return !!attachment.media;
+		case "file":
+			return false;
+	}
+}
+
+// Newest-first selection of the media the model may see, one flag per
 // attachment in message order. Reply quotes never qualify: their bytes stay
 // client-side. Anything beyond MAX_SNAPSHOT_IMAGES stays presence-only.
-export function forwardableImageSlots(messages: readonly ConversationMessage[]): boolean[][] {
+export function forwardableMediaSlots(messages: readonly ConversationMessage[]): boolean[][] {
 	const slots = messages.map((message) => message.attachments.map(() => false));
 	let remaining = MAX_SNAPSHOT_IMAGES;
 	for (let m = messages.length - 1; m >= 0 && remaining > 0; m--) {
 		const attachments = messages[m]!.attachments;
 		for (let a = attachments.length - 1; a >= 0 && remaining > 0; a--) {
-			const attachment = attachments[a]!;
-			if (attachment.type !== "image") continue;
-			if (!fetchableImageUrl(attachment.url) && !attachment.media) continue;
+			if (!forwardableAttachment(attachments[a]!)) continue;
 			slots[m]![a] = true;
 			remaining--;
 		}
 	}
 	return slots;
+}
+
+// Historical name for the shared media selection above.
+export function forwardableImageSlots(messages: readonly ConversationMessage[]): boolean[][] {
+	return forwardableMediaSlots(messages);
 }
