@@ -79,8 +79,8 @@ export interface VideoAttachment {
 	url: string | null;
 	description: null;
 	// Poster frame for local sources the backend cannot fetch. Null for remote
-	// sources (the backend cannot make stills from video bytes) and when
-	// extraction failed. Older clients omit this field.
+	// sources (the backend attempts the clip URL as a video block instead)
+	// and when extraction failed. Older clients omit this field.
 	media: InlineImageMedia | null;
 }
 
@@ -275,10 +275,10 @@ function forwardableAttachment(attachment: MessageAttachment): boolean {
 		case "sticker":
 			return fetchableMediaUrl(attachment.url) || !!attachment.media;
 		case "video":
-			// The backend cannot make stills from video bytes, so only a
-			// captured poster frame qualifies. A bare video URL stays
-			// presence-only.
-			return !!attachment.media;
+			// A captured poster frame forwards as a still; otherwise the
+			// backend attempts the clip URL as a video block, falling back
+			// to presence-only if the endpoint rejects it.
+			return fetchableMediaUrl(attachment.url) || !!attachment.media;
 		case "file":
 			return false;
 	}

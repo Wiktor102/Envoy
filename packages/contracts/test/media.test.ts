@@ -88,11 +88,11 @@ test("forwardable media slots cover video stills, GIFs, and stickers but never f
 		message([remote(null)]),
 	];
 	assert.deepEqual(forwardableMediaSlots(messages), [
-		[true, false],
-		// Newest-first: the sticker, the framed video, and the GIF take three
-		// of the four slots. A video URL alone never qualifies: the backend
-		// cannot make stills from video bytes, so it stays presence-only.
-		[true, true, true, false],
+		[false, false],
+		// Newest-first: the clip URL, the framed video, the sticker, and the
+		// GIF take all four slots. The backend attempts the clip as a video
+		// block and falls back to presence-only if the endpoint rejects it.
+		[true, true, true, true],
 		[false],
 	]);
 });
