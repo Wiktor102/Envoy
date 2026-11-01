@@ -899,6 +899,65 @@ test("the media debug log records the connection cause without request data", as
 	}
 });
 
+test("the Meta request retries once when the connection itself fails", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	const previousFlag = process.env.ENVOY_DEBUG_MEDIA;
+	const previousInfo = console.info;
+	process.env.MODEL_API_KEY = "test-key";
+	process.env.ENVOY_DEBUG_MEDIA = "1";
+	const lines: string[] = [];
+	console.info = (line: string) => {
+		lines.push(line);
+	};
+	let calls = 0;
+	globalThis.fetch = (async (input: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			calls++;
+			if (calls === 1) {
+				throw Object.assign(new Error("fetch failed"), {
+					cause: Object.assign(new Error("unable to verify the first certificate"), {
+						code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+					}),
+				});
+			}
+			return modelResponse();
+		}
+		throw new Error("unexpected fetch");
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "text",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Hello",
+				replyTo: null,
+				attachments: [],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		const decision = await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		assert.equal(calls, 2);
+		assert.equal(decision.action, "wait");
+		assert.ok(lines.some((line) => line.includes("retrying once")));
+		assert.ok(lines.some((line) => line.includes("UNABLE_TO_VERIFY_LEAF_SIGNATURE")));
+	} finally {
+		console.info = previousInfo;
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+		if (previousFlag === undefined) delete process.env.ENVOY_DEBUG_MEDIA;
+		else process.env.ENVOY_DEBUG_MEDIA = previousFlag;
+	}
+});
+
 test("the Meta request includes the agent conversation alongside instructions", async () => {
 	const previousKey = process.env.MODEL_API_KEY;
 	const previousFetch = globalThis.fetch;

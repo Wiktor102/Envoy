@@ -107,36 +107,47 @@ export class MetaModelAdapter implements Agent {
 		debugMedia(
 			`request ${images.length} image blocks [${images.map((url) => `${blockBytes(url)}B`).join(", ")}], ${pendingVideos.length} video blocks [${pendingVideos.map((url) => `${blockBytes(url)}B`).join(", ")}]`,
 		);
-		try {
-			completion = await complete();
-		} catch (error) {
-			// Status, class, and network cause chain only: bodies may include
-			// request data. Transports nest: undici's outer "fetch failed"
-			// carries the specific error in its own cause.
-			const failure = error as {
-				status?: number;
-				cause?: unknown;
-				constructor?: { name?: string };
-			};
-			const status = failure?.status ?? "unknown";
-			const kind = failure?.constructor?.name ?? "unknown";
-			const chain: string[] = [];
-			let current: unknown = failure?.cause;
-			while (current instanceof Error && chain.length < 3) {
-				const code = (current as { code?: string }).code ?? "?";
-				chain.push(`${code}: ${current.message.slice(0, 160)}`);
-				current = (current as { cause?: unknown }).cause;
+		let retriedConnection = false;
+		for (;;) {
+			try {
+				completion = await complete();
+				break;
+			} catch (error) {
+				// Status, class, and network cause chain only: bodies may include
+				// request data. Transports nest: undici's outer "fetch failed"
+				// carries the specific error in its own cause.
+				const failure = error as {
+					status?: number;
+					cause?: unknown;
+					constructor?: { name?: string };
+				};
+				const rawStatus = failure?.status;
+				const status = rawStatus ?? "unknown";
+				const kind = failure?.constructor?.name ?? "unknown";
+				const chain: string[] = [];
+				let current: unknown = failure?.cause;
+				while (current instanceof Error && chain.length < 3) {
+					const code = (current as { code?: string }).code ?? "?";
+					chain.push(`${code}: ${current.message.slice(0, 160)}`);
+					current = (current as { cause?: unknown }).cause;
+				}
+				const causedBy = chain.length ? ` caused by ${chain.join("; caused by ")}` : "";
+				debugMedia(`request failed: status ${status} (${kind})${causedBy}`);
+				// A transport failure never completed, so one retry cannot
+				// double-apply anything. Aborts stay aborted.
+				if (rawStatus === undefined && !retriedConnection && !signal?.aborted) {
+					retriedConnection = true;
+					debugMedia("connection failed, retrying once");
+					continue;
+				}
+				// The chat endpoint may not accept video blocks. Fall back to
+				// evaluating with the clips presence-only instead of failing the
+				// whole decision.
+				if (!pendingVideos.length || (error as { status?: number })?.status !== 400) throw error;
+				debugMedia("video blocks rejected, retrying presence-only");
+				payload = dropVideoIndexes(payload);
+				pendingVideos = [];
 			}
-			const causedBy = chain.length ? ` caused by ${chain.join("; caused by ")}` : "";
-			debugMedia(`request failed: status ${status} (${kind})${causedBy}`);
-			// The chat endpoint may not accept video blocks. Fall back to
-			// evaluating with the clips presence-only instead of failing the
-			// whole decision.
-			if (!pendingVideos.length || (error as { status?: number })?.status !== 400) throw error;
-			debugMedia("video blocks rejected, retrying presence-only");
-			payload = dropVideoIndexes(payload);
-			pendingVideos = [];
-			completion = await complete();
 		}
 
 		let parsed: unknown;
