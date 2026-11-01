@@ -286,6 +286,10 @@ async function resolveMediaInner(attachment: MessageAttachment, signal?: AbortSi
 	return null;
 }
 
+// One megabyte of image bytes. Renders past it re-encode to a still instead
+// of going out untouched.
+const MAX_IMAGE_BYTES = 1_000_000;
+
 // Stills only: video arrives as a captured poster frame, and bytes already
 // within caps pass through untouched instead of re-encoding.
 async function imageDataUrl(bytes: Buffer, mime: string | null): Promise<string | null> {
@@ -304,7 +308,10 @@ async function imageDataUrl(bytes: Buffer, mime: string | null): Promise<string 
 	const format = meta.format ? formats[meta.format] : undefined;
 	if (!format || !meta.width || !meta.height) return null;
 	if (mime && mime !== format) return null;
-	if (meta.width <= MAX_IMAGE_SIDE && meta.height <= MAX_IMAGE_SIDE) {
+	// Small renders pass through untouched, animation included. Large ones
+	// re-encode to a still: oversized blocks have no passing record, and a
+	// first-frame still describes where a rejected block produced nothing.
+	if (meta.width <= MAX_IMAGE_SIDE && meta.height <= MAX_IMAGE_SIDE && bytes.length <= MAX_IMAGE_BYTES) {
 		return `data:${format};base64,${bytes.toString("base64")}`;
 	}
 	try {

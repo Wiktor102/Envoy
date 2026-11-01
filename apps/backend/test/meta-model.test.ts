@@ -617,6 +617,57 @@ test("the Meta request attempts a video_url block for clip URLs", async () => {
 	}
 });
 
+test("the Meta request re-encodes fetched images past the byte budget as stills", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	const big = await sharp({
+		create: { width: 1200, height: 1200, channels: 3, noise: { type: "gaussian", mean: 128, sigma: 30 } },
+	})
+		.png()
+		.toBuffer();
+	assert.ok(big.length > 1_000_000);
+	let body: any;
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			body = await new Request(input, init).json();
+			return modelResponse();
+		}
+		return new Response(big as unknown as BodyInit, { status: 200, headers: { "content-type": "image/png" } });
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "big",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Look",
+				replyTo: null,
+				attachments: [{ type: "image", url: "https://example.test/big", description: null, media: null }],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		const content = body.messages[2].content;
+		assert.equal(content.length, 2);
+		const blockUrl = content[1].image_url.url as string;
+		assert.match(blockUrl, /^data:image\/jpeg;base64,/);
+		assert.ok(Buffer.from(blockUrl.split(",")[1]!, "base64").length < big.length);
+		const payload = JSON.parse(content[0].text);
+		assert.deepEqual(payload.conversation[0].attachments, [{ type: "image", imageIndex: 0 }]);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
 test("the Meta request falls back to presence-only when video blocks are rejected", async () => {
 	const previousKey = process.env.MODEL_API_KEY;
 	const previousFetch = globalThis.fetch;
