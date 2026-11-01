@@ -151,15 +151,19 @@ export class MetaModelAdapter implements Agent {
 		}
 
 		let parsed: unknown;
-		const decisionText = completion.choices[0]?.message.content ?? "";
+		const decisionText = completion.choices[0]?.message?.content ?? "";
 		try {
 			parsed = JSON.parse(decisionText);
 		} catch {
-			// Length only: model output may echo conversation text.
-			debugMedia(`model decision unparsable (choices ${completion.choices.length}, ${decisionText.length} chars)`);
+			debugMedia(`model decision unparsable: ${describeDecisionFailure(completion)}`);
 			throw new Error("Invalid model decision");
 		}
-		return parseDecision(parsed);
+		try {
+			return parseDecision(parsed);
+		} catch (error) {
+			debugMedia(`model decision invalid: ${describeDecisionFailure(completion)}`);
+			throw error;
+		}
 	}
 }
 
@@ -429,6 +433,76 @@ async function fetchMediaBytes(
 		}
 	}
 	return null;
+}
+
+// Finish reasons worth naming in a log line. Anything else stays "unlisted":
+// provider strings are arbitrary and never reach the log.
+const KNOWN_FINISH_REASONS = new Set(["stop", "length", "tool_calls", "content_filter", "function_call"]);
+
+// Structural view of a chat completion for failure diagnostics. Fields stay
+// unknown because providers omit or reshape them; every access below guards.
+interface DecisionFailureResponse {
+	choices?:
+		| readonly {
+				finish_reason?: string;
+				message?: {
+					content?: unknown;
+					refusal?: unknown;
+					tool_calls?: readonly unknown[];
+				} | null;
+		  }[]
+		| null;
+	usage?: {
+		prompt_tokens?: unknown;
+		completion_tokens?: unknown;
+		total_tokens?: unknown;
+		completion_tokens_details?: { reasoning_tokens?: unknown } | null;
+	} | null;
+}
+
+// One content-free metadata line for a decision that cannot be parsed or
+// validated: choice count, allowlisted finish reason, content presence, refusal
+// presence, tool-call count, and numeric token usage. Content distinguishes
+// missing, null, empty, and present-with-length. Missing fields report as
+// missing instead of crashing; no content, refusal text, tool arguments,
+// reasoning text, prompt, or URL ever reaches the log.
+function describeDecisionFailure(response: DecisionFailureResponse): string {
+	const choices = Array.isArray(response?.choices) ? response.choices : [];
+	const choice = choices[0];
+	const finish = choice?.finish_reason;
+	const finishText =
+		typeof finish === "string" && KNOWN_FINISH_REASONS.has(finish)
+			? finish
+			: finish === undefined
+				? "missing"
+				: "unlisted";
+	const message = choice?.message ?? null;
+	let contentText = "missing";
+	if (message !== null && typeof message === "object" && "content" in message) {
+		const content = message.content;
+		if (typeof content === "string") contentText = content.length ? `present ${content.length} chars` : "empty";
+		else if (content === null) contentText = "null";
+		else if (content !== undefined) contentText = "unlisted";
+	}
+	const refusal = message !== null && typeof message === "object" ? message.refusal : undefined;
+	const refusalText = typeof refusal === "string" && refusal.length ? `${refusal.length} chars` : "none";
+	const tools =
+		message !== null && typeof message === "object" && Array.isArray(message.tool_calls) ? message.tool_calls.length : 0;
+	const usage = response?.usage;
+	let usageText = "none";
+	if (usage !== null && typeof usage === "object") {
+		const parts: string[] = [];
+		const numeric = (label: string, value: unknown) => {
+			if (typeof value === "number") parts.push(`${label} ${value}`);
+		};
+		numeric("prompt", usage.prompt_tokens);
+		numeric("completion", usage.completion_tokens);
+		numeric("total", usage.total_tokens);
+		const details = usage.completion_tokens_details;
+		if (details !== null && typeof details === "object") numeric("reasoning", details.reasoning_tokens);
+		if (parts.length) usageText = `[${parts.join(", ")}]`;
+	}
+	return `choices ${choices.length}, finish ${finishText}, content ${contentText}, refusal ${refusalText}, tool calls ${tools}, usage ${usageText}`;
 }
 
 function formatAgentChat(chat: readonly AgentChatMessage[]): string {

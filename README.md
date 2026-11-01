@@ -27,6 +27,8 @@ pnpm start:backend
 
 In `chrome://extensions`, enable Developer mode and load `apps/extension/.output/chrome-mv3` as an unpacked extension. Reload the extension after rebuilding it.
 
+On Windows hosts where outbound HTTPS passes through local inspection, backend requests to the model API can fail certificate verification (`UNABLE_TO_VERIFY_LEAF_SIGNATURE`) even though the browser works: the inspection root (observed with Avast Web/Mail Shield) is trusted by Windows but not by Node's bundled trust store. In that case launch the backend with `NODE_OPTIONS=--use-system-ca` (verified with Node v26.12.1), which only makes Node also trust the operating system's root store. Do not disable certificate verification, and do not set the flag on hosts without local inspection; it is a targeted trust option, not a general requirement.
+
 ## Delegate a conversation
 
 1. Open the private Messenger conversation in a dedicated tab, then reload that tab. Reload after selecting a different conversation too. Envoy stops when the tab navigates because the URL may change before Messenger replaces the old messages.
