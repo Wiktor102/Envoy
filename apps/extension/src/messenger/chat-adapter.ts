@@ -628,17 +628,16 @@ function isMessengerPhotoLink(anchor: HTMLAnchorElement): boolean {
 	}
 }
 
-// A GIF sent through GIPHY renders as a photo link whose image alt names the
-// format and whose caption names the service. Animated previews carry a play
-// glyph instead. Both stay presence-only: only photos forward bytes.
+// A GIF renders as a photo link whose image alt names the format. Links sent
+// through GIPHY also carry a caption naming the service, while an uploaded
+// GIF renders the same link with a descriptive alt (e.g. "Obraz GIF") and no
+// caption. The alt word carries the classification either way: observed photo
+// links render their images with an empty alt. Animated previews carry a play
+// glyph instead.
 function isGifLink(viewer: HTMLElement): boolean {
 	if (!viewer.matches("a[href]") || !isMessengerPhotoLink(viewer as HTMLAnchorElement)) return false;
 	const image = viewer.querySelector("img[alt]");
-	return (
-		image !== null &&
-		isGifLabel(image.getAttribute("alt") ?? "") &&
-		[...viewer.querySelectorAll("span")].some((span) => span.textContent?.trim() === "GIPHY")
-	);
+	return image !== null && isGifLabel(image.getAttribute("alt") ?? "");
 }
 
 function isGifViewer(viewer: HTMLElement): boolean {

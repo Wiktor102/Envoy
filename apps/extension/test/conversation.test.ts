@@ -1256,22 +1256,24 @@ test("reads an animated preview as an unreadable attachment and tracks its blob 
 test("reads the observed GIPHY image link while rejecting ambiguous media", async () => {
 	const dom = setup();
 	const gif = `<div data-scope="messages_table" data-message-id="g1" aria-roledescription="wiadomość" aria-label="O 21:29, Alex"><a href="/messenger_media/?attachment_id=1"><img alt="Fish GIF fish, hello there" src="https://example.test/gif"><span>GIPHY</span></a></div>`;
+	// Live normal chat: an uploaded GIF renders as the same link with a
+	// descriptive alt and no GIPHY caption.
+	const uploaded = `<div data-scope="messages_table" data-message-id="g2" aria-roledescription="wiadomość" aria-label="O 21:29, Alex"><a href="/messenger_media/?attachment_id=2"><img alt="Obraz GIF" src="https://example.test/uploaded"></a></div>`;
 	const sticker = `<div data-scope="messages_table" data-message-id="s1" aria-roledescription="wiadomość" aria-label="O 21:30, Alex"><div role="img" aria-label="Banana sticker" style="background-image: url(https://example.test/sticker)"></div></div>`;
 	const text = `<div data-scope="messages_table" data-message-id="t1" aria-roledescription="wiadomość" aria-label="O 21:31, Alex: Hello"><span dir="auto">Hello</span></div>`;
-	setMessages(`${gif}${sticker}${text}`);
+	setMessages(`${gif}${uploaded}${sticker}${text}`);
+	const snapshot = await messengerChatAdapter.readConversation();
 	assert.deepEqual(
-		(await messengerChatAdapter.readConversation()).messages.map(({ text, attachments }) => [
-			text,
-			attachments.map(({ type }) => type),
-		]),
+		snapshot.messages.map(({ text, attachments }) => [text, attachments.map(({ type }) => type)]),
 		[
+			["", ["gif"]],
 			["", ["gif"]],
 			["", ["sticker"]],
 			["Hello", []],
 		],
 	);
+	assert.equal(snapshot.messages[1]!.attachments[0]!.url, "https://example.test/uploaded");
 	for (const unsafe of [
-		gif.replace("GIPHY", "other"),
 		gif.replace("/messenger_media/?attachment_id=1", "https://example.test/other"),
 		gif.replace("</a>", "<video></video></a>"),
 	]) {
