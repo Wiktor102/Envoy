@@ -68,4 +68,4 @@ The test suites use synthetic Messenger DOM fixtures and a fake agent. They do n
 | `apps/backend`       | Meta Model API adapter, in-memory task service, connector boundary, and tRPC WebSocket server |
 | `apps/extension`     | Messenger DOM reader and sender, background transport, and injected sidebar controls          |
 
-Contracts and backend use TypeScript `NodeNext` resolution. The extension imports only backend router types; the server implementation and credentials do not enter its bundle. See [PLAN.md](PLAN.md) for scope and remaining work.
+Contracts and backend use TypeScript `NodeNext` resolution. The extension imports only backend router types; the server implementation and credentials do not enter its bundle.
