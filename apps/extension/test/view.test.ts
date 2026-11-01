@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { test, type TestContext } from "node:test";
 import { JSDOM } from "jsdom";
-import type { TaskState, TaskStatus } from "@envoy/contracts";
+import { MAX_TASK_TEXT_LENGTH, type TaskState, type TaskStatus } from "@envoy/contracts";
 import type { ControllerState, EnvoyController } from "../src/controller";
 
 // Supply Vite's static asset imports when running the view in Node.
@@ -360,7 +360,8 @@ test("reply sending defaults to auto-send after a 10-second countdown", async (t
 	assert.equal(ui.element<HTMLInputElement>("delay-max").value, "10");
 	assert.equal(ui.element<HTMLInputElement>("delay-min").disabled, false);
 	assert.equal(ui.element("delay-hint").textContent, "Replies send after a 10-second countdown.");
-	assert.equal(ui.element("goal-hint").hidden, true);
+	assert.equal(ui.element("goal-hint").hidden, false);
+	assert.equal(ui.element("goal-hint").textContent, `0 / ${MAX_TASK_TEXT_LENGTH} characters`);
 });
 
 test("the auto-send switch and delay range are remembered across remounts", async (t) => {
@@ -545,6 +546,70 @@ test("answers send to the agent without rewriting the goal", async (t) => {
 	assert.deepEqual(ui.texts, ["Yes, after 3."]);
 	assert.equal(ui.element<HTMLTextAreaElement>("answer-text").value, "");
 	assert.equal(goal.value, "Arrange a meeting");
+});
+
+test("limited inputs show character counts and block over-limit submits", (t) => {
+	const ui = setup(t);
+	const over = "x".repeat(MAX_TASK_TEXT_LENGTH + 1);
+	const start = ui.element<HTMLButtonElement>("start");
+	assert.equal(ui.element("goal-hint").textContent, `0 / ${MAX_TASK_TEXT_LENGTH} characters`);
+	assert.equal(start.disabled, true);
+	ui.setText("goal", "Arrange a meeting");
+	assert.equal(ui.element("goal-hint").textContent, `17 / ${MAX_TASK_TEXT_LENGTH} characters`);
+	assert.equal(start.disabled, false);
+	ui.setText("goal", over);
+	assert.equal(
+		ui.element("goal-hint").textContent,
+		`${MAX_TASK_TEXT_LENGTH + 1} / ${MAX_TASK_TEXT_LENGTH} characters. Too long, shorten the text.`,
+	);
+	assert.equal(start.disabled, true);
+
+	ui.update({ task: { ...task, status: "needs_user", detail: "Is Friday allowed?" }, isOwner: true });
+	const updateGoal = ui.element<HTMLButtonElement>("update-goal");
+	ui.setText("goal", "Arrange a meeting");
+	assert.equal(
+		ui.element("goal-hint").textContent,
+		`Changes apply after you choose Update instructions. 17 / ${MAX_TASK_TEXT_LENGTH} characters`,
+	);
+	assert.equal(updateGoal.disabled, true);
+	ui.setText("goal", "Arrange a meeting on Thursday");
+	assert.equal(updateGoal.disabled, false);
+	ui.setText("goal", over);
+	assert.equal(updateGoal.disabled, true);
+
+	const answerSend = ui.element<HTMLButtonElement>("answer-send");
+	ui.setText("answer-text", "Yes, after 3.");
+	assert.equal(ui.element("answer-hint").textContent, `13 / ${MAX_TASK_TEXT_LENGTH} characters`);
+	assert.equal(answerSend.disabled, false);
+	ui.setText("answer-text", over);
+	assert.equal(
+		ui.element("answer-hint").textContent,
+		`${MAX_TASK_TEXT_LENGTH + 1} / ${MAX_TASK_TEXT_LENGTH} characters. Too long, shorten the text.`,
+	);
+	assert.equal(answerSend.disabled, true);
+
+	ui.update({
+		task: {
+			...task,
+			status: "editing",
+			pendingReply: {
+				commandId: "reply-1",
+				chatId: snapshot.chatId,
+				expectedRevision: snapshot.revision,
+				text: "Hi",
+				sendAt: null,
+			},
+		},
+		isOwner: true,
+	});
+	const saveEdit = ui.element<HTMLButtonElement>("save-edit");
+	assert.equal(
+		ui.element("edit-hint").textContent,
+		`Saving keeps the reply paused. Use Send now when it is ready. 2 / ${MAX_TASK_TEXT_LENGTH} characters`,
+	);
+	assert.equal(saveEdit.disabled, false);
+	ui.setText("reply-edit", over);
+	assert.equal(saveEdit.disabled, true);
 });
 
 test("agent history stays hidden from other tabs and read-only after the task ends", (t) => {
