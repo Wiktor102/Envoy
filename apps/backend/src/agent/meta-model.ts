@@ -21,6 +21,13 @@ function maxCompletionTokens(): number {
 	return value;
 }
 
+// One-line diagnostics for live triage (which fetches succeeded, which
+// blocks reach the model). Set ENVOY_DEBUG_MEDIA=1 on the backend; quiet
+// otherwise. Never logs URLs or conversation text.
+function debugMedia(line: string): void {
+	if (process.env.ENVOY_DEBUG_MEDIA) console.info(`[envoy] ${line}`);
+}
+
 // Credentials and API responses stay on the backend. Never log message content
 // or provider errors, which may include request data.
 export class MetaModelAdapter implements Agent {
@@ -93,6 +100,7 @@ export class MetaModelAdapter implements Agent {
 				{ signal },
 			);
 		let completion: Awaited<ReturnType<typeof complete>>;
+		debugMedia(`request ${images.length} image blocks, ${pendingVideos.length} video blocks`);
 		try {
 			completion = await complete();
 		} catch (error) {
@@ -100,6 +108,7 @@ export class MetaModelAdapter implements Agent {
 			// evaluating with the clips presence-only instead of failing the
 			// whole decision.
 			if (!pendingVideos.length || (error as { status?: number })?.status !== 400) throw error;
+			debugMedia("video blocks rejected, retrying presence-only");
 			payload = dropVideoIndexes(payload);
 			pendingVideos = [];
 			completion = await complete();
@@ -225,6 +234,13 @@ async function collectMedia(
 }
 
 async function resolveMedia(attachment: MessageAttachment, signal?: AbortSignal): Promise<ResolvedMedia> {
+	const origin = attachment.type === "file" ? "none" : attachment.media ? "inline" : "url";
+	const resolved = await resolveMediaInner(attachment, signal);
+	debugMedia(`media ${attachment.type} ${origin} -> ${resolved ? `${resolved.block} block` : "presence-only"}`);
+	return resolved;
+}
+
+async function resolveMediaInner(attachment: MessageAttachment, signal?: AbortSignal): Promise<ResolvedMedia> {
 	try {
 		switch (attachment.type) {
 			case "image":
@@ -340,7 +356,10 @@ async function fetchMediaBytes(
 			continue;
 		}
 		const contentType = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
-		if (!response.ok || !contentType.startsWith(contentPrefix)) return null;
+		if (!response.ok || !contentType.startsWith(contentPrefix)) {
+			debugMedia(`fetch rejected: status ${response.status} type ${contentType || "none"}`);
+			return null;
+		}
 		try {
 			const reader = response.body?.getReader();
 			if (!reader) return null;
@@ -356,7 +375,9 @@ async function fetchMediaBytes(
 				}
 				chunks.push(value);
 			}
-			return { bytes: Buffer.concat(chunks), contentType };
+			const bytes = Buffer.concat(chunks);
+			debugMedia(`fetch ${contentType} ${bytes.length}B`);
+			return { bytes, contentType };
 		} catch {
 			return null;
 		}

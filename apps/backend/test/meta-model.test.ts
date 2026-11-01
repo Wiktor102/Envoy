@@ -669,6 +669,59 @@ test("the Meta request falls back to presence-only when video blocks are rejecte
 	}
 });
 
+test("the media debug log narrates fetches and blocks without URLs or text", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	const previousFlag = process.env.ENVOY_DEBUG_MEDIA;
+	const previousInfo = console.info;
+	process.env.MODEL_API_KEY = "test-key";
+	process.env.ENVOY_DEBUG_MEDIA = "1";
+	const lines: string[] = [];
+	console.info = (line: string) => {
+		lines.push(line);
+	};
+	const clipBytes = Buffer.from("fake-mp4-bytes");
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") return modelResponse();
+		return new Response(clipBytes as unknown as BodyInit, {
+			status: 200,
+			headers: { "content-type": "video/mp4" },
+		});
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "clip",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Watch this",
+				replyTo: null,
+				attachments: [{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null }],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		assert.ok(lines.some((line) => line.includes("fetch video/mp4")));
+		assert.ok(lines.some((line) => line.includes("media video url -> video block")));
+		assert.ok(lines.some((line) => line.includes("0 image blocks, 1 video blocks")));
+		assert.ok(!lines.join("\n").includes("example.test"));
+		assert.ok(!lines.join("\n").includes("Watch this"));
+	} finally {
+		console.info = previousInfo;
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+		if (previousFlag === undefined) delete process.env.ENVOY_DEBUG_MEDIA;
+		else process.env.ENVOY_DEBUG_MEDIA = previousFlag;
+	}
+});
+
 test("the Meta request includes the agent conversation alongside instructions", async () => {
 	const previousKey = process.env.MODEL_API_KEY;
 	const previousFetch = globalThis.fetch;
