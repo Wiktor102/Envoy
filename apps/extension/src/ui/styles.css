@@ -164,6 +164,11 @@ summary:focus-visible,
 	flex: none;
 }
 
+.settings-button span {
+	text-box-trim: trim-both;
+	text-box-edge: cap alphabetic;
+}
+
 .switch-track {
 	display: block;
 	flex: 0 0 28px;
