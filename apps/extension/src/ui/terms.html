@@ -1,34 +1,44 @@
-<!-- Keep TERMS_VERSION in src/terms.ts in sync with the version below. -->
-<p class="hint">Version 2026-11-01</p>
+<!--
+	Keep TERMS_VERSION in src/terms.ts in sync with the version below.
+	This text describes the hosted backend. Do not release it until the backend is hosted.
+-->
+<p class="hint">Version 2026-11-01.2</p>
 
 <h3>1. Who we are</h3>
 <p>
-	Envoy is a browser extension and backend software made by Envoy Team ("we", "us"). Contact: admin@wiktorgolicz.pl. Envoy
-	is not affiliated with, endorsed by, or sponsored by Meta Platforms, Inc. or its affiliates ("Meta").
+	Envoy is a browser extension and a backend service operated by Wiktor Golicz under the name Envoy Team ("we", "us").
+	Contact: admin@wiktorgolicz.pl. Envoy is not affiliated with, endorsed by, or sponsored by Meta Platforms, Inc. or its
+	affiliates ("Meta").
 </p>
 <p>
 	Envoy is currently a non-commercial prototype, not a finished product. We offer it for testing and personal,
 	non-commercial use only. It may contain errors, and we may change or stop it at any time.
 </p>
-<p>
-	You run the Envoy backend on your own computer with your own Meta Model API key. We do not currently host Envoy, and your
-	chats are not sent to us.
-</p>
+<p>We run the backend on our server with our own Meta Model API account, so your delegated chats pass through our server.</p>
 
 <h3>2. What Envoy does</h3>
 <p>
 	Envoy uses artificial intelligence to generate responses, so it cannot work without processing your data. This includes
-	the text of your chats in the conversation you delegate, including messages written by other people. When you start a
-	task, Envoy:
+	the text of your chats in the conversation you delegate, including messages written by other people. Envoy can only use
+	messages currently loaded in the Messenger tab, and it does not upload your other chats. When you start a task, Envoy:
 </p>
 <ul>
-	<li>reads the messages currently loaded in the Messenger conversation you select;</li>
-	<li>passes them, together with your goal, instructions, and answers, to the backend on your computer;</li>
-	<li>has the backend send this content to Meta's Model API, an artificial intelligence service, using your key.</li>
+	<li>reads the messages loaded in the conversation you select;</li>
+	<li>sends them, together with your goal, to our backend;</li>
+	<li>keeps sending the loaded conversation at short intervals while the task is active and the tab is connected;</li>
+	<li>
+		has our backend ask Meta's Model API, an artificial intelligence service, what to do when the task starts, when you
+		change the instructions or resume, and when it detects a new or edited message.
+	</li>
 </ul>
 <p>
-	Based on the model's output, Envoy may wait, ask you a question, propose a reply, or send a reply in your name. Unless
-	you turn off auto-send, a proposed reply is sent automatically when its countdown ends.
+	Based on the model's output, Envoy may wait, ask you a question, finish the task, or prepare a message and send it in
+	your name. Envoy can write first, even if the chat is empty or you sent the last message.
+</p>
+<p>
+	Auto-send is on by default. A prepared message is sent automatically after a 10-second countdown unless you edit it,
+	cancel it, pause the task, or take over. You can change the delay to between 1 and 600 seconds, or turn auto-send off so
+	that messages wait for Send now. A task keeps running while you use other tabs, as long as its Messenger tab stays open.
 </p>
 
 <h3>3. Eligibility</h3>
@@ -49,18 +59,14 @@
 	Before resuming, check the conversation for any send that Envoy could not confirm.
 </p>
 <p>
-	You are responsible for your computer, your Meta Model API account and key, and any charges on that account. You must use
-	a Model API service that allows personal information. Meta's terms prohibit sending it to Contributor services, whose
-	content Meta may use to train its models.
-</p>
-<p>
-	You must comply with applicable law, including data protection law, the Meta Terms of Service, the Messenger terms, and
-	the Meta Model API Terms and Acceptable Use Policy. You must not use Envoy to:
+	You must comply with applicable law, the Meta Terms of Service, the Messenger terms, and the Meta Model API Acceptable
+	Use Policy. You must not use Envoy to:
 </p>
 <ul>
 	<li>send spam, unsolicited bulk, or commercial messages;</li>
 	<li>deceive, defraud, harass, threaten, or manipulate anyone;</li>
 	<li>impersonate another person;</li>
+	<li>process a conversation that you know or should expect contains health, financial, or other sensitive data;</li>
 	<li>
 		negotiate or accept legally binding, financial, medical, or similarly significant commitments without reviewing each
 		message yourself;
@@ -70,10 +76,9 @@
 
 <h3>5. Telling the other person about AI</h3>
 <p>
-	You must inform every person in a conversation you delegate to Envoy that messages in that conversation may be written
-	and sent by an AI system on your behalf. You must do this before Envoy sends its first message to them, or when you start
-	the task if earlier messages exist. You must also tell them that their messages are processed by software on your
-	computer and by Meta, and give them the information in section 8.
+	Before you start a task, you must inform every person in that conversation that messages may be written and sent by an AI
+	system on your behalf. Envoy can send a message seconds after a task starts, so you must not wait until later. You must
+	also tell them that their messages are processed by us and by Meta, and refer them to section 8.
 </p>
 <p>
 	You must not state or imply that AI-generated messages were written personally by you or by a human. If a person objects,
@@ -88,6 +93,11 @@
 <p>You understand and accept the following:</p>
 <ul>
 	<li>AI output can be inaccurate, incomplete, inappropriate, or inconsistent with your instructions.</li>
+	<li>Envoy sees only the loaded messages and cannot rely on earlier history.</li>
+	<li>
+		Messages written by other people can influence the AI's output, even though Envoy instructs the model not to obey
+		them.
+	</li>
 	<li>
 		Envoy relies on Messenger's page structure. It can misread messages, misattribute senders, fail to send, or be unable
 		to confirm whether a message was sent.
@@ -98,54 +108,74 @@
 	</li>
 </ul>
 
-<h3>7. Data processing by Meta</h3>
+<h3>7. Data processing by us and Meta</h3>
 <p>
-	By using Envoy you instruct the software on your computer to send the data described in section 8 to Meta under your own
-	Model API account, and you accept that Meta processes it under its terms. This covers both your data and the data of the
-	people in delegated conversations. You confirm that you are entitled to share that conversation content for this purpose.
+	By using Envoy you instruct and authorize us, and Meta as our AI provider, to process the data described in section 8.
+	This covers both your data and the data of the people in delegated conversations, for the purposes described there. You
+	confirm that you are entitled to share that conversation content for those purposes.
 </p>
 
 <h3>8. Privacy notice</h3>
 <p>This notice applies to you and to the people you talk to through Envoy.</p>
 <ul>
+	<li><strong>Controller:</strong> Wiktor Golicz, admin@wiktorgolicz.pl.</li>
 	<li>
-		<strong>Who is responsible:</strong> you choose which conversations to delegate and you run the backend. We do not
-		receive, store, or have access to this data, so we cannot retrieve or delete it for anyone. Meta is responsible for
-		its own processing under its terms.
+		<strong>Data our backend receives:</strong> your goal, instructions, and answers to Envoy; the text of loaded
+		messages, including quoted replies and earlier versions of edited messages that Envoy observed; sender display names;
+		the chat name and identifier; message reactions; image attachments, their links, and their descriptions; proposed and
+		sent replies; your reply settings; and send results. Our backend downloads images from the links Messenger shows,
+		without your login.
 	</li>
 	<li>
-		<strong>Data handled on your computer:</strong> your goal, instructions, and answers to Envoy; the text of loaded
-		messages, attachment images, sender display names, the chat name and identifier, and message reactions and reply
-		previews; proposed and sent replies; your reply settings.
+		<strong>Technical data:</strong> every open Messenger tab with Envoy contacts our backend to check task status, even
+		when you have no task. These checks contain no messages, but they reveal your IP address and a tab identifier.
 	</li>
 	<li>
-		<strong>Data sent to Meta:</strong> your instructions and answers, loaded message text and reply previews, attachment
-		images, attachment types, and sender and chat display names.
-	</li>
-	<li><strong>Purpose:</strong> generating the responses and decisions you asked Envoy to produce.</li>
-	<li>
-		<strong>Meta:</strong> Meta provides the Model API. It retains and processes content as needed to detect and respond
-		to policy violations and to keep its products safe and secure. Its review can be automated or manual. Meta may
-		process data outside your country, including outside the European Economic Area.
+		<strong>Data sent to Meta:</strong> your goal, your exchanges with Envoy, and the outcomes of its replies; the chat
+		name; for each loaded message, its text, direction, sender display name, and quoted reply; observed edits; and up to
+		four of the newest images per request, such as photos and, where supported, GIFs, stickers, and video preview frames.
+		Files and full videos are noted by type only. We do not send Meta the chat identifier, reactions, attachment links,
+		or tab identifiers.
 	</li>
 	<li>
-		<strong>Retention:</strong> the backend keeps task data only in memory. There is no database. Data is deleted when
-		you select Delete task, when the backend restarts, or one hour after a task ends. If a send needs your verification,
-		its task is kept until you delete it or the backend restarts. Envoy does not log message contents. Meta retains data
-		according to its own terms. Your acceptance of these Terms and your preferences are stored in your browser.
+		<strong>Purposes and legal bases:</strong> providing Envoy to you is based on the performance of these Terms (GDPR
+		Art. 6(1)(b)). Processing the messages of the people you talk to is based on your and our legitimate interest in
+		delivering the delegation you requested (Art. 6(1)(f)). Securing the service and preventing abuse is based on our
+		legitimate interest (Art. 6(1)(f)).
 	</li>
 	<li>
-		<strong>Your rights:</strong> people in a delegated conversation can ask you to stop using Envoy with them. Requests
-		about data held by Meta go to Meta. You may also lodge a complaint with a data protection authority (in Poland, the
-		President of the Personal Data Protection Office, UODO).
+		<strong>Recipients:</strong> Meta Platforms Ireland Limited provides the Model API as our processor under the Meta
+		Global Processor Terms, and may use affiliates such as Meta Platforms, Inc. and other subprocessors. We use a
+		Standard model, and under Meta's terms content sent to it is not used to train Meta's models. Meta also retains and
+		processes content as needed to detect and respond to policy violations and to keep its products safe and secure.
+		mydevil.net hosts our backend.
 	</li>
 	<li>
-		<strong>Contacting us:</strong> if you email us, we use your message and address only to reply, based on our
-		legitimate interest in answering you (GDPR Art. 6(1)(f)). You can ask us to access, correct, or delete them.
+		<strong>Transfers:</strong> Meta may transfer data outside the European Economic Area, including to the United
+		States, using the GDPR transfer mechanisms referred to in its processor terms. Its terms do not name specific
+		locations.
+	</li>
+	<li>
+		<strong>Retention:</strong> our backend keeps task data only in memory. There is no database, and we do not write
+		message contents to logs. The copy of the conversation is cleared shortly after the task ends or the tab disconnects.
+		Your goal, your exchanges with Envoy, and sent replies stay until the task is deleted. An unfinished task, including
+		a paused one, has no time limit and stays until you take over and delete it or the backend restarts. A finished task
+		is deleted when you select Delete task, when the backend restarts, or one hour after it ends. If a send needs your
+		verification, its task is kept until you delete it or the backend restarts. Meta's terms set no fixed retention
+		period; Meta keeps content as needed for the purposes in its terms. Your acceptance of these Terms and your
+		preferences are stored in your browser.
+	</li>
+	<li>
+		<strong>Your rights:</strong> you may request access, rectification, erasure, restriction, or data portability. You
+		may also object to processing based on legitimate interests and lodge a complaint with a supervisory authority (in
+		Poland, the President of the Personal Data Protection Office, UODO). Envoy has no user accounts or database, so we
+		may be unable to identify you or find your data once a task is gone. For copies Meta holds, we can act only through
+		the means Meta provides. If you are talking to an Envoy user, you can also ask them to stop the task.
 	</li>
 	<li>
 		<strong>No automated decisions:</strong> Envoy does not make decisions about anyone that have legal or similarly
-		significant effects within the meaning of GDPR Art. 22. You remain in control of every task.
+		significant effects within the meaning of GDPR Art. 22. You set the limits of each task and can stop it at any time,
+		but with auto-send on, messages can go out without you reviewing them.
 	</li>
 </ul>
 
@@ -181,13 +211,14 @@
 
 <h3>12. Changes</h3>
 <p>
-	We may update these Terms. We plan to host the backend later, and your chats would then reach our servers. We will
-	publish updated Terms before that happens. Envoy will ask you to accept any new version before you can start or reconnect
-	a task.
+	We may update these Terms. When we do, the Envoy panel stays locked and you cannot start or reconnect a task until you
+	accept the new version.
 </p>
 
 <h3>13. Ending use</h3>
-<p>You may stop using Envoy at any time by taking over and deleting your tasks and uninstalling the extension.</p>
+<p>
+	You may stop using Envoy at any time. End any active task with Take over, delete your tasks, and uninstall the extension.
+</p>
 
 <h3>14. Governing law</h3>
 <p>

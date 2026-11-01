@@ -1,5 +1,5 @@
 // Bump the version whenever terms.html changes so every user accepts it again.
-export const TERMS_VERSION = "2026-11-01";
+export const TERMS_VERSION = "2026-11-01.2";
 export const TERMS_STORAGE_KEY = "envoyTermsAcceptance";
 
 export type TermsAcceptance = { version: string; acceptedAt: string };

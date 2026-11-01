@@ -41,7 +41,7 @@ Use **Dev mode** beside the sidebar tabs to show message history, chat and task 
 
 ## Privacy and storage
 
-Before first use, the Envoy panel shows the [Terms of Use and Privacy Notice](apps/extension/src/ui/terms.html) and stays locked until you accept them. It asks again whenever `TERMS_VERSION` in `apps/extension/src/terms.ts` changes. The terms require you to tell the people you talk to that an AI system may write and send messages on your behalf. They describe the current local backend, so hosting it requires a new version first. Have the text reviewed before publishing the extension.
+Before first use, the Envoy panel shows the [Terms of Use and Privacy Notice](apps/extension/src/ui/terms.html) and stays locked until you accept them. It asks again whenever `TERMS_VERSION` in `apps/extension/src/terms.ts` changes. The terms require you to tell the people you talk to that an AI system may write and send messages on your behalf. The current text describes the planned hosted backend, not the local setup above, so do not release it before hosting is live. Have it reviewed first.
 
 The extension sends the chosen chat's loaded context and your instructions to the local backend; the backend sends text and instructions to Meta Model API. Other Messenger tabs do not upload their conversation snapshots. Once Envoy shows a task as completed or taken over, it stops uploading conversation snapshots. The backend also ignores late conversation updates for ended tasks. The project does not log message bodies or provider errors. Conversation text remains untrusted input and cannot authorize changes to your instructions.
 
