@@ -142,9 +142,10 @@ export class MetaModelAdapter implements Agent {
 				break;
 			} catch (error) {
 				debugMedia(describeRequestFailure(error));
+				const status = (error as { status?: number })?.status;
 				// A transport failure never completed, so one retry cannot
 				// double-apply anything. Aborts stay aborted.
-				if ((error as { status?: number })?.status === undefined && !retriedConnection && !signal?.aborted) {
+				if (status === undefined && !retriedConnection && !signal?.aborted) {
 					retriedConnection = true;
 					debugMedia("connection failed, retrying once");
 					continue;
@@ -152,7 +153,7 @@ export class MetaModelAdapter implements Agent {
 				// The chat endpoint may not accept video blocks. Fall back to
 				// evaluating with the clips presence-only instead of failing the
 				// whole decision.
-				if (!pendingVideos.length || (error as { status?: number })?.status !== 400) throw error;
+				if (!pendingVideos.length || status !== 400) throw error;
 				debugMedia("video blocks rejected, retrying presence-only");
 				payload = dropVideoIndexes(payload);
 				pendingVideos = [];
@@ -392,7 +393,7 @@ async function imageDataUrl(bytes: Buffer, mime: string | null): Promise<string 
 
 function tryParseUrl(value: string, base?: string): URL | null {
 	try {
-		return base === undefined ? new URL(value) : new URL(value, base);
+		return new URL(value, base);
 	} catch {
 		return null;
 	}
@@ -482,6 +483,12 @@ interface DecisionFailureResponse {
 	} | null;
 }
 
+function describeFinishReason(reason: unknown): string {
+	if (reason === undefined) return "missing";
+	if (typeof reason === "string" && KNOWN_FINISH_REASONS.has(reason)) return reason;
+	return "unlisted";
+}
+
 // One content-free metadata line for a decision that cannot be parsed or
 // validated: choice count, allowlisted finish reason, content presence, refusal
 // presence, tool-call count, and numeric token usage. Content distinguishes
@@ -491,13 +498,7 @@ interface DecisionFailureResponse {
 function describeDecisionFailure(response: DecisionFailureResponse): string {
 	const choices = Array.isArray(response?.choices) ? response.choices : [];
 	const choice = choices[0];
-	const finish = choice?.finish_reason;
-	const finishText =
-		typeof finish === "string" && KNOWN_FINISH_REASONS.has(finish)
-			? finish
-			: finish === undefined
-				? "missing"
-				: "unlisted";
+	const finishText = describeFinishReason(choice?.finish_reason);
 	const message = choice?.message ?? null;
 	const record = message !== null && typeof message === "object" ? message : null;
 	let contentText = "missing";

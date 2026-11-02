@@ -4,7 +4,6 @@ import type {
 	ConversationSnapshot,
 	HealthResponse,
 	InlineImageMedia,
-	InlineImageMime,
 	MessageAttachment,
 	ReplySettings,
 	SendResult,
@@ -64,7 +63,7 @@ const MAX_PARTICIPANTS = 10;
 
 function inlineMedia(value: unknown): InlineImageMedia {
 	const item = object(value);
-	if (typeof item.mime !== "string" || !INLINE_IMAGE_MIMES.includes(item.mime as InlineImageMime)) return invalid();
+	const mime = enumOf(item.mime, INLINE_IMAGE_MIMES);
 	if (
 		typeof item.data !== "string" ||
 		!item.data.length ||
@@ -73,21 +72,17 @@ function inlineMedia(value: unknown): InlineImageMedia {
 		!/^[A-Za-z0-9+/]*={0,2}$/.test(item.data)
 	)
 		return invalid();
-	for (const side of [item.width, item.height] as const) {
-		const size = side as number;
-		if (!Number.isSafeInteger(side) || size < 1 || size > MAX_IMAGE_SIDE) return invalid();
-	}
 	return {
-		mime: item.mime as InlineImageMime,
+		mime,
 		data: item.data,
-		width: item.width as number,
-		height: item.height as number,
+		width: intInRange(item.width, 1, MAX_IMAGE_SIDE),
+		height: intInRange(item.height, 1, MAX_IMAGE_SIDE),
 	};
 }
 
 // Reply quotes stay type-only: their bytes never reach the backend.
 function optMedia(value: unknown, allowMedia: boolean): InlineImageMedia | null {
-	if (value === undefined || value === null) return null;
+	if (value == null) return null;
 	return allowMedia ? inlineMedia(value) : invalid();
 }
 
@@ -96,49 +91,40 @@ function attachment(value: unknown, allowMedia: boolean): MessageAttachment {
 	// Files stay presence-only. Their bytes never reach the backend.
 	if (item.type === "file") {
 		for (const key of ["url", "description", "media"] as const) {
-			if (item[key] !== undefined && item[key] !== null) return invalid();
+			if (item[key] != null) return invalid();
 		}
 		return { type: "file" };
 	}
-	if (item.type === "image" || item.type === "video" || item.type === "sticker" || item.type === "gif") {
-		const type = item.type as "image" | "video" | "sticker" | "gif";
-		const media = optMedia(item.media, allowMedia);
-		if (type === "image") {
-			return {
-				type,
-				url: optionalText(item.url, MAX_URL_LENGTH),
-				description: optionalText(item.description, MAX_DESCRIPTION_LENGTH),
-				media,
-			};
-		}
-		if (item.description !== null && item.description !== undefined) return invalid();
-		return { type, url: optionalText(item.url, MAX_URL_LENGTH), description: null, media };
+	const type = enumOf(item.type, ["image", "video", "sticker", "gif"] as const);
+	const media = optMedia(item.media, allowMedia);
+	if (type === "image") {
+		return {
+			type,
+			url: optionalText(item.url, MAX_URL_LENGTH),
+			description: optionalText(item.description, MAX_DESCRIPTION_LENGTH),
+			media,
+		};
 	}
-	return invalid();
+	if (item.description != null) return invalid();
+	return { type, url: optionalText(item.url, MAX_URL_LENGTH), description: null, media };
 }
 
 function message(value: unknown): ConversationMessage {
 	const item = object(value);
-	const direction = item.direction;
-	if (direction !== "incoming" && direction !== "outgoing" && direction !== "unknown" && direction !== "system")
-		return invalid();
+	const direction = enumOf(item.direction, ["incoming", "outgoing", "unknown", "system"] as const);
 	if (typeof item.unsent !== "boolean") return invalid();
-	if (item.edited !== undefined && item.edited !== null && typeof item.edited !== "boolean") return invalid();
-	if (item.stableId !== undefined && item.stableId !== null && typeof item.stableId !== "string") return invalid();
+	if (item.edited != null && typeof item.edited !== "boolean") return invalid();
 	const reply = item.replyTo === null ? null : object(item.replyTo);
 	return {
 		id: string(item.id),
 		// Stable matching key and edited marker. Older extension versions send
 		// no field; both default to unknown.
-		stableId:
-			item.stableId === undefined || item.stableId === null
-				? null
-				: string(item.stableId, MAX_ID_LENGTH, true) || null,
-		edited: item.edited === undefined ? null : (item.edited as boolean | null),
+		stableId: optionalText(item.stableId ?? null, MAX_ID_LENGTH) || null,
+		edited: (item.edited as boolean | null | undefined) ?? null,
 		text: string(item.text, MAX_TEXT_LENGTH, true),
 		direction,
 		// Per-message display label. Older extension versions send no field.
-		sender: item.sender === undefined ? null : optionalText(item.sender, MAX_ID_LENGTH),
+		sender: optionalText(item.sender ?? null, MAX_ID_LENGTH),
 		replyTo: reply && {
 			text: optionalText(reply.text, MAX_TEXT_LENGTH),
 			context: optionalText(reply.context, MAX_DESCRIPTION_LENGTH),

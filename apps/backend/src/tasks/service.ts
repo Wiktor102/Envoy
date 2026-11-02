@@ -73,6 +73,19 @@ type Options = {
 	connector?: () => BrowserConnector;
 };
 
+function editedMessageLabel(edit: ObservedEdit): string {
+	switch (edit.direction) {
+		case "incoming":
+			return edit.sender ? `incoming message from ${edit.sender}` : "incoming message";
+		case "outgoing":
+			return "outgoing message";
+		case "unknown":
+			return "message with unknown sender";
+		default:
+			return "message";
+	}
+}
+
 // The state is intentionally in backend memory. A backend restart cannot
 // revive a pending send. Only one connector can own a live task.
 export class TaskService {
@@ -630,16 +643,7 @@ export class TaskService {
 	}
 
 	private appendEditEvent(edit: ObservedEdit): void {
-		const who =
-			edit.direction === "incoming"
-				? edit.sender
-					? `incoming message from ${edit.sender}`
-					: "incoming message"
-				: edit.direction === "outgoing"
-					? "outgoing message"
-					: edit.direction === "unknown"
-						? "message with unknown sender"
-						: "message";
+		const who = editedMessageLabel(edit);
 		const article = /^[aeiou]/i.test(who) ? "An" : "A";
 		// Untrusted conversation history, like the conversation itself. The
 		// current text in the snapshot is the sender's statement; the previous

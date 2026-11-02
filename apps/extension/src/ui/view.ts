@@ -5,6 +5,7 @@ import {
 	MAX_TASK_TEXT_LENGTH,
 	MIN_REPLY_DELAY_SECONDS,
 	normalizeReplySettings,
+	type ConversationMessage,
 	type ReplySettings,
 	type TaskControlAction,
 	type TaskDetail,
@@ -50,8 +51,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	// Facebook marks its active theme on <html>; CSS falls back to the system theme.
 	function syncTheme() {
 		const classes = document.documentElement.classList;
-		const theme = classes.contains("__fb-dark-mode") ? "dark" : classes.contains("__fb-light-mode") ? "light" : null;
-		if (theme) host.setAttribute("data-theme", theme);
+		if (classes.contains("__fb-dark-mode")) host.setAttribute("data-theme", "dark");
+		else if (classes.contains("__fb-light-mode")) host.setAttribute("data-theme", "light");
 		else host.removeAttribute("data-theme");
 	}
 	syncTheme();
@@ -354,6 +355,18 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		return value.trim().length > MAX_TASK_TEXT_LENGTH;
 	}
 
+	function replyDelayHint({ autoSend, minDelaySeconds, maxDelaySeconds }: ReplySettings): string {
+		if (!autoSend) return strings.delayManual;
+		if (minDelaySeconds === maxDelaySeconds) return format(strings.delayFixed, { min: minDelaySeconds });
+		return format(strings.delayRandom, { min: minDelaySeconds, max: maxDelaySeconds });
+	}
+
+	function messagePreview(message: ConversationMessage): string {
+		if (message.unsent) return strings.unsentPlaceholder;
+		if (message.text) return message.text;
+		return message.attachments.length ? strings.attachmentPlaceholder : strings.emptyPlaceholder;
+	}
+
 	function setLine(element: HTMLElement, text: string, hide: boolean): void {
 		element.textContent = text;
 		element.hidden = hide;
@@ -387,9 +400,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			item.dataset.direction = message.direction;
 			const sender = makeSender(senderLabel(message.direction, message.sender, incomingLabel));
 			const text = makeText();
-			text.textContent = message.unsent
-				? strings.unsentPlaceholder
-				: message.text || (message.attachments.length ? strings.attachmentPlaceholder : strings.emptyPlaceholder);
+			text.textContent = messagePreview(message);
 			item.append(sender, text);
 			conversation.append(item);
 		}
@@ -443,18 +454,12 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		goalHint.textContent = (active ? strings.goalUpdateNote : "") + countText(goal.value);
 		goalHint.hidden = false;
 		const goalOverLimit = isOverLimit(goal.value);
-		const { autoSend, minDelaySeconds, maxDelaySeconds } = replySettings;
+		const { autoSend } = replySettings;
 		autoSendToggle.setAttribute("aria-checked", String(autoSend));
 		delayRange.setAttribute("aria-disabled", String(!autoSend));
 		delayMin.disabled = !autoSend;
 		delayMax.disabled = !autoSend;
-		delayHint.textContent =
-			(!autoSend
-				? strings.delayManual
-				: minDelaySeconds === maxDelaySeconds
-					? format(strings.delayFixed, { min: minDelaySeconds })
-					: format(strings.delayRandom, { min: minDelaySeconds, max: maxDelaySeconds })) +
-			(active ? strings.delayAppliesNow : "");
+		delayHint.textContent = replyDelayHint(replySettings) + (active ? strings.delayAppliesNow : "");
 		startButton.hidden = active;
 		startButton.disabled = busy || !state.snapshot || !goal.value.trim() || goalOverLimit;
 		updateGoalButton.hidden = !active;
@@ -526,7 +531,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		else if (task?.status !== "sending" || task.id !== sendingReply?.taskId) sendingReply = null;
 		const shownText = pending?.text ?? (owner ? sendingReply?.text : undefined) ?? null;
 		pendingSection.hidden = shownText === null;
-		const pendingKey = pending ? pending.commandId : sendingReply ? `sending:${task?.id}` : null;
+		const sendingKey = sendingReply ? `sending:${task?.id}` : null;
+		const pendingKey = pending?.commandId ?? sendingKey;
 		if (chat.length > lastChatCount || (pendingKey && pendingKey !== lastPendingKey)) {
 			panel.scrollTop = panel.scrollHeight;
 		}
@@ -542,13 +548,15 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			editingCommandId = null;
 		}
 
-		replyControls.hidden = !owner || !task || !REPLY_ACTIVE_STATUSES.includes(task.status);
+		const canCancelReply = owner && !!task && REPLY_ACTIVE_STATUSES.includes(task.status);
+		const canSendReply = owner && currentChat && task?.status === "pending" && !!pending;
+		const canEditReply = canSendReply || (owner && currentChat && task?.status === "sending");
+		replyControls.hidden = !canCancelReply;
 		cancelThinking.hidden = !owner || task?.status !== "thinking";
 		cancelThinking.disabled = busy;
-		sendButton.disabled = busy || !owner || !currentChat || task?.status !== "pending" || !pending;
-		editButton.disabled =
-			busy || !owner || !currentChat || !(task?.status === "sending" || (task?.status === "pending" && pending));
-		cancelButton.disabled = busy || !owner || !task || !REPLY_ACTIVE_STATUSES.includes(task.status);
+		sendButton.disabled = busy || !canSendReply;
+		editButton.disabled = busy || !canEditReply;
+		cancelButton.disabled = busy || !canCancelReply;
 		editHint.textContent = `${strings.saveEditNote} ${countText(editText.value)}`;
 		saveEditButton.disabled = busy || !editing || !editText.value.trim() || isOverLimit(editText.value);
 		editText.disabled = busy;
@@ -565,9 +573,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		takeoverButton.disabled = busy || !active;
 		deleteButton.hidden = !task || active;
 		deleteButton.disabled = busy;
-		header.hidden =
-			!task ||
-			(goalToggle.hidden && pauseButton.hidden && resumeButton.hidden && takeoverButton.hidden && deleteButton.hidden);
+		const taskControls = [goalToggle, pauseButton, resumeButton, takeoverButton, deleteButton];
+		header.hidden = !task || taskControls.every((button) => button.hidden);
 		ownerHint.hidden = !(task && !owner && active);
 		ownerHint.textContent = showReconnect ? strings.ownerPaused : strings.ownerElsewhere;
 		deleteHint.hidden = deleteButton.hidden;
