@@ -70,16 +70,20 @@ export function createEnvoyController(
 	let refreshPromise: Promise<void> | null = null;
 	const claimed = new Set<string>();
 
+	// Backend revocations must survive a later return to sending. A delayed
+	// authorization belongs only to the task and send that requested it.
+	function authorizationScopeChanged(previous: ControllerState, next: ControllerState): boolean {
+		return (
+			previous.task?.id !== next.task?.id ||
+			previous.task?.chatId !== next.task?.chatId ||
+			previous.isOwner !== next.isOwner ||
+			(previous.task?.status === "sending" && next.task?.status !== "sending")
+		);
+	}
+
 	function publish(patch: Partial<ControllerState>) {
 		const next = { ...state, ...patch };
-		// Backend revocations must survive a later return to sending. A delayed
-		// authorization belongs only to the task and send that requested it.
-		if (
-			state.task?.id !== next.task?.id ||
-			state.task?.chatId !== next.task?.chatId ||
-			state.isOwner !== next.isOwner ||
-			(state.task?.status === "sending" && next.task?.status !== "sending")
-		) {
+		if (authorizationScopeChanged(state, next)) {
 			sendVersion++;
 		}
 		state = next;
@@ -88,6 +92,10 @@ export function createEnvoyController(
 
 	function identity(snapshot: ConversationSnapshot | null): string | null {
 		return snapshot ? `${snapshot.chatId}:${snapshot.revision}` : null;
+	}
+
+	function commandIdentity(command: SendReplyCommand): string {
+		return `${command.chatId}:${command.expectedRevision}`;
 	}
 
 	function observe(snapshot: ConversationSnapshot | null, conversationStatus: string) {
@@ -173,18 +181,17 @@ export function createEnvoyController(
 		let result: SendResult = "rejected";
 		const taskId = state.task?.id;
 		const commandVersion = sendVersion;
+		// ownerAvailable covers the stopped/suspended/controls/owner/task checks;
+		// "sending" below implies the remaining liveness checks.
 		const isCurrent = () =>
-			!stopped &&
-			!suspended &&
-			controlsAvailable &&
+			ownerAvailable() &&
 			!actionInFlight &&
 			epoch === commandEpoch &&
 			sendVersion === commandVersion &&
-			state.isOwner &&
 			state.task?.id === taskId &&
 			state.task?.status === "sending" &&
 			state.task.chatId === command.chatId &&
-			identity(state.snapshot) === `${command.chatId}:${command.expectedRevision}`;
+			identity(state.snapshot) === commandIdentity(command);
 		try {
 			if (isCurrent())
 				result = await adapter.sendReply(
@@ -264,11 +271,13 @@ export function createEnvoyController(
 	const stopWatching = watch((snapshot, conversationStatus) => {
 		if (!stopped && !suspended) observe(snapshot, conversationStatus);
 	});
+	// Fallback pump when the heartbeat port cannot reach the background worker.
+	const POLL_MS = 1_000;
 	const interval = setInterval(() => {
 		reconcileHeartbeat();
 		if (ownerAvailable()) requestFreshSync();
 		else requestSync();
-	}, 1_000);
+	}, POLL_MS);
 	requestSync();
 
 	async function runAction(action: () => Promise<TaskState | null>) {
