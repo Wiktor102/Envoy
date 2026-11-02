@@ -22,7 +22,7 @@ import {
 	messageContent,
 } from "@envoy/contracts";
 import type { Agent, EvaluationReason } from "../agent/agent.js";
-import type { BrowserConnector } from "../connectors/browser-connector.js";
+import { type BrowserConnector, sameConversation } from "../connectors/browser-connector.js";
 import { ExtensionConnector } from "../connectors/extension-connector.js";
 
 const LEASE_MS = 8_000;
@@ -137,6 +137,7 @@ export class TaskService {
 		if (this.hasAwaitingRetiredResult()) {
 			throw new Error("A previous send is still being checked. Try again shortly.");
 		}
+		this.assertNoRetiredCheck();
 		if (this.task && this.requiresVerification) {
 			throw new Error("The previous send may have completed. Check the conversation and delete the old task first.");
 		}
@@ -207,9 +208,7 @@ export class TaskService {
 		if (!isTaskEnded(task.status)) {
 			throw new Error("Take over the task before deleting it.");
 		}
-		if (this.hasAwaitingRetiredResult()) {
-			throw new Error("A previous send is still being checked. Try again shortly.");
-		}
+		this.assertNoRetiredCheck();
 		this.erase();
 	}
 
@@ -265,10 +264,7 @@ export class TaskService {
 					throw new Error("There is no reply to cancel.");
 				}
 				const snapshot = this.connector.readConversation();
-				if (snapshot) {
-					this.suppressedRevisions.add(snapshot.revision);
-					this.suppressedContexts.add(textContext(snapshot));
-				}
+				if (snapshot) this.suppressAttempt(snapshot.revision, textContext(snapshot));
 				const uncertain = this.invalidate(true);
 				task.pendingReply = null;
 				// Cancelling during the post-send completion check must leave the
@@ -347,15 +343,14 @@ export class TaskService {
 				if (uncertain || this.requiresVerification) {
 					task.status = wasPaused ? "paused" : "needs_user";
 					task.detail = { code: "send_may_have_completed_before_resuming" };
-				} else {
-					this.processedRevisions.clear();
-					this.evaluationReason = "instructions_updated";
-					if (task.status !== "paused") {
-						task.status = "waiting";
-						task.detail = null;
-						this.maybeGenerate();
-					}
+					break;
 				}
+				this.processedRevisions.clear();
+				this.evaluationReason = "instructions_updated";
+				if (task.status === "paused") break;
+				task.status = "waiting";
+				task.detail = null;
+				this.maybeGenerate();
 				break;
 			}
 		}
@@ -467,7 +462,7 @@ export class TaskService {
 		}
 		if (task.status === "waiting") this.maybeGenerate();
 		let command: SendReplyCommand | null = null;
-		if (task.status === "pending" && task.pendingReply?.sendAt !== null && task.pendingReply?.sendAt !== undefined) {
+		if (task.status === "pending" && task.pendingReply?.sendAt != null) {
 			if (task.pendingReply.sendAt <= this.now()) {
 				if (this.hasAwaitingRetiredResult()) {
 					task.detail = { code: "checking_previous_send_before_sending" };
@@ -506,6 +501,9 @@ export class TaskService {
 		const task = this.task;
 		const attempt = this.inFlight;
 		const snapshot = this.connector.readConversation();
+		// The attempt, the task, and the live view must all name the same
+		// conversation revision; the shared predicate keeps the null-safe
+		// comparison in one place.
 		if (
 			!task ||
 			connectorId !== this.owner ||
@@ -518,8 +516,7 @@ export class TaskService {
 			attempt.command.chatId !== chatId ||
 			attempt.command.expectedRevision !== revision ||
 			task.chatId !== chatId ||
-			snapshot?.chatId !== chatId ||
-			snapshot.revision !== revision
+			!sameConversation(snapshot, chatId, revision)
 		)
 			return false;
 		attempt.authorized = true;
@@ -561,13 +558,12 @@ export class TaskService {
 		}
 		this.scheduleAttemptTimeout();
 		if (attempt.retired) return returnState();
-		this.processedRevisions.add(attempt.command.expectedRevision);
+		this.markProcessed(attempt.command.expectedRevision);
 		const current = this.connector.readConversation();
 		if (
 			result === "rejected" &&
 			this.task.status === "sending" &&
-			current?.chatId === attempt.command.chatId &&
-			current.revision === attempt.command.expectedRevision
+			sameConversation(current, attempt.command.chatId, attempt.command.expectedRevision)
 		) {
 			// A rejection proves the reply was not dispatched. Return it to the
 			// user under a new command ID; only an explicit Send now retries it.
@@ -583,8 +579,7 @@ export class TaskService {
 			this.appendAgentChat("event", "The reply was not sent.");
 			return returnState();
 		}
-		this.suppressedRevisions.add(attempt.command.expectedRevision);
-		this.suppressedContexts.add(attempt.context);
+		this.suppressAttempt(attempt.command.expectedRevision, attempt.context);
 		if (this.task.status !== "sending") return returnState();
 		if (result === "sent" && attempt.authorized) {
 			this.task.status = "waiting";
@@ -721,6 +716,21 @@ export class TaskService {
 		return this.task;
 	}
 
+	private assertNoRetiredCheck(): void {
+		if (this.hasAwaitingRetiredResult()) {
+			throw new Error("A previous send is still being checked. Try again shortly.");
+		}
+	}
+
+	private suppressAttempt(revision: string, context: string): void {
+		this.suppressedRevisions.add(revision);
+		this.suppressedContexts.add(context);
+	}
+
+	private markProcessed(revision: string): void {
+		this.processedRevisions.add(revision);
+	}
+
 	private touch(): void {
 		this.leaseUntil = this.now() + this.leaseMs;
 		if (this.leaseTimer) clearTimeout(this.leaseTimer);
@@ -785,8 +795,7 @@ export class TaskService {
 		if (!this.task || this.task.id !== attempt.taskId) return;
 		this.invalidate();
 		this.requiresVerification = true;
-		this.suppressedRevisions.add(attempt.command.expectedRevision);
-		this.suppressedContexts.add(attempt.context);
+		this.suppressAttempt(attempt.command.expectedRevision, attempt.context);
 		this.task.pendingReply = null;
 		this.appendAgentChat("event", "A previous send may have completed.");
 		if (isTaskEnded(this.task.status)) {
@@ -821,11 +830,10 @@ export class TaskService {
 		const uncertain = this.inFlight !== null && (!explicitControl || this.inFlight.authorized);
 		if (this.inFlight) {
 			this.inFlight.retired = true;
-			this.processedRevisions.add(this.inFlight.command.expectedRevision);
+			this.markProcessed(this.inFlight.command.expectedRevision);
 			if (uncertain) {
 				this.requiresVerification = true;
-				this.suppressedRevisions.add(this.inFlight.command.expectedRevision);
-				this.suppressedContexts.add(this.inFlight.context);
+				this.suppressAttempt(this.inFlight.command.expectedRevision, this.inFlight.context);
 			} else if (explicitControl) {
 				this.inFlight.awaitingRetiredResult = true;
 			}
@@ -932,12 +940,11 @@ export class TaskService {
 			!task ||
 			task.status !== "thinking" ||
 			!this.leaseActive() ||
-			current?.chatId !== snapshot.chatId ||
-			current.revision !== snapshot.revision
+			!sameConversation(current, snapshot.chatId, snapshot.revision)
 		)
 			return;
 		this.generation = null;
-		this.processedRevisions.add(snapshot.revision);
+		this.markProcessed(snapshot.revision);
 		// The post-send check runs once: consume the reason so later syncs fall
 		// back to the outgoing guard instead of re-evaluating.
 		if (reason === "reply_sent") this.evaluationReason = "new_message";
