@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 import { JSDOM } from "jsdom";
 import { bindMessengerDocument, messengerChatAdapter } from "../src/messenger/chat-adapter";
+
+// Each fixture closes its own DOM even when an assertion throws midway.
+const openDoms = new Set<JSDOM>();
+afterEach(() => {
+	for (const dom of openDoms) dom.window.close();
+	openDoms.clear();
+});
 
 function setup() {
 	const dom = new JSDOM(
@@ -44,6 +51,7 @@ function setup() {
 		});
 	});
 	bindMessengerDocument();
+	openDoms.add(dom);
 	return { dom, editor, button, lexical };
 }
 
@@ -100,7 +108,6 @@ test("sends once only after authorization and confirms an appended outgoing mess
 	assert.equal(await messengerChatAdapter.sendReply(send, authorize), "sent");
 	assert.equal(clicks, 1);
 	assert.equal(authorizations, 1);
-	dom.window.close();
 });
 
 test("confirms an acknowledged send when Messenger removes older rows from a full message window", async () => {
@@ -134,7 +141,6 @@ test("confirms an acknowledged send when Messenger removes older rows from a ful
 		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent", acknowledgement);
 		assert.equal(clicks, 1);
 		assert.equal((await messengerChatAdapter.readConversation()).messages.length, 15);
-		dom.window.close();
 	}
 });
 
@@ -170,7 +176,6 @@ test("waits when a trimmed window has edits, reordered history, intervening mess
 		scope.replaceChildren(...original.slice(1), outgoing!);
 		outgoing!.setAttribute("data-message-status", "seen");
 		assert.equal(await pending, "sent", change);
-		dom.window.close();
 	}
 });
 
@@ -202,7 +207,6 @@ test("does not confirm an old repeated reply after trimming or remounting its se
 		assert.equal(await pending, "sent");
 		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
 		assert.equal(clicks, 1);
-		dom.window.close();
 	}
 });
 
@@ -222,7 +226,6 @@ test("prepares a send without relying on a zero-delay background timer", async (
 		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
 	} finally {
 		globalThis.setTimeout = original;
-		dom.window.close();
 	}
 });
 
@@ -242,7 +245,6 @@ test("uses the composer send icon with arbitrary labels and never its Like butto
 		});
 		assert.equal(await messengerChatAdapter.sendReply(await command(), async () => true), "sent");
 		assert.equal(likes, 0);
-		dom.window.close();
 	}
 });
 
@@ -257,7 +259,6 @@ test("rejects missing, ambiguous, disabled, or out-of-composer send icons", asyn
 		if (change === "outside") document.querySelector("main")!.append(button);
 		assert.equal(await messengerChatAdapter.sendReply(await command(), async () => true), "rejected");
 		assert.equal(clicks, 0);
-		dom.window.close();
 	}
 });
 
@@ -286,7 +287,6 @@ test("does not treat a CSS-hidden status as send confirmation", async () => {
 		assert.ok(status);
 		(status as HTMLElement).parentElement!.removeAttribute("style");
 		assert.equal(await pending, "sent");
-		dom.window.close();
 	}
 });
 
@@ -316,7 +316,6 @@ test("waits for a server message ID instead of translated sent headings", async 
 	assert.equal(settled, false);
 	message.removeAttribute("data-message-status");
 	assert.equal(await pending, "sent");
-	dom.window.close();
 });
 
 test("confirms the visible sent footer captured in PR #9 without requiring a server ID", async () => {
@@ -343,7 +342,6 @@ test("confirms the visible sent footer captured in PR #9 without requiring a ser
 		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
 		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
 		assert.equal(clicks, 1);
-		dom.window.close();
 	}
 });
 
@@ -381,7 +379,6 @@ test("waits for a visible footer on the sent bubble with no pending or failed st
 		scope.removeAttribute("aria-busy");
 		if (blocker === "outside") scope.append(footer);
 		assert.equal(await pending, "sent", blocker);
-		dom.window.close();
 	}
 });
 
@@ -404,7 +401,6 @@ test("does not overwrite an existing draft or use an ambiguous composer", async 
 	assert.equal(await messengerChatAdapter.sendReply(second, authorize), "rejected");
 	assert.equal(clicks, 0);
 	assert.equal(authorizations, 0);
-	dom.window.close();
 });
 
 test("rejects stale snapshots, unsupported text, and a scrolled-away message list", async () => {
@@ -422,7 +418,6 @@ test("rejects stale snapshots, unsupported text, and a scrolled-away message lis
 	document.querySelector("main")!.append(jump);
 	assert.equal(await messengerChatAdapter.sendReply(scrolled, async () => true), "rejected");
 	assert.equal(clicks, 0);
-	dom.window.close();
 });
 
 test("does not dispatch after authorization is denied or local control changes", async () => {
@@ -443,7 +438,6 @@ test("does not dispatch after authorization is denied or local control changes",
 	);
 	assert.equal(editor.textContent, "");
 	assert.equal(clicks, 0);
-	dom.window.close();
 });
 
 test("does not focus or insert a draft for an already invalid command", async () => {
@@ -466,7 +460,6 @@ test("does not focus or insert a draft for an already invalid command", async ()
 	assert.equal(focusEvents, 0);
 	assert.equal(authorizations, 0);
 	assert.equal(editor.textContent, "");
-	dom.window.close();
 });
 
 test("rechecks local control after focus and before inserting a draft", async () => {
@@ -490,7 +483,6 @@ test("rechecks local control after focus and before inserting a draft", async ()
 	);
 	assert.equal(authorizations, 0);
 	assert.equal(editor.textContent, "");
-	dom.window.close();
 });
 
 test("rechecks the conversation and chat synchronously after authorization", async () => {
@@ -515,7 +507,6 @@ test("rechecks the conversation and chat synchronously after authorization", asy
 		"rejected",
 	);
 	assert.equal(clicks, 0);
-	dom.window.close();
 });
 
 test("preserves a user edit during authorization and reports it as uncertain", async () => {
@@ -533,7 +524,6 @@ test("preserves a user edit during authorization and reports it as uncertain", a
 	);
 	assert.equal(editor.textContent, "User changed this");
 	assert.equal(clicks, 0);
-	dom.window.close();
 });
 
 test("reports an uncleared draft as uncertain when the editor loses focus", async () => {
@@ -547,7 +537,6 @@ test("reports an uncleared draft as uncertain when the editor loses focus", asyn
 		"uncertain",
 	);
 	assert.equal(editor.textContent, "Hi there");
-	dom.window.close();
 });
 
 test("reports an uncleared draft as uncertain when Lexical ignores delete", async () => {
@@ -556,7 +545,6 @@ test("reports an uncleared draft as uncertain when Lexical ignores delete", asyn
 	lexical.accepts = (inputType) => inputType === "insertText";
 	assert.equal(await messengerChatAdapter.sendReply(send, async () => false), "uncertain");
 	assert.equal(editor.textContent, "Hi there");
-	dom.window.close();
 });
 
 test("does not treat an optimistic bubble as confirmation or retry it", async () => {
@@ -571,7 +559,6 @@ test("does not treat an optimistic bubble as confirmation or retry it", async ()
 	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "uncertain");
 	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "uncertain");
 	assert.equal(clicks, 1);
-	dom.window.close();
 });
 
 test("waits for Lexical to commit a draft in a later task before sending", async () => {
@@ -593,7 +580,6 @@ test("waits for Lexical to commit a draft in a later task before sending", async
 	});
 	assert.equal(await messengerChatAdapter.sendReply(await command(), async () => true), "sent");
 	assert.equal(clicks, 1);
-	dom.window.close();
 });
 
 test("confirms a deferred Lexical delete before reporting a cleared draft", async () => {
@@ -603,7 +589,6 @@ test("confirms a deferred Lexical delete before reporting a cleared draft", asyn
 	assert.equal(await messengerChatAdapter.sendReply(await command(), async () => false), "rejected");
 	assert.equal(editor.textContent, "");
 	assert.equal(clicks, 0);
-	dom.window.close();
 });
 
 test("does not send when Lexical never commits the draft", async () => {
@@ -613,7 +598,6 @@ test("does not send when Lexical never commits the draft", async () => {
 	button.addEventListener("click", () => clicks++);
 	assert.equal(await messengerChatAdapter.sendReply(await command(), async () => true), "uncertain");
 	assert.equal(clicks, 0);
-	dom.window.close();
 });
 
 test("waits for Messenger to render the send control after the draft", async () => {
@@ -634,7 +618,6 @@ test("waits for Messenger to render the send control after the draft", async () 
 	});
 	assert.equal(await messengerChatAdapter.sendReply(await command(), async () => true), "sent");
 	assert.equal(clicks, 1);
-	dom.window.close();
 });
 
 test("confirms an acknowledged Dev-mode reply rendered as a blockquote", async () => {
@@ -658,7 +641,6 @@ test("confirms an acknowledged Dev-mode reply rendered as a blockquote", async (
 	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
 	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
 	assert.equal(clicks, 1);
-	dom.window.close();
 });
 
 test("does not confirm a blockquote reply whose quoted text differs", async () => {
@@ -678,7 +660,6 @@ test("does not confirm a blockquote reply whose quoted text differs", async () =
 	assert.ok(quote);
 	quote.textContent = "Hi there";
 	assert.equal(await pending, "sent");
-	dom.window.close();
 });
 
 test("does not confirm a blockquote reply that reuses a stale message ID", async () => {
@@ -702,7 +683,6 @@ test("does not confirm a blockquote reply that reuses a stale message ID", async
 	// The acknowledged send arrives with its own server ID.
 	scope.lastElementChild!.setAttribute("data-message-id", "100054118657081@msgr.1");
 	assert.equal(await pending, "sent");
-	dom.window.close();
 });
 
 test("confirms an outgoing reply followed by an incoming message before acknowledgement", async () => {
@@ -720,7 +700,6 @@ test("confirms an outgoing reply followed by an incoming message before acknowle
 	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
 	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
 	assert.equal(clicks, 1);
-	dom.window.close();
 });
 
 test("confirms a trailing-incoming send when the message window trims an older row", async () => {
@@ -740,7 +719,6 @@ test("confirms a trailing-incoming send when the message window trims an older r
 	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
 	assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
 	assert.equal(clicks, 1);
-	dom.window.close();
 });
 
 test("does not confirm a stale repeated reply when a trailing incoming message is present", async () => {
@@ -775,7 +753,6 @@ test("does not confirm a stale repeated reply when a trailing incoming message i
 		assert.equal(await pending, "sent");
 		assert.equal(await messengerChatAdapter.sendReply(send, async () => true), "sent");
 		assert.equal(clicks, 1);
-		dom.window.close();
 	}
 });
 
@@ -800,5 +777,4 @@ test("waits when history is edited and a trailing incoming message follows the c
 	assert.equal(settled, false);
 	historyRow.textContent = "Earlier message 1";
 	assert.equal(await pending, "sent");
-	dom.window.close();
 });
