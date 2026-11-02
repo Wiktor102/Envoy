@@ -580,3 +580,32 @@ test("the Meta request marks edited messages and explains corrections", async ()
 		else process.env.MODEL_API_KEY = previousKey;
 	}
 });
+
+test("the Meta request defaults completion tokens to 16000 with an env override", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousCap = process.env.MODEL_MAX_COMPLETION_TOKENS;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	delete process.env.MODEL_MAX_COMPLETION_TOKENS;
+	let body: any;
+	globalThis.fetch = async (input, init) => {
+		body = await new Request(input, init).json();
+		return modelResponse();
+	};
+	try {
+		await new MetaModelAdapter().run(task, conversation as unknown as ConversationSnapshot, "task_started");
+		assert.equal(body.max_completion_tokens, 16000);
+		process.env.MODEL_MAX_COMPLETION_TOKENS = "8000";
+		await new MetaModelAdapter().run(task, conversation as unknown as ConversationSnapshot, "task_started");
+		assert.equal(body.max_completion_tokens, 8000);
+		process.env.MODEL_MAX_COMPLETION_TOKENS = "bogus";
+		await new MetaModelAdapter().run(task, conversation as unknown as ConversationSnapshot, "task_started");
+		assert.equal(body.max_completion_tokens, 16000);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+		if (previousCap === undefined) delete process.env.MODEL_MAX_COMPLETION_TOKENS;
+		else process.env.MODEL_MAX_COMPLETION_TOKENS = previousCap;
+	}
+});
