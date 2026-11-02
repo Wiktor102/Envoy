@@ -65,42 +65,24 @@ export interface InlineImageMedia {
 	height: number;
 }
 
-export interface ImageAttachment {
-	type: "image";
+interface BaseMediaAttachment<TType extends string, TDescription> {
+	type: TType;
 	url: string | null;
-	description: string | null;
+	description: TDescription;
 	// Inline bytes for local sources the backend cannot fetch. Null for remote
 	// sources and when extraction failed. Older clients omit this field.
 	media: InlineImageMedia | null;
 }
 
-export interface VideoAttachment {
-	type: "video";
-	url: string | null;
-	description: null;
-	// Poster frame for local sources the backend cannot fetch. Null for remote
-	// sources (the backend attempts the clip URL as a video block instead)
-	// and when extraction failed. Older clients omit this field.
-	media: InlineImageMedia | null;
-}
+export interface ImageAttachment extends BaseMediaAttachment<"image", string | null> {}
 
-export interface StickerAttachment {
-	type: "sticker";
-	url: string | null;
-	description: null;
-	// Inline bytes for local sources the backend cannot fetch. Null for remote
-	// sources and when extraction failed. Older clients omit this field.
-	media: InlineImageMedia | null;
-}
+// A video carries a captured poster frame; the backend attempts the clip URL
+// as a video block instead when the frame is absent.
+export interface VideoAttachment extends BaseMediaAttachment<"video", null> {}
 
-export interface GifAttachment {
-	type: "gif";
-	url: string | null;
-	description: null;
-	// Inline bytes for local sources the backend cannot fetch. Null for remote
-	// sources and when extraction failed. Older clients omit this field.
-	media: InlineImageMedia | null;
-}
+export interface StickerAttachment extends BaseMediaAttachment<"sticker", null> {}
+
+export interface GifAttachment extends BaseMediaAttachment<"gif", null> {}
 
 // Presence-only. A file's bytes never reach the model; capturing the row
 // keeps the reader fail-closed without failing the whole snapshot.
@@ -313,7 +295,12 @@ export function messageContent({ text, direction, replyTo, attachments, reaction
 	return {
 		text,
 		direction,
-		replyTo,
+		// Quote bytes are transport like top-level bytes: strip them so a
+		// re-fetched quote does not churn the revision.
+		replyTo: replyTo && {
+			...replyTo,
+			attachments: replyTo.attachments.map(attachmentIdentity),
+		},
 		attachments: attachments.map(attachmentIdentity),
 		reactions,
 		unsent,
@@ -324,7 +311,7 @@ export function messageContent({ text, direction, replyTo, attachments, reaction
 function fetchableMediaUrl(url: string | null): boolean {
 	// Prefix only; the backend parses strictly before fetching. A malformed
 	// URL merely fails there and stays presence-only.
-	return !!url && url.startsWith("https://");
+	return !!url?.startsWith("https://");
 }
 
 function forwardableAttachment(attachment: MessageAttachment): boolean {
@@ -332,7 +319,6 @@ function forwardableAttachment(attachment: MessageAttachment): boolean {
 		case "image":
 		case "gif":
 		case "sticker":
-			return fetchableMediaUrl(attachment.url) || !!attachment.media;
 		case "video":
 			// A captured poster frame forwards as a still; otherwise the
 			// backend attempts the clip URL as a video block, falling back
@@ -350,10 +336,11 @@ export function forwardableMediaSlots(messages: readonly ConversationMessage[]):
 	const slots = messages.map((message) => message.attachments.map(() => false));
 	let remaining = MAX_SNAPSHOT_IMAGES;
 	for (let m = messages.length - 1; m >= 0 && remaining > 0; m--) {
-		const attachments = messages[m]!.attachments;
-		for (let a = attachments.length - 1; a >= 0 && remaining > 0; a--) {
-			if (!forwardableAttachment(attachments[a]!)) continue;
-			slots[m]![a] = true;
+		const message = messages[m]!;
+		const slot = slots[m]!;
+		for (let a = message.attachments.length - 1; a >= 0 && remaining > 0; a--) {
+			if (!forwardableAttachment(message.attachments[a]!)) continue;
+			slot[a] = true;
 			remaining--;
 		}
 	}
