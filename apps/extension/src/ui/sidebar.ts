@@ -1,5 +1,12 @@
 // Messenger does not expose a stable sidebar API. Find the chat search field and
 // the smallest sidebar-sized ancestor that also contains the chat list.
+const MIN_SEARCH_WIDTH = 150;
+const MIN_SEARCH_HEIGHT = 20;
+const MAX_SIDEBAR_WIDTH = 600;
+const MIN_SIDEBAR_HEIGHT = 240;
+const SIDEBAR_BELOW_SEARCH = 150;
+const MIN_ROW_HEIGHT = 40;
+
 function findSidebar(): {
 	sidebar: HTMLElement;
 	insertionPoint: HTMLElement;
@@ -19,16 +26,17 @@ function findSidebar(): {
 		}
 
 		const searchRect = search.getBoundingClientRect();
-		if (searchRect.width < 150 || searchRect.height < 20 || searchRect.left > innerWidth / 3) continue;
+		if (searchRect.width < MIN_SEARCH_WIDTH || searchRect.height < MIN_SEARCH_HEIGHT || searchRect.left > innerWidth / 3)
+			continue;
 
 		let sidebar = search.parentElement;
 		while (sidebar && sidebar !== document.body) {
 			const rect = sidebar.getBoundingClientRect();
 			if (
 				rect.width >= searchRect.width &&
-				rect.width <= 600 &&
-				rect.height >= 240 &&
-				rect.bottom > searchRect.bottom + 150 &&
+				rect.width <= MAX_SIDEBAR_WIDTH &&
+				rect.height >= MIN_SIDEBAR_HEIGHT &&
+				rect.bottom > searchRect.bottom + SIDEBAR_BELOW_SEARCH &&
 				(sidebar.querySelector('a[href*="/t/"]') || sidebar.querySelector("envoy-root"))
 			) {
 				break;
@@ -41,12 +49,9 @@ function findSidebar(): {
 		let insertionPoint: HTMLElement = search;
 		while (insertionPoint.parentElement && insertionPoint.parentElement !== sidebar) {
 			const next = insertionPoint.nextElementSibling;
-			if (
-				next instanceof HTMLElement &&
-				next.getBoundingClientRect().height >= 40 &&
-				next.getBoundingClientRect().width >= searchRect.width * 0.7
-			) {
-				break;
+			if (next instanceof HTMLElement) {
+				const nextRect = next.getBoundingClientRect();
+				if (nextRect.height >= MIN_ROW_HEIGHT && nextRect.width >= searchRect.width * 0.7) break;
 			}
 
 			insertionPoint = insertionPoint.parentElement;
@@ -113,6 +118,11 @@ export function createSidebarController(
 		}
 	}
 
+	function refreshPanels() {
+		updateChatListAccessibility();
+		positionPanel();
+	}
+
 	function update() {
 		frame = 0;
 		const found = findSidebar();
@@ -130,8 +140,7 @@ export function createSidebarController(
 		}
 		setAvailable(host.isConnected);
 
-		updateChatListAccessibility();
-		positionPanel();
+		refreshPanels();
 	}
 
 	function scheduleUpdate() {
@@ -148,10 +157,7 @@ export function createSidebarController(
 
 	return {
 		update,
-		refresh() {
-			updateChatListAccessibility();
-			positionPanel();
-		},
+		refresh: refreshPanels,
 		destroy() {
 			setAvailable(false);
 			observer.disconnect();

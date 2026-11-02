@@ -161,6 +161,11 @@ summary:focus-visible,
 .settings-button svg {
 	width: 16px;
 	height: 16px;
+}
+
+.settings-button svg,
+.icon-btn svg,
+.goal-line svg {
 	flex: none;
 }
 
@@ -206,11 +211,23 @@ summary:focus-visible,
 	background: var(--envoy-surface);
 	color: var(--envoy-text);
 	border-bottom-right-radius: 8px;
+}
+
+#envoy-panel,
+.chat-id,
+.message-text,
+.agent-state {
 	overflow-wrap: anywhere;
 }
 
-:host([data-facebook]) #envoy-panel {
+:host([data-facebook]) #envoy-panel,
+:host([data-facebook]) #envoy-header,
+:host([data-facebook]) #envoy-settings-popover,
+:host([data-facebook]) #envoy-footer {
 	background: var(--envoy-facebook-surface);
+}
+
+:host([data-facebook]) #envoy-panel {
 	border-bottom-right-radius: 0;
 }
 
@@ -224,10 +241,6 @@ summary:focus-visible,
 	padding: 10px 12px;
 	background: var(--envoy-surface);
 	border-bottom: 1px solid var(--envoy-divider);
-}
-
-:host([data-facebook]) #envoy-header {
-	background: var(--envoy-facebook-surface);
 }
 
 .header-main {
@@ -264,7 +277,6 @@ summary:focus-visible,
 .icon-btn svg {
 	width: 18px;
 	height: 18px;
-	flex: none;
 }
 
 #envoy-resume:not(:disabled) {
@@ -316,7 +328,6 @@ summary:focus-visible,
 .goal-line svg {
 	width: 14px;
 	height: 14px;
-	flex: none;
 }
 
 .goal-line:disabled svg {
@@ -385,13 +396,15 @@ textarea::placeholder {
 	opacity: 1;
 }
 
-textarea:focus-visible {
+textarea:focus-visible,
+.delay-inputs input:focus-visible {
 	border-color: var(--envoy-focus);
 	outline: 2px solid var(--envoy-focus);
 	outline-offset: 1px;
 }
 
-textarea:disabled {
+textarea:disabled,
+.delay-inputs input:disabled {
 	color: var(--envoy-disabled-text);
 	cursor: not-allowed;
 }
@@ -423,10 +436,6 @@ textarea:disabled {
 	border-radius: 12px;
 	background: var(--envoy-surface);
 	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-}
-
-:host([data-facebook]) #envoy-settings-popover {
-	background: var(--envoy-facebook-surface);
 }
 
 #envoy-settings-popover .developer-settings {
@@ -492,17 +501,6 @@ textarea:disabled {
 	appearance: none;
 }
 
-.delay-inputs input:focus-visible {
-	border-color: var(--envoy-focus);
-	outline: 2px solid var(--envoy-focus);
-	outline-offset: 1px;
-}
-
-.delay-inputs input:disabled {
-	color: var(--envoy-disabled-text);
-	cursor: not-allowed;
-}
-
 .reply-settings .hint {
 	margin-bottom: 0;
 }
@@ -561,7 +559,6 @@ button.primary:focus-visible:not(:disabled) {
 .chat-id {
 	font-size: 12px;
 	color: var(--envoy-secondary-text);
-	overflow-wrap: anywhere;
 }
 
 summary {
@@ -603,22 +600,29 @@ summary .hint {
 
 #envoy-conversation li[data-direction="outgoing"] {
 	margin-inline-start: 16px;
+}
+
+#envoy-conversation li[data-direction="outgoing"],
+#envoy-agent-messages li[data-role="user"] {
 	border-radius: 10px 10px 2px 10px;
 	background: var(--envoy-tab-selected);
 }
 
-#envoy-conversation strong {
+#envoy-conversation strong,
+#envoy-agent-messages strong {
 	display: block;
-	margin-bottom: 4px;
 	font-size: 12px;
 	font-weight: 600;
 	color: var(--envoy-secondary-text);
 }
 
+#envoy-conversation strong {
+	margin-bottom: 4px;
+}
+
 .message-text {
 	display: block;
 	white-space: pre-wrap;
-	overflow-wrap: anywhere;
 }
 
 .agent-state {
@@ -626,7 +630,6 @@ summary .hint {
 	font-size: 13px;
 	font-weight: 600;
 	white-space: pre-wrap;
-	overflow-wrap: anywhere;
 }
 
 .agent-state::before {
@@ -683,8 +686,6 @@ summary .hint {
 
 #envoy-agent-messages li[data-role="user"] {
 	margin-inline-start: 24px;
-	border-radius: 10px 10px 2px 10px;
-	background: var(--envoy-tab-selected);
 }
 
 #envoy-agent-messages li[data-role="event"] {
@@ -718,11 +719,7 @@ summary .hint {
 }
 
 #envoy-agent-messages strong {
-	display: block;
 	margin-bottom: 2px;
-	font-size: 12px;
-	font-weight: 600;
-	color: var(--envoy-secondary-text);
 }
 
 #envoy-footer {
@@ -732,10 +729,6 @@ summary .hint {
 	padding: 10px 12px;
 	background: var(--envoy-surface);
 	border-top: 1px solid var(--envoy-divider);
-}
-
-:host([data-facebook]) #envoy-footer {
-	background: var(--envoy-facebook-surface);
 }
 
 .answer-bar {
