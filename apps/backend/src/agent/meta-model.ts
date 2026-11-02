@@ -6,9 +6,20 @@ import type { Agent, EvaluationReason } from "./agent.js";
 
 const MODEL_API_BASE_URL = "https://api.meta.ai/v1";
 const DEFAULT_MODEL = "muse-spark-1.3";
+// Reasoning tokens count toward this cap, so it must leave room for the
+// JSON decision after reasoning. Override with MODEL_MAX_COMPLETION_TOKENS.
+const DEFAULT_MAX_COMPLETION_TOKENS = 16_000;
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_FETCH_BYTES = 8_000_000;
 const MAX_REDIRECTS = 3;
+
+function maxCompletionTokens(): number {
+	const raw = process.env.MODEL_MAX_COMPLETION_TOKENS?.trim();
+	if (!raw) return DEFAULT_MAX_COMPLETION_TOKENS;
+	const value = Number(raw);
+	if (!Number.isInteger(value) || value <= 0) return DEFAULT_MAX_COMPLETION_TOKENS;
+	return value;
+}
 
 // Credentials and API responses stay on the backend. Never log message content
 // or provider errors, which may include request data.
@@ -35,7 +46,7 @@ export class MetaModelAdapter implements Agent {
 			{
 				model: process.env.MODEL_API_MODEL?.trim() || DEFAULT_MODEL,
 				response_format: { type: "json_object" },
-				max_completion_tokens: 4096,
+				max_completion_tokens: maxCompletionTokens(),
 				messages: [
 					{
 						role: "system",

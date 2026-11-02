@@ -14,7 +14,7 @@ cp apps/backend/.env.example apps/backend/.env.development
 cp apps/backend/.env.example apps/backend/.env.production
 ```
 
-Put `MODEL_API_KEY` in the backend env files. Set `NODE_ENV=production` in `.env.production`. `MODEL_API_MODEL` defaults to `muse-spark-1.3`; change it if your Meta account uses a different supported model. Restart the backend after changing an env file. Existing process environment variables take precedence. Never put the key in the extension.
+Put `MODEL_API_KEY` in the backend env files. Set `NODE_ENV=production` in `.env.production`. `MODEL_API_MODEL` defaults to `muse-spark-1.3`; change it if your Meta account uses a different supported model. `MODEL_MAX_COMPLETION_TOKENS` defaults to `16000`. Restart the backend after changing an env file. Existing process environment variables take precedence. Never put the key in the extension.
 
 For development run `pnpm dev`. WXT may open Chrome. To run each part separately, use `pnpm dev:backend` or `pnpm dev:extension`. Restart development after backend router type changes so the extension picks up the new declarations.
 
