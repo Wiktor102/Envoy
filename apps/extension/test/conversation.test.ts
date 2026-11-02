@@ -2509,6 +2509,34 @@ test("prefers the GIF render in multi-image links regardless of order", async ()
 	}
 });
 
+test("reads GIPHY-captioned links with tag-like alts as GIFs regardless of order", async () => {
+	const dom = setup();
+	try {
+		// Live normal chat: the kiwi render carries tag text with no GIF word,
+		// beside an empty-alt static image and a GIPHY caption.
+		const kiwi = (id: string) =>
+			`<div data-scope="messages_table" data-message-id="${id}" aria-roledescription="wiadomość" aria-label="O 21:29, Alex"><a href="/messenger_media/?attachment_id=1"><img alt="green, vegan, fruit, spiral, kiwi" src="https://example.test/kiwi"><img alt="" src="https://example.test/static"><span>GIPHY</span></a></div>`;
+		const reversed = (id: string) =>
+			`<div data-scope="messages_table" data-message-id="${id}" aria-roledescription="wiadomość" aria-label="O 21:29, Alex"><a href="/messenger_media/?attachment_id=1"><img alt="" src="https://example.test/static"><img alt="green, vegan, fruit, spiral, kiwi" src="https://example.test/kiwi"><span>GIPHY</span></a></div>`;
+		for (const fixture of [kiwi("g1"), reversed("g1")]) {
+			setMessages(fixture);
+			const snapshot = await messengerChatAdapter.readConversation();
+			assert.deepEqual(snapshot.messages[0]!.attachments, [
+				{ type: "gif", url: "https://example.test/kiwi", description: null, media: null },
+			]);
+		}
+		// Without the caption the same link stays a photo: the chrome carries
+		// the classification, not the tag text alone.
+		setMessages(kiwi("g1").replace("<span>GIPHY</span>", ""));
+		const snapshot = await messengerChatAdapter.readConversation();
+		assert.deepEqual(snapshot.messages[0]!.attachments, [
+			{ type: "image", url: "https://example.test/kiwi", description: null, media: null },
+		]);
+	} finally {
+		dom.window.close();
+	}
+});
+
 test("inlines local GIF renders while keeping remote GIF links fetchable", async () => {
 	const dom = setup();
 	const restoreImage = installImageStub({ "*": { width: 100, height: 80 } });

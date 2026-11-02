@@ -1,4 +1,4 @@
-import { isAnimatedPreview, isGifButton, isGifLabel } from "./animated-preview";
+import { hasGifChrome, isAnimatedPreview, isGifButton, isGifLabel } from "./animated-preview";
 import { isGroupSystemEvent, isThreadIntro } from "./group-events";
 import {
 	hasControlCharacters,
@@ -631,21 +631,30 @@ function isMessengerPhotoLink(anchor: HTMLAnchorElement): boolean {
 // A GIF renders as a photo link whose image alt names the format. Links sent
 // through GIPHY also carry a caption naming the service, while an uploaded
 // GIF renders the same link with a descriptive alt (e.g. "Obraz GIF") and no
-// caption. The alt word carries the classification either way: observed photo
-// links render their images with an empty alt. Animated previews carry a play
-// glyph instead.
+// caption. One observed GIPHY shape carries neither: the render alt holds tag
+// text with no format word, beside an empty-alt static image. The service
+// chrome classifies that shape, the same check quote previews use. Observed
+// photo links render their images with an empty alt and no chrome. Animated
+// previews carry a play glyph instead.
 function isGifLink(viewer: HTMLElement): boolean {
 	if (!viewer.matches("a[href]") || !isMessengerPhotoLink(viewer as HTMLAnchorElement)) return false;
 	const image = gifLinkImage(viewer);
-	return image !== null && isGifLabel(image.getAttribute("alt") ?? "");
+	if (image !== null && isGifLabel(image.getAttribute("alt") ?? "")) return true;
+	return hasGifChrome(viewer);
 }
 
 // A GIF link can render several images, e.g. a static preview beside the
-// animated render. Prefer the image whose alt names the format so the
-// classification and the forwarded URL never depend on DOM order.
+// animated render. Prefer the image whose alt names the format, then any
+// labeled image over an empty-alt one, so the classification and the
+// forwarded URL never depend on DOM order.
 function gifLinkImage(viewer: HTMLElement): HTMLImageElement | null {
 	const images = [...viewer.querySelectorAll("img")];
-	return images.find((image) => isGifLabel(image.getAttribute("alt") ?? "")) ?? images[0] ?? null;
+	return (
+		images.find((image) => isGifLabel(image.getAttribute("alt") ?? "")) ??
+		images.find((image) => image.getAttribute("alt")?.trim()) ??
+		images[0] ??
+		null
+	);
 }
 
 function isGifViewer(viewer: HTMLElement): boolean {
@@ -913,11 +922,7 @@ function getQuotedAttachments(button: Element): { element: HTMLImageElement; att
 	const images = [...button.querySelectorAll<HTMLImageElement>("img")].filter(
 		(image) => !image.closest('[dir="auto"], [aria-hidden="true"]'),
 	);
-	const gifChrome = [...button.querySelectorAll<HTMLElement>("a, span, [aria-label]")].some(
-		(element) =>
-			element.textContent?.trim() === "GIPHY" ||
-			/(?:^|\s)(?:open|otwórz)\s+gif(?:$|[\s:.,])/i.test(element.getAttribute("aria-label") ?? ""),
-	);
+	const gifChrome = hasGifChrome(button);
 	const quoted: { element: HTMLImageElement; attachment: MessageAttachment }[] = [];
 	for (const image of images) {
 		const label = quotedImageLabel(image);
