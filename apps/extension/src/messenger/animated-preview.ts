@@ -16,6 +16,17 @@ export function isGifLabel(value: string): boolean {
 	return /(?:^|\s)gif(?=$|[\s:.,])/i.test(value);
 }
 
+// Service chrome around a GIF render: a caption naming GIPHY or a label
+// offering to open the GIF. Observed on quote previews and on multi-image
+// GIF links whose render alt carries tags instead of the format word.
+export function hasGifChrome(scope: Element): boolean {
+	return [...scope.querySelectorAll<HTMLElement>("a, span, [aria-label]")].some(
+		(element) =>
+			element.textContent?.trim() === "GIPHY" ||
+			/(?:^|\s)(?:open|otwórz)\s+gif(?:$|[\s:.,])/i.test(element.getAttribute("aria-label") ?? ""),
+	);
+}
+
 // An encrypted-chat GIF is a button holding a lone image whose alt names the
 // format. No play control or tabindex required; some variants omit them. The
 // alt word carries the classification: photo buttons never carry it, and a

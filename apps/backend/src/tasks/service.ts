@@ -14,7 +14,7 @@ import type {
 } from "@envoy/contracts";
 import {
 	DEFAULT_REPLY_DELAY_SECONDS,
-	forwardableImageSlots,
+	forwardableMediaSlots,
 	hasControlCharacters,
 	isTaskEnded,
 	MAX_TASK_TEXT_LENGTH,
@@ -838,9 +838,12 @@ export class TaskService {
 			task.status = "needs_user";
 			// Quote bytes never reach the model, so a quoted attachment always
 			// causes this pause. Name it: the general message hides what happened.
-			task.detail = latest.replyTo?.attachments.length
-				? "The latest message quotes an image Envoy cannot read. Take over to reply yourself."
-				: "The latest message contains content Envoy cannot interpret.";
+			const quoted = latest.replyTo?.attachments ?? [];
+			task.detail = !quoted.length
+				? "The latest message contains content Envoy cannot interpret."
+				: quoted.every((attachment) => attachment.type === "image")
+					? "The latest message quotes an image Envoy cannot read. Take over to reply yourself."
+					: "The latest message quotes media Envoy cannot read. Take over to reply yourself.";
 			return;
 		}
 		task.status = "thinking";
@@ -936,11 +939,21 @@ function checkedReply(value: string | undefined): string {
 }
 
 function readableLatest(messages: readonly ConversationMessage[], latest: ConversationMessage): boolean {
-	// Only forwarded photos read as content. Anything else attached, or a
-	// photo past the per-snapshot cap, still pauses for the user.
-	const slots = forwardableImageSlots(messages);
+	// Only forwarded media reads as content. Anything else attached (files,
+	// sourceless media), or media past the per-snapshot cap, still pauses for
+	// the user.
+	const slots = forwardableMediaSlots(messages);
 	const index = messages.indexOf(latest);
-	if (!latest.attachments.every((attachment, position) => attachment.type === "image" && slots[index]?.[position]))
+	if (
+		!latest.attachments.every(
+			(attachment, position) =>
+				(attachment.type === "image" ||
+					attachment.type === "video" ||
+					attachment.type === "gif" ||
+					attachment.type === "sticker") &&
+				slots[index]?.[position],
+		)
+	)
 		return false;
 	if (!latest.text.trim() && !latest.attachments.length) return false;
 	const quote = latest.replyTo;

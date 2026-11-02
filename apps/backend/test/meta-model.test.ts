@@ -183,16 +183,17 @@ test("the Meta request marks unverified history and attachments without sending 
 			sender: null,
 			text: "What about this?",
 			attachments: [
-				{ type: "image" as const, url: "https://private.example/photo", description: null },
-				{ type: "video" as const, url: null, description: null },
-				{ type: "sticker" as const, url: null, description: null },
+				{ type: "image" as const, url: "https://private.example/photo", description: null, media: null },
+				{ type: "video" as const, url: null, description: null, media: null },
+				{ type: "sticker" as const, url: null, description: null, media: null },
+				{ type: "file" as const },
 			],
 			replyTo: {
 				text: null,
 				context: null,
 				attachments: [
-					{ type: "image" as const, url: null, description: null },
-					{ type: "sticker" as const, url: null, description: null },
+					{ type: "image" as const, url: null, description: null, media: null },
+					{ type: "sticker" as const, url: null, description: null, media: null },
 				],
 			},
 			reactions: [],
@@ -210,7 +211,7 @@ test("the Meta request marks unverified history and attachments without sending 
 			text: "What about this?",
 			unsent: false,
 			edited: null,
-			attachments: [{ type: "image" }, { type: "video" }, { type: "sticker" }],
+			attachments: [{ type: "image" }, { type: "video" }, { type: "sticker" }, { type: "file" }],
 			replyTo: { text: null, context: null, attachments: [{ type: "image" }, { type: "sticker" }] },
 		});
 		assert.doesNotMatch(body.messages[2].content, /private\.example/);
@@ -390,9 +391,13 @@ test("the Meta request keeps photos past the cap and failed fetches presence-onl
 		);
 		assert.deepEqual(result, { action: "wait" });
 		const content = body.messages[2].content;
-		// Newest-first selection takes the last four; only the fetchable one resolves.
-		assert.equal(content.length, 2);
+		// Newest-first selection takes the last four; the GIF and the photo
+		// resolve while oversized, downgraded, and failed fetches stay behind.
+		assert.equal(content.length, 3);
 		assert.equal(content[1].type, "image_url");
+		assert.equal(content[2].type, "image_url");
+		assert.match(content[1].image_url.url, /^data:image\/gif;base64,/);
+		assert.match(content[2].image_url.url, /^data:image\/jpeg;base64,/);
 		const payload = JSON.parse(content[0].text);
 		assert.deepEqual(payload.conversation[0].attachments, [{ type: "image" }]);
 		assert.deepEqual(payload.conversation[1].attachments, [
@@ -400,8 +405,8 @@ test("the Meta request keeps photos past the cap and failed fetches presence-onl
 			{ type: "image" },
 			{ type: "image" },
 			{ type: "image" },
-			{ type: "image" },
 			{ type: "image", imageIndex: 0 },
+			{ type: "image", imageIndex: 1 },
 		]);
 	} finally {
 		globalThis.fetch = previousFetch;
@@ -480,6 +485,597 @@ test("the Meta request never fetches or forwards quoted photos", async () => {
 		globalThis.fetch = previousFetch;
 		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
 		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the Meta request forwards GIFs, stickers, and video stills as image blocks", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	const bytes = await photo();
+	const frame = (await photo(60, 40)).toString("base64");
+	const fetched: string[] = [];
+	let body: any;
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			body = await new Request(input, init).json();
+			return modelResponse();
+		}
+		fetched.push(url);
+		return new Response(bytes as unknown as BodyInit, { status: 200, headers: { "content-type": "image/jpeg" } });
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "media",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Look",
+				replyTo: null,
+				attachments: [
+					{ type: "gif", url: "https://example.test/clip", description: null, media: null },
+					{ type: "sticker", url: "https://example.test/sticker", description: null, media: null },
+					{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null },
+					{
+						type: "video",
+						url: null,
+						description: null,
+						media: { mime: "image/jpeg", data: frame, width: 60, height: 40 },
+					},
+					{ type: "file" },
+				],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		const content = body.messages[2].content;
+		// The GIF, the sticker, and the framed video resolve. The bare video
+		// URL is attempted but rejected on content type here, and the file
+		// stays presence-only.
+		assert.deepEqual(fetched.sort(), [
+			"https://example.test/clip",
+			"https://example.test/clip.mp4",
+			"https://example.test/sticker",
+		]);
+		assert.equal(content.length, 4);
+		assert.deepEqual(
+			content.slice(1).map(({ type }: { type: string }) => type),
+			["image_url", "image_url", "image_url"],
+		);
+		assert.equal(content[3].image_url.url, `data:image/jpeg;base64,${frame}`);
+		const payload = JSON.parse(content[0].text);
+		assert.deepEqual(payload.conversation[0].attachments, [
+			{ type: "gif", imageIndex: 0 },
+			{ type: "sticker", imageIndex: 1 },
+			{ type: "video" },
+			{ type: "video", imageIndex: 2 },
+			{ type: "file" },
+		]);
+		assert.doesNotMatch(JSON.stringify(body), /example\.test/);
+		assert.match(body.messages[0].content, /video stills/);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the Meta request attempts a video_url block for clip URLs", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	const clipBytes = Buffer.from("fake-mp4-bytes");
+	const clipDataUrl = `data:video/mp4;base64,${clipBytes.toString("base64")}`;
+	let body: any;
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			body = await new Request(input, init).json();
+			return modelResponse();
+		}
+		return new Response(clipBytes as unknown as BodyInit, {
+			status: 200,
+			headers: { "content-type": "video/mp4" },
+		});
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "clip",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Watch this",
+				replyTo: null,
+				attachments: [{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null }],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		const content = body.messages[2].content;
+		assert.equal(content.length, 2);
+		assert.equal(content[1].type, "video_url");
+		assert.equal(content[1].video_url.url, clipDataUrl);
+		const payload = JSON.parse(content[0].text);
+		assert.deepEqual(payload.conversation[0].attachments, [{ type: "video", videoIndex: 0 }]);
+		assert.doesNotMatch(JSON.stringify(body), /example\.test\/clip\.mp4/);
+		assert.match(body.messages[0].content, /videoIndex/);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the Meta request re-encodes fetched images past the byte budget as stills", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	const big = await sharp({
+		create: { width: 1200, height: 1200, channels: 3, noise: { type: "gaussian", mean: 128, sigma: 30 } },
+	})
+		.png()
+		.toBuffer();
+	assert.ok(big.length > 1_000_000);
+	let body: any;
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			body = await new Request(input, init).json();
+			return modelResponse();
+		}
+		return new Response(big as unknown as BodyInit, { status: 200, headers: { "content-type": "image/png" } });
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "big",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Look",
+				replyTo: null,
+				attachments: [{ type: "image", url: "https://example.test/big", description: null, media: null }],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		const content = body.messages[2].content;
+		assert.equal(content.length, 2);
+		const blockUrl = content[1].image_url.url as string;
+		assert.match(blockUrl, /^data:image\/jpeg;base64,/);
+		assert.ok(Buffer.from(blockUrl.split(",")[1]!, "base64").length < big.length);
+		const payload = JSON.parse(content[0].text);
+		assert.deepEqual(payload.conversation[0].attachments, [{ type: "image", imageIndex: 0 }]);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the Meta request falls back to presence-only when video blocks are rejected", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	const clipBytes = Buffer.from("fake-mp4-bytes");
+	const bodies: any[] = [];
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			const body = await new Request(input, init).json();
+			bodies.push(body);
+			if (JSON.stringify(body).includes("video_url")) {
+				return new Response(JSON.stringify({ error: { message: "unknown part" } }), { status: 400 });
+			}
+			return modelResponse('{"action":"reply","text":"Got it"}');
+		}
+		return new Response(clipBytes as unknown as BodyInit, {
+			status: 200,
+			headers: { "content-type": "video/mp4" },
+		});
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "clip",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Watch this",
+				replyTo: null,
+				attachments: [{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null }],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		const decision = await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		assert.equal(bodies.length, 2);
+		const retry = bodies[1].messages[2].content;
+		assert.equal(typeof retry, "string");
+		const payload = JSON.parse(retry);
+		assert.deepEqual(payload.conversation[0].attachments, [{ type: "video" }]);
+		assert.equal(decision.action, "reply");
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
+test("the media debug log narrates fetches and blocks without URLs or text", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	const previousFlag = process.env.ENVOY_DEBUG_MEDIA;
+	const previousInfo = console.info;
+	process.env.MODEL_API_KEY = "test-key";
+	process.env.ENVOY_DEBUG_MEDIA = "1";
+	const lines: string[] = [];
+	console.info = (line: string) => {
+		lines.push(line);
+	};
+	const clipBytes = Buffer.from("fake-mp4-bytes");
+	globalThis.fetch = (async (input: any, init: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") return modelResponse();
+		return new Response(clipBytes as unknown as BodyInit, {
+			status: 200,
+			headers: { "content-type": "video/mp4" },
+		});
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "clip",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Watch this",
+				replyTo: null,
+				attachments: [{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null }],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		assert.ok(lines.some((line) => line.includes("fetch video/mp4")));
+		assert.ok(lines.some((line) => line.includes("media video url -> video block")));
+		assert.ok(lines.some((line) => line.includes("0 image blocks [], 1 video blocks [14B]")));
+		assert.ok(!lines.join("\n").includes("example.test"));
+		assert.ok(!lines.join("\n").includes("Watch this"));
+	} finally {
+		console.info = previousInfo;
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+		if (previousFlag === undefined) delete process.env.ENVOY_DEBUG_MEDIA;
+		else process.env.ENVOY_DEBUG_MEDIA = previousFlag;
+	}
+});
+
+test("the media debug log records request failures by status only", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	const previousFlag = process.env.ENVOY_DEBUG_MEDIA;
+	const previousInfo = console.info;
+	process.env.MODEL_API_KEY = "test-key";
+	process.env.ENVOY_DEBUG_MEDIA = "1";
+	const lines: string[] = [];
+	console.info = (line: string) => {
+		lines.push(line);
+	};
+	globalThis.fetch = (async (input: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			return new Response(JSON.stringify({ error: { message: "busy" } }), { status: 500 });
+		}
+		throw new Error("unexpected fetch");
+	}) as typeof fetch;
+	try {
+		await assert.rejects(
+			new MetaModelAdapter().run(task, conversation as unknown as ConversationSnapshot, "new_message"),
+		);
+		assert.ok(lines.some((line) => line.includes("request failed: status 500 (InternalServerError)")));
+		assert.ok(!lines.join("\n").includes("busy"));
+	} finally {
+		console.info = previousInfo;
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+		if (previousFlag === undefined) delete process.env.ENVOY_DEBUG_MEDIA;
+		else process.env.ENVOY_DEBUG_MEDIA = previousFlag;
+	}
+});
+
+test("the media debug log marks unparsable model decisions without their text", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	const previousFlag = process.env.ENVOY_DEBUG_MEDIA;
+	const previousInfo = console.info;
+	process.env.MODEL_API_KEY = "test-key";
+	process.env.ENVOY_DEBUG_MEDIA = "1";
+	const lines: string[] = [];
+	console.info = (line: string) => {
+		lines.push(line);
+	};
+	globalThis.fetch = (async (input: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			return new Response(JSON.stringify({ choices: [{ message: { content: "not json" } }] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}
+		throw new Error("unexpected fetch");
+	}) as typeof fetch;
+	try {
+		await assert.rejects(
+			new MetaModelAdapter().run(task, conversation as unknown as ConversationSnapshot, "new_message"),
+			(error: unknown) => (error as Error).message === "Invalid model decision",
+		);
+		assert.ok(lines.some((line) => line.includes("model decision unparsable")));
+		assert.ok(!lines.join("\n").includes("not json"));
+	} finally {
+		console.info = previousInfo;
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+		if (previousFlag === undefined) delete process.env.ENVOY_DEBUG_MEDIA;
+		else process.env.ENVOY_DEBUG_MEDIA = previousFlag;
+	}
+});
+
+async function decisionFailure(choice: unknown, usage?: unknown): Promise<string[]> {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	const previousFlag = process.env.ENVOY_DEBUG_MEDIA;
+	const previousInfo = console.info;
+	process.env.MODEL_API_KEY = "test-key";
+	process.env.ENVOY_DEBUG_MEDIA = "1";
+	const lines: string[] = [];
+	console.info = (line: string) => {
+		lines.push(line);
+	};
+	const body: Record<string, unknown> = { choices: [choice] };
+	if (usage !== undefined) body.usage = usage;
+	globalThis.fetch = (async (input: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			return new Response(JSON.stringify(body), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}
+		throw new Error("unexpected fetch");
+	}) as typeof fetch;
+	try {
+		await new MetaModelAdapter().run(task, conversation as unknown as ConversationSnapshot, "new_message");
+		assert.fail("expected an Invalid model decision error");
+	} catch (error) {
+		assert.equal((error as Error).message, "Invalid model decision");
+		return lines;
+	} finally {
+		console.info = previousInfo;
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+		if (previousFlag === undefined) delete process.env.ENVOY_DEBUG_MEDIA;
+		else process.env.ENVOY_DEBUG_MEDIA = previousFlag;
+	}
+}
+
+test("the media debug log describes an empty model response with its finish reason", async () => {
+	const lines = await decisionFailure({ message: { content: "" }, finish_reason: "stop" });
+	const line = lines.find((candidate) => candidate.includes("model decision unparsable"));
+	assert.ok(line);
+	assert.match(line, /choices 1/);
+	assert.match(line, /finish stop/);
+	assert.match(line, /content empty/);
+	assert.match(line, /refusal none/);
+	assert.match(line, /tool calls 0/);
+	assert.match(line, /usage none/);
+});
+
+test("the media debug log reports a refusal by length without its text", async () => {
+	const refusal = "I cannot look at images of any kind whatsoever in this evaluation";
+	const lines = await decisionFailure({ message: { content: null, refusal }, finish_reason: "stop" });
+	const line = lines.find((candidate) => candidate.includes("model decision unparsable"));
+	assert.ok(line);
+	assert.match(line, /content null/);
+	assert.match(line, new RegExp(`refusal ${refusal.length} chars`));
+	assert.ok(!lines.join("\n").includes(refusal));
+});
+
+test("the media debug log reports a length finish with reasoning usage", async () => {
+	const lines = await decisionFailure(
+		{ message: {}, finish_reason: "length" },
+		{
+			prompt_tokens: 81,
+			completion_tokens: 72,
+			total_tokens: 211,
+			completion_tokens_details: { reasoning_tokens: 58 },
+		},
+	);
+	const line = lines.find((candidate) => candidate.includes("model decision unparsable"));
+	assert.ok(line);
+	assert.match(line, /finish length/);
+	assert.match(line, /content missing/);
+	assert.match(line, /usage \[prompt 81, completion 72, total 211, reasoning 58\]/);
+});
+
+test("the media debug log counts tool calls without their arguments", async () => {
+	const lines = await decisionFailure({
+		message: {
+			tool_calls: [
+				{ id: "a", function: { name: "send", arguments: '{"private":"s3cret-payload-one"}' } },
+				{ id: "b", function: { name: "send", arguments: '{"private":"s3cret-payload-two"}' } },
+			],
+		},
+		finish_reason: "tool_calls",
+	});
+	const line = lines.find((candidate) => candidate.includes("model decision unparsable"));
+	assert.ok(line);
+	assert.match(line, /tool calls 2/);
+	assert.match(line, /content missing/);
+	assert.match(line, /usage none/);
+	assert.ok(!lines.join("\n").includes("s3cret-payload"));
+});
+
+test("the media debug log survives a bare choice with unlisted metadata", async () => {
+	const lines = await decisionFailure({ finish_reason: "pause" });
+	const line = lines.find((candidate) => candidate.includes("model decision unparsable"));
+	assert.ok(line);
+	assert.match(line, /choices 1/);
+	assert.match(line, /finish unlisted/);
+	assert.match(line, /content missing/);
+	assert.match(line, /refusal none/);
+	assert.match(line, /tool calls 0/);
+	assert.match(line, /usage none/);
+});
+
+test("the media debug log describes a well-formed but invalid decision without its text", async () => {
+	const lines = await decisionFailure(
+		{ message: { content: '{"action":"dance"}' }, finish_reason: "stop" },
+		{ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+	);
+	const line = lines.find((candidate) => candidate.includes("model decision invalid"));
+	assert.ok(line);
+	assert.match(line, /finish stop/);
+	assert.match(line, /content present 18 chars/);
+	assert.match(line, /usage \[prompt 10, completion 5, total 15\]/);
+	assert.ok(!lines.join("\n").includes("dance"));
+});
+
+test("the media debug log records the connection cause without request data", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	const previousFlag = process.env.ENVOY_DEBUG_MEDIA;
+	const previousInfo = console.info;
+	process.env.MODEL_API_KEY = "test-key";
+	process.env.ENVOY_DEBUG_MEDIA = "1";
+	const lines: string[] = [];
+	console.info = (line: string) => {
+		lines.push(line);
+	};
+	// Undici wraps the transport error: an outer "fetch failed" whose cause
+	// carries the specific network code.
+	const socketError = Object.assign(new Error("fetch failed"), {
+		cause: Object.assign(new Error("socket hang up"), { code: "UND_ERR_SOCKET" }),
+	});
+	globalThis.fetch = (async (input: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") throw socketError;
+		throw new Error("unexpected fetch");
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "clip",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Watch this",
+				replyTo: null,
+				attachments: [{ type: "video", url: "https://example.test/clip.mp4", description: null, media: null }],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		await assert.rejects(
+			new MetaModelAdapter().run(
+				task,
+				{ ...conversation, messages } as unknown as ConversationSnapshot,
+				"new_message",
+			),
+		);
+		assert.ok(lines.some((line) => line.includes("APIConnectionError")));
+		assert.ok(lines.some((line) => line.includes("UND_ERR_SOCKET") && line.includes("socket hang up")));
+		assert.ok(!lines.join("\n").includes("Watch this"));
+	} finally {
+		console.info = previousInfo;
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+		if (previousFlag === undefined) delete process.env.ENVOY_DEBUG_MEDIA;
+		else process.env.ENVOY_DEBUG_MEDIA = previousFlag;
+	}
+});
+
+test("the Meta request retries once when the connection itself fails", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	const previousFlag = process.env.ENVOY_DEBUG_MEDIA;
+	const previousInfo = console.info;
+	process.env.MODEL_API_KEY = "test-key";
+	process.env.ENVOY_DEBUG_MEDIA = "1";
+	const lines: string[] = [];
+	console.info = (line: string) => {
+		lines.push(line);
+	};
+	let calls = 0;
+	globalThis.fetch = (async (input: any) => {
+		const url = String(input instanceof Request ? input.url : input);
+		if (url === "https://api.meta.ai/v1/chat/completions") {
+			calls++;
+			if (calls === 1) {
+				throw Object.assign(new Error("fetch failed"), {
+					cause: Object.assign(new Error("unable to verify the first certificate"), {
+						code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+					}),
+				});
+			}
+			return modelResponse();
+		}
+		throw new Error("unexpected fetch");
+	}) as typeof fetch;
+	try {
+		const messages = [
+			{
+				id: "text",
+				direction: "incoming",
+				sender: "Alex",
+				text: "Hello",
+				replyTo: null,
+				attachments: [],
+				reactions: [],
+				unsent: false,
+			},
+		];
+		const decision = await new MetaModelAdapter().run(
+			task,
+			{ ...conversation, messages } as unknown as ConversationSnapshot,
+			"new_message",
+		);
+		assert.equal(calls, 2);
+		assert.equal(decision.action, "wait");
+		assert.ok(lines.some((line) => line.includes("retrying once")));
+		assert.ok(lines.some((line) => line.includes("UNABLE_TO_VERIFY_LEAF_SIGNATURE")));
+	} finally {
+		console.info = previousInfo;
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+		if (previousFlag === undefined) delete process.env.ENVOY_DEBUG_MEDIA;
+		else process.env.ENVOY_DEBUG_MEDIA = previousFlag;
 	}
 });
 

@@ -1,4 +1,4 @@
-import { isAnimatedPreview, isGifButton, isGifLabel } from "./animated-preview";
+import { hasGifChrome, isAnimatedPreview, isGifButton, isGifLabel } from "./animated-preview";
 import { isGroupSystemEvent, isThreadIntro } from "./group-events";
 import {
 	hasControlCharacters,
@@ -14,6 +14,7 @@ import type {
 	ConversationSnapshot,
 	InlineImageMedia,
 	InlineImageMime,
+	MessageAttachment,
 	SendReplyCommand,
 	SendResult,
 } from "@envoy/contracts";
@@ -108,6 +109,7 @@ interface RenderedMessage {
 	images: HTMLElement[];
 	videos: HTMLElement[];
 	stickers: HTMLElement[];
+	files: HTMLElement[];
 	unsent: boolean;
 	standaloneLike?: boolean;
 }
@@ -194,6 +196,9 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		if (isControlWrapper(element)) return false;
 		const photoLink = element.closest<HTMLAnchorElement>("a[href]");
 		if (photoLink && isMessengerPhotoLink(photoLink)) return false;
+		// A file row's label is part of the download control, not a message.
+		// The row itself becomes a presence-only file attachment.
+		if (element.closest("a[download]")) return false;
 		// A nested directional span is part of the outer text, not a second message.
 		const parent = element.parentElement?.closest('[dir="auto"]');
 		if (parent && main.contains(parent) && parent.closest('[data-scope="messages_table"]')) return false;
@@ -211,6 +216,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 		images: [],
 		videos: [],
 		stickers: [],
+		files: [],
 		unsent: unsentPlaceholder.test(normalizedText(element.textContent)),
 	}));
 
@@ -247,7 +253,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	}
 	// Media joins the single text bubble in its boundary, or that boundary's
 	// media-only message. Otherwise it starts a message of its own.
-	function placeMedia(kind: "images" | "videos" | "stickers", element: HTMLElement) {
+	function placeMedia(kind: "images" | "videos" | "stickers" | "files", element: HTMLElement) {
 		const boundary = messageBoundary(element);
 		const textMatches = messages.filter(
 			(message) => message.boundary === boundary && textElements.includes(message.element),
@@ -262,7 +268,15 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 			target[kind].push(element);
 			return;
 		}
-		const message: RenderedMessage = { element, boundary, images: [], videos: [], stickers: [], unsent: false };
+		const message: RenderedMessage = {
+			element,
+			boundary,
+			images: [],
+			videos: [],
+			stickers: [],
+			files: [],
+			unsent: false,
+		};
 		message[kind].push(element);
 		messages.push(message);
 	}
@@ -277,6 +291,10 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 	// metadata was observed. Keep the shape narrow: unknown, quoted, toolbar,
 	// or hidden graphics stay unsupported, and dimensions alone never qualify.
 	for (const sticker of collectStickerViewers(main)) placeMedia("stickers", sticker);
+	// A sent file renders as a download row. Capturing it keeps the reader
+	// fail-closed without failing the whole snapshot; its bytes never leave.
+	// Voice has no such row in the rendered DOM and stays out of scope.
+	for (const file of collectFileViewers(main)) placeMedia("files", file);
 	// The placeholder may be plain text outside a directional text element.
 	for (const element of main.querySelectorAll<HTMLElement>(
 		'[data-scope="messages_table"] div, [data-scope="messages_table"] span',
@@ -294,7 +312,15 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 			.map((node) => node.nodeValue)
 			.join("");
 		if (!unsentPlaceholder.test(normalizedText(ownText)) || !isVisible(element)) continue;
-		messages.push({ element, boundary: messageBoundary(element), images: [], videos: [], stickers: [], unsent: true });
+		messages.push({
+			element,
+			boundary: messageBoundary(element),
+			images: [],
+			videos: [],
+			stickers: [],
+			files: [],
+			unsent: true,
+		});
 	}
 	// Messenger renders its large Like as an accessible SVG rather than text.
 	// Require the enclosing message label to identify the same emoji, and do not
@@ -319,6 +345,7 @@ function getRenderedMessages(main = getMessageMain()): RenderedMessage[] {
 			images: [],
 			videos: [],
 			stickers: [],
+			files: [],
 			unsent: false,
 			standaloneLike: true,
 		});
@@ -493,8 +520,8 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 		// A text caption does not make an adjacent voice, video, sticker, or file
 		// readable by this text-only connector. Recognized video viewers carry
 		// their player UI with them, so exempt that subtree, as are recognized
-		// sticker graphics.
-		const recognizedMedia = rendered.flatMap(({ videos, stickers }) => [...videos, ...stickers]);
+		// sticker graphics and file rows.
+		const recognizedMedia = rendered.flatMap(({ videos, stickers, files }) => [...videos, ...stickers, ...files]);
 		const inRecognizedMedia = (element: Element) =>
 			recognizedMedia.some((viewer) => viewer === element || viewer.contains(element));
 		const media = [
@@ -509,6 +536,9 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 		if (
 			media.some((element) => {
 				if (inRecognizedMedia(element)) return false;
+				// A quoted file preview carries no download row; a stray one
+				// inside a quote stays text, never a reader failure.
+				if (element.matches("a[download]") && (reply?.contains(element) ?? false)) return false;
 				if (element.matches("video, audio, object, embed, iframe, a[download]")) return true;
 				const preview = rendered
 					.flatMap(({ images }) => images)
@@ -598,16 +628,32 @@ function isMessengerPhotoLink(anchor: HTMLAnchorElement): boolean {
 	}
 }
 
-// A GIF sent through GIPHY renders as a photo link whose image alt names the
-// format and whose caption names the service. Animated previews carry a play
-// glyph instead. Both stay presence-only: only photos forward bytes.
+// A GIF renders as a photo link whose image alt names the format. Links sent
+// through GIPHY also carry a caption naming the service, while an uploaded
+// GIF renders the same link with a descriptive alt (e.g. "Obraz GIF") and no
+// caption. One observed GIPHY shape carries neither: the render alt holds tag
+// text with no format word, beside an empty-alt static image. The service
+// chrome classifies that shape, the same check quote previews use. Observed
+// photo links render their images with an empty alt and no chrome. Animated
+// previews carry a play glyph instead.
 function isGifLink(viewer: HTMLElement): boolean {
 	if (!viewer.matches("a[href]") || !isMessengerPhotoLink(viewer as HTMLAnchorElement)) return false;
-	const image = viewer.querySelector("img[alt]");
+	const image = gifLinkImage(viewer);
+	if (image !== null && isGifLabel(image.getAttribute("alt") ?? "")) return true;
+	return hasGifChrome(viewer);
+}
+
+// A GIF link can render several images, e.g. a static preview beside the
+// animated render. Prefer the image whose alt names the format, then any
+// labeled image over an empty-alt one, so the classification and the
+// forwarded URL never depend on DOM order.
+function gifLinkImage(viewer: HTMLElement): HTMLImageElement | null {
+	const images = [...viewer.querySelectorAll("img")];
 	return (
-		image !== null &&
-		isGifLabel(image.getAttribute("alt") ?? "") &&
-		[...viewer.querySelectorAll("span")].some((span) => span.textContent?.trim() === "GIPHY")
+		images.find((image) => isGifLabel(image.getAttribute("alt") ?? "")) ??
+		images.find((image) => image.getAttribute("alt")?.trim()) ??
+		images[0] ??
+		null
 	);
 }
 
@@ -664,6 +710,26 @@ function collectStickerViewers(main: HTMLElement): HTMLElement[] {
 		if (!stickers.some((existing) => existing === graphic || existing.contains(graphic))) stickers.push(graphic);
 	}
 	return stickers;
+}
+
+// A sent file renders as a download row with a visible label. Keep the shape
+// narrow like the other collectors: toolbar, hidden, quoted, and decoration
+// rows stay out, and the href shape never leaves the extension.
+function collectFileViewers(main: HTMLElement): HTMLElement[] {
+	const files: HTMLElement[] = [];
+	for (const link of main.querySelectorAll<HTMLAnchorElement>('[data-scope="messages_table"] a[download]')) {
+		const element = link as HTMLElement;
+		if (!isVisible(element) || element.closest('[role="toolbar"], [aria-hidden="true"]')) continue;
+		const scope = element.closest('[data-scope="messages_table"]');
+		if (!scope || isThreadIntro(scope) || isTypingStatus(scope)) continue;
+		if (isMessageDecoration(scope as HTMLElement)) continue;
+		const boundary = messageBoundary(element);
+		if (!boundary?.matches('[data-scope="messages_table"][data-message-id]')) continue;
+		if (findReplyButton(boundary)?.contains(element)) continue;
+		if (!files.some((existing) => existing === element || existing.contains(element) || element.contains(existing)))
+			files.push(element);
+	}
+	return files;
 }
 
 function messageId(element: Element): string {
@@ -755,9 +821,7 @@ function readReply(boundary: Element): ConversationSnapshot["messages"][number][
 					? text
 					: null,
 		context: uncertainContext ? null : context?.textContent?.trim() || null,
-		attachments: getQuotedImages(button).map((image) =>
-			isGifLabel(quotedImageLabel(image)) ? gifAttachment() : imageAttachment(image),
-		),
+		attachments: getQuotedAttachments(button).map(({ attachment }) => attachment),
 	};
 }
 
@@ -845,14 +909,56 @@ function readInlineText(element: Element): string {
 	return text;
 }
 
-function getQuotedImages(button: Element): HTMLImageElement[] {
-	return [...button.querySelectorAll<HTMLImageElement>("img")].filter((image) => {
+// Quote previews stay type-only: their bytes never reach the backend, but
+// capturing their kind keeps the pause specific instead of failing the read.
+// Observed shapes: photo previews (alt naming the kind), GIF previews
+// (gif-labeled, or a disabled open-GIF link with a GIPHY caption and
+// empty-alt images), video previews (one empty-alt https thumbnail, no
+// <video>), sticker previews (one https image whose descriptive alt omits
+// the word sticker), and file previews (generic text, no image at all).
+// Voice-labeled and sticker-worded images keep tripping the fail-closed
+// reader: detection stays narrow on purpose.
+function getQuotedAttachments(button: Element): { element: HTMLImageElement; attachment: MessageAttachment }[] {
+	const images = [...button.querySelectorAll<HTMLImageElement>("img")].filter(
+		(image) => !image.closest('[dir="auto"], [aria-hidden="true"]'),
+	);
+	const gifChrome = hasGifChrome(button);
+	const quoted: { element: HTMLImageElement; attachment: MessageAttachment }[] = [];
+	for (const image of images) {
 		const label = quotedImageLabel(image);
-		return (
-			!image.closest('[dir="auto"], [aria-hidden="true"]') &&
-			(/photo|image|zdjęci|obraz/i.test(label) || isGifLabel(label))
-		);
-	});
+		// Anything the reader cannot name stays unsupported.
+		if (
+			/(?:^|\s)(?:sticker|voice(?: message)?|audio(?: message)?|video|file attachment|naklejka|wiadomość głosowa|plik)(?:$|[\s:.,])/i.test(
+				label,
+			)
+		)
+			continue;
+		if (isGifLabel(label)) {
+			quoted.push({ element: image, attachment: { type: "gif", url: null, description: null, media: null } });
+			continue;
+		}
+		if (/photo|image|zdjęci|obraz/i.test(label)) {
+			quoted.push({ element: image, attachment: imageAttachment(image) });
+			continue;
+		}
+		const src = imageSource(image);
+		if (!src.trim()) continue;
+		const url = remoteSourceUrl(image.currentSrc) ?? remoteSourceUrl(image.getAttribute("src"));
+		if (!image.getAttribute("alt")?.trim()) {
+			if (gifChrome) {
+				quoted.push({ element: image, attachment: { type: "gif", url, description: null, media: null } });
+			} else if (url && images.length === 1 && !src.startsWith("blob:")) {
+				quoted.push({ element: image, attachment: { type: "video", url, description: null, media: null } });
+			}
+			continue;
+		}
+		quoted.push({ element: image, attachment: { type: "sticker", url, description: null, media: null } });
+	}
+	return quoted;
+}
+
+function getQuotedImages(button: Element): HTMLImageElement[] {
+	return getQuotedAttachments(button).map(({ element }) => element);
 }
 
 function quotedImageLabel(image: HTMLImageElement): string {
@@ -861,21 +967,73 @@ function quotedImageLabel(image: HTMLImageElement): string {
 
 // A viewer link identifies the attachment; the image element supplies the
 // direct URL when one is rendered. No network request is needed to read it.
-function videoAttachment(): { type: "video"; url: null; description: null } {
-	// Blob sources are transient and never leave the extension. The model
-	// only learns that an unreadable clip is present.
-	return { type: "video", url: null, description: null };
+function remoteSourceUrl(source: string | null | undefined): string | null {
+	if (!source?.trim()) return null;
+	try {
+		const url = new URL(source, location.href);
+		if (url.protocol === "http:" || url.protocol === "https:") return url.href;
+	} catch {
+		// Ignore malformed or unavailable sources.
+	}
+	return null;
 }
 
-function stickerAttachment(): { type: "sticker"; url: null; description: null } {
-	// The CSS background URL is transient and may be sensitive. The model
-	// only learns that an uninterpreted sticker is present.
-	return { type: "sticker", url: null, description: null };
+function videoSource(viewer: HTMLElement): HTMLVideoElement | null {
+	return viewer.matches("video") ? (viewer as HTMLVideoElement) : viewer.querySelector<HTMLVideoElement>("video");
 }
 
-function gifAttachment(): { type: "gif"; url: null; description: null } {
-	// Only photos forward bytes. The model only learns that a GIF is present.
-	return { type: "gif", url: null, description: null };
+function videoAttachment(viewer: HTMLElement): {
+	type: "video";
+	url: string | null;
+	description: null;
+	media: null;
+} {
+	// An https source identifies the clip for a future fetch; only a captured
+	// poster frame forwards bytes. Blob sources are transient and never leave.
+	const video = videoSource(viewer);
+	const url = remoteSourceUrl(video?.currentSrc) ?? remoteSourceUrl(video?.getAttribute("src"));
+	return { type: "video", url, description: null, media: null };
+}
+
+function stickerBackgroundSource(graphic: HTMLElement): string {
+	return (
+		graphic
+			.getAttribute("style")
+			?.match(/background-image\s*:\s*url\(\s*["']?([^"')]+)["']?\s*\)/i)?.[1]
+			?.trim() ?? ""
+	);
+}
+
+function stickerAttachment(graphic: HTMLElement): {
+	type: "sticker";
+	url: string | null;
+	description: null;
+	media: null;
+} {
+	// An https background identifies the graphic for the backend fetch. Blob
+	// backgrounds inline through canvas below; the URL itself stays out of the
+	// revision because CSS URLs can rotate across reloads.
+	return { type: "sticker", url: remoteSourceUrl(stickerBackgroundSource(graphic)), description: null, media: null };
+}
+
+function gifAttachment(viewer: HTMLElement): {
+	type: "gif";
+	url: string | null;
+	description: null;
+	media: null;
+} {
+	// An https render identifies the GIF for the backend fetch. Local renders
+	// inline below; animated previews forward their opening frame as a still.
+	// Multi-image links resolve to the GIF render, never DOM order.
+	const image = gifLinkImage(viewer) ?? viewer.querySelector("img");
+	const url = remoteSourceUrl(image?.currentSrc) ?? remoteSourceUrl(image?.getAttribute("src"));
+	return { type: "gif", url, description: null, media: null };
+}
+
+function fileAttachment(): { type: "file" } {
+	// The download href never leaves the extension. The model only learns
+	// that a file is present, and the task pauses like any unreadable media.
+	return { type: "file" };
 }
 
 function imageSource(image: HTMLImageElement | null): string {
@@ -909,9 +1067,9 @@ const MEDIA_JPEG_QUALITY = 0.85;
 // compliance. This only bounces pathological inputs before decoding them.
 const MAX_INLINE_SOURCE_CHARS = 12_000_000;
 
-// Decoded photo bytes keyed by element. Polling re-reads the same nodes, so
+// Decoded media bytes keyed by element. Polling re-reads the same nodes, so
 // the cache avoids re-decoding every snapshot. Entries die with their nodes.
-const mediaCache = new WeakMap<HTMLImageElement, { source: string; media: InlineImageMedia | null }>();
+const mediaCache = new WeakMap<object, { source: string; media: InlineImageMedia | null }>();
 
 function parseInlineData(source: string): { mime: string; data: string } | null {
 	const match = source.match(/^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/]*={0,2})$/);
@@ -953,6 +1111,20 @@ async function decodeLocalMedia(source: string): Promise<InlineImageMedia | null
 	if (width <= MAX_IMAGE_SIDE && height <= MAX_IMAGE_SIDE && parsed.data.length <= MAX_INLINE_MEDIA_CHARS) {
 		return { mime: parsed.mime as InlineImageMime, data: parsed.data, width, height };
 	}
+	return encodeCanvasFrame(width, height, (context, targetWidth, targetHeight) => {
+		context.drawImage(loaded, 0, 0, targetWidth, targetHeight);
+	});
+}
+
+// Re-encode a rendered frame through canvas until it fits the caps. Used for
+// blob: renders the backend cannot fetch (sticker backgrounds, animated GIF
+// previews) and for video poster frames. A tainted canvas throws, so
+// cross-origin renders without CORS approval stay presence-only.
+function encodeCanvasFrame(
+	width: number,
+	height: number,
+	paint: (context: CanvasRenderingContext2D, targetWidth: number, targetHeight: number) => void,
+): InlineImageMedia | null {
 	const scale = Math.min(1, MAX_IMAGE_SIDE / width, MAX_IMAGE_SIDE / height);
 	const targetWidth = Math.max(1, Math.floor(width * scale));
 	const targetHeight = Math.max(1, Math.floor(height * scale));
@@ -962,7 +1134,7 @@ async function decodeLocalMedia(source: string): Promise<InlineImageMedia | null
 		canvas.height = targetHeight;
 		const context = canvas.getContext("2d");
 		if (!context) return null;
-		context.drawImage(loaded, 0, 0, targetWidth, targetHeight);
+		paint(context, targetWidth, targetHeight);
 		const downscaled = parseInlineData(canvas.toDataURL("image/jpeg", MEDIA_JPEG_QUALITY));
 		if (!downscaled || downscaled.mime !== "image/jpeg" || downscaled.data.length > MAX_INLINE_MEDIA_CHARS) return null;
 		return { mime: "image/jpeg", data: downscaled.data, width: targetWidth, height: targetHeight };
@@ -971,12 +1143,89 @@ async function decodeLocalMedia(source: string): Promise<InlineImageMedia | null
 	}
 }
 
+// Decode a blob: render through an image element and canvas. Unlike data:
+// sources there are no bytes to pass through, so every blob re-encodes as a
+// still frame.
+async function decodeBlobMedia(source: string): Promise<InlineImageMedia | null> {
+	if (!source.startsWith("blob:")) return null;
+	let loaded: HTMLImageElement;
+	try {
+		loaded = await loadImage(source);
+	} catch {
+		return null;
+	}
+	const width = loaded.naturalWidth;
+	const height = loaded.naturalHeight;
+	if (!width || !height) return null;
+	return encodeCanvasFrame(width, height, (context, targetWidth, targetHeight) => {
+		context.drawImage(loaded, 0, 0, targetWidth, targetHeight);
+	});
+}
+
+function videoReady(video: HTMLVideoElement): Promise<void> {
+	if (video.readyState >= 2) return Promise.resolve();
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			cleanup();
+			reject(new Error("timeout"));
+		}, MEDIA_LOAD_TIMEOUT_MS);
+		const onData = () => {
+			cleanup();
+			resolve();
+		};
+		const onError = () => {
+			cleanup();
+			reject(new Error("unreadable"));
+		};
+		function cleanup() {
+			clearTimeout(timer);
+			video.removeEventListener("loadeddata", onData);
+			video.removeEventListener("error", onError);
+		}
+		video.addEventListener("loadeddata", onData);
+		video.addEventListener("error", onError);
+	});
+}
+
+// Capture a video poster's current frame as a still. Blob clips decode
+// same-origin; remote clips without CORS approval taint the canvas and stay
+// presence-only, as does anything that never loads.
+async function decodeVideoFrame(video: HTMLVideoElement): Promise<InlineImageMedia | null> {
+	try {
+		await videoReady(video);
+	} catch {
+		return null;
+	}
+	const width = video.videoWidth;
+	const height = video.videoHeight;
+	if (!width || !height) return null;
+	return encodeCanvasFrame(width, height, (context, targetWidth, targetHeight) => {
+		context.drawImage(video, 0, 0, targetWidth, targetHeight);
+	});
+}
+
 async function extractLocalMedia(image: HTMLImageElement): Promise<InlineImageMedia | null> {
 	const source = imageSource(image);
 	const cached = mediaCache.get(image);
 	if (cached && cached.source === source) return cached.media;
 	const media = await decodeLocalMedia(source);
 	mediaCache.set(image, { source, media });
+	return media;
+}
+
+async function extractRasterMedia(element: object, source: string): Promise<InlineImageMedia | null> {
+	const cached = mediaCache.get(element);
+	if (cached && cached.source === source) return cached.media;
+	const media = source.startsWith("blob:") ? await decodeBlobMedia(source) : await decodeLocalMedia(source);
+	mediaCache.set(element, { source, media });
+	return media;
+}
+
+async function extractVideoMedia(video: HTMLVideoElement, source: string): Promise<InlineImageMedia | null> {
+	const cached = mediaCache.get(video);
+	if (cached && cached.source === source) return cached.media;
+	const media = await decodeVideoFrame(video);
+	mediaCache.set(video, { source, media });
 	return media;
 }
 
@@ -990,26 +1239,61 @@ function isRemoteSource(source: string): boolean {
 	}
 }
 
-// Fill inline bytes for local photo sources, newest first within the snapshot
-// cap. Remote sources need nothing: the backend fetches them itself.
+// Fill inline bytes for local media sources, newest first within the shared
+// snapshot cap. Remote photo, GIF, and sticker sources need nothing: the
+// backend fetches them itself. Remote video sources stay presence-only: the
+// backend cannot make stills from video bytes.
 async function attachInlineMedia(rendered: RenderedMessage[], messages: ConversationSnapshot["messages"]): Promise<void> {
-	const candidates: { message: number; position: number; image: HTMLImageElement }[] = [];
-	rendered.forEach(({ images }, message) => {
-		images.forEach((viewer, position) => {
-			if (isGifViewer(viewer)) return;
-			const image = viewer.querySelector("img");
-			if (!image) return;
+	type Candidate =
+		| { message: number; position: number; kind: "image" | "gif"; image: HTMLImageElement }
+		| { message: number; position: number; kind: "sticker"; element: HTMLElement; source: string }
+		| { message: number; position: number; kind: "video"; video: HTMLVideoElement; source: string };
+	const candidates: Candidate[] = [];
+	rendered.forEach(({ images, videos, stickers }, message) => {
+		// Positions mirror readMessages: images, then videos, then stickers.
+		let position = 0;
+		for (const viewer of images) {
+			const slot = position++;
+			const gif = isGifViewer(viewer);
+			const image = gif ? (gifLinkImage(viewer) ?? viewer.querySelector("img")) : viewer.querySelector("img");
+			if (!image) continue;
 			const source = imageSource(image);
-			if (!isRemoteSource(source) && !parseInlineData(source)) return;
-			candidates.push({ message, position, image });
-		});
+			// Animated GIF buttons and previews inline their local renders
+			// below; only photos skipped GIF handling before.
+			if (!isRemoteSource(source) && !parseInlineData(source) && !source.startsWith("blob:")) continue;
+			candidates.push({ message, position: slot, kind: gif ? "gif" : "image", image });
+		}
+		for (const viewer of videos) {
+			const slot = position++;
+			const video = videoSource(viewer);
+			if (!video) continue;
+			const source = video.currentSrc || video.getAttribute("src") || "";
+			if (!source || isRemoteSource(source)) continue;
+			candidates.push({ message, position: slot, kind: "video", video, source });
+		}
+		for (const sticker of stickers) {
+			const slot = position++;
+			const source = stickerBackgroundSource(sticker);
+			if (!source || isRemoteSource(source)) continue;
+			candidates.push({ message, position: slot, kind: "sticker", element: sticker, source });
+		}
 	});
 	await Promise.all(
-		candidates.slice(-MAX_SNAPSHOT_IMAGES).map(async ({ message, position, image }) => {
-			if (isRemoteSource(imageSource(image))) return;
-			const media = await extractLocalMedia(image);
-			const slot = messages[message]?.attachments[position];
-			if (slot?.type === "image" && media) slot.media = media;
+		candidates.slice(-MAX_SNAPSHOT_IMAGES).map(async (candidate) => {
+			let media: InlineImageMedia | null = null;
+			if (candidate.kind === "image" || candidate.kind === "gif") {
+				if (isRemoteSource(imageSource(candidate.image))) return;
+				media =
+					candidate.kind === "image"
+						? await extractLocalMedia(candidate.image)
+						: await extractRasterMedia(candidate.image, imageSource(candidate.image));
+			} else if (candidate.kind === "sticker") {
+				media = await extractRasterMedia(candidate.element, candidate.source);
+			} else if (candidate.kind === "video") {
+				media = await extractVideoMedia(candidate.video, candidate.source);
+			}
+			const slot = messages[candidate.message]?.attachments[candidate.position];
+			if (media && slot && slot.type !== "file") slot.media = media;
 		}),
 	);
 }
@@ -1133,17 +1417,18 @@ function readParticipantHeader(main: HTMLElement): readonly string[] {
 
 function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messages"] {
 	const boundaries = rendered.map((message) => message.boundary);
-	const texts = rendered.map(({ element, images, videos, stickers, unsent, standaloneLike }) =>
+	const texts = rendered.map(({ element, images, videos, stickers, files, unsent, standaloneLike }) =>
 		unsent ||
 		images.some((image) => image === element) ||
 		videos.some((video) => video === element) ||
-		stickers.some((sticker) => sticker === element)
+		stickers.some((sticker) => sticker === element) ||
+		files.some((file) => file === element)
 			? ""
 			: standaloneLike
 				? "👍"
 				: readInlineText(element),
 	);
-	return rendered.map(({ element, boundary, images, videos, stickers, unsent, standaloneLike }, index) => {
+	return rendered.map(({ element, boundary, images, videos, stickers, files, unsent, standaloneLike }, index) => {
 		// A shared boundary cannot safely assign metadata to one message.
 		const unique = boundary && boundaries.indexOf(boundary) === boundaries.lastIndexOf(boundary);
 		// A fresh bubble can share its container with a rendered delivery status.
@@ -1156,10 +1441,11 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 			rendered.filter((message, i) => message.boundary === boundary && texts[i]!.trim() === labeled.text).length === 1;
 		const attachments = [
 			...images.map((image) =>
-				isGifViewer(image) ? gifAttachment() : imageAttachment(image.querySelector<HTMLImageElement>("img")),
+				isGifViewer(image) ? gifAttachment(image) : imageAttachment(image.querySelector<HTMLImageElement>("img")),
 			),
-			...videos.map(() => videoAttachment()),
-			...stickers.map(() => stickerAttachment()),
+			...videos.map((viewer) => videoAttachment(viewer)),
+			...stickers.map((sticker) => stickerAttachment(sticker)),
+			...files.map(() => fileAttachment()),
 		];
 		return {
 			id: messageId(element),
@@ -1185,19 +1471,23 @@ function readMessages(rendered: RenderedMessage[]): ConversationSnapshot["messag
 // Video blobs are likewise local-only, but a replaced clip must invalidate.
 // A sticker's CSS URL can rotate across reloads and may be sensitive, so the
 // stable graphic label feeds the revision instead. It is hashed, never sent.
+// File hrefs are local-only too, but a replaced row must invalidate.
 function imageFingerprint(rendered: RenderedMessage[]): string[][] {
-	return rendered.map(({ images, videos, stickers, boundary }) => {
+	return rendered.map(({ images, videos, stickers, files, boundary }) => {
 		const reply = boundary && findReplyButton(boundary);
 		return [
 			...images.flatMap((viewer) => {
-				const image = viewer.querySelector<HTMLImageElement>("img");
-				return [viewer.getAttribute("href") ?? "", imageSource(image)];
+				// A GIF link can render several images; track each so swapping
+				// the animated render invalidates even when the others stay.
+				const rendered = isGifViewer(viewer) ? [...viewer.querySelectorAll("img")] : [viewer.querySelector("img")];
+				return [viewer.getAttribute("href") ?? "", ...rendered.map((image) => imageSource(image))];
 			}),
 			...videos.flatMap((viewer) => {
 				const video = viewer.matches("video") ? viewer : viewer.querySelector<HTMLVideoElement>("video");
 				return [video?.currentSrc || video?.getAttribute("src") || ""];
 			}),
 			...stickers.map((sticker) => sticker.getAttribute("aria-label") ?? ""),
+			...files.map((file) => (file as HTMLAnchorElement).getAttribute("href") ?? ""),
 			...(reply ? getQuotedImages(reply).map((image) => image.getAttribute("src") ?? "") : []),
 		];
 	});
