@@ -1,4 +1,4 @@
-import { hasGifChrome, isAnimatedPreview, isGifButton, isGifLabel } from "./animated-preview";
+import { GIF_WORD_SOURCE, hasGifChrome, isAnimatedPreview, isGifButton, isGifLabel } from "./animated-preview";
 import { isGroupSystemEvent, isThreadIntro } from "./group-events";
 import {
 	hasControlCharacters,
@@ -22,6 +22,17 @@ import type {
 export interface MessengerChatAdapter {
 	readConversation(): Promise<ConversationSnapshot>;
 	sendReply(command: SendReplyCommand, authorize: () => Promise<boolean>, isCurrent?: () => boolean): Promise<SendResult>;
+}
+
+// Media words in Messenger-supplied labels, EN and PL. The quote-preview
+// check below reuses the same list without "gif", which isGifLabel handles.
+const ATTACHMENT_WORDS =
+	"sticker|voice(?: message)?|audio(?: message)?|video|file attachment|naklejka|wiadomość głosowa|plik";
+const MEDIA_WORD = new RegExp(`(?:^|\\s)(?:${ATTACHMENT_WORDS}|gif)(?:$|[\\s:.,])`, "i");
+const QUOTED_ATTACHMENT_WORD = new RegExp(`(?:^|\\s)(?:${ATTACHMENT_WORDS})(?:$|[\\s:.,])`, "i");
+
+function bareAttachment(type: "gif" | "video" | "sticker", url: string | null): MessageAttachment {
+	return { type, url, description: null, media: null };
 }
 
 export class ConversationUnavailableError extends Error {
@@ -568,10 +579,8 @@ function hasUnrecognizedContent(main: HTMLElement, rendered: RenderedMessage[]):
 					);
 				const inQuote = reply?.contains(element) ?? false;
 				const checkedMetadata =
-					preview || giphyImage || inQuote ? metadata.replace(/(?:^|\s)gif(?=$|[\s:.,])/gi, " ") : metadata;
-				return /(?:^|\s)(?:sticker|voice(?: message)?|audio(?: message)?|video|gif|file attachment|naklejka|wiadomość głosowa|plik)(?:$|[\s:.,])/i.test(
-					checkedMetadata,
-				);
+					preview || giphyImage || inQuote ? metadata.replace(new RegExp(GIF_WORD_SOURCE, "gi"), " ") : metadata;
+				return MEDIA_WORD.test(checkedMetadata);
 			})
 		)
 			return true;
@@ -779,12 +788,12 @@ function isEditedLabel(value: string | null): boolean {
 	return label === "edited" || label === "edytowano";
 }
 
-function hasHeadingButton(boundary: Element): boolean {
-	return headingButtons(boundary).length > 0;
+function hasHeadingButton(buttons: HTMLElement[]): boolean {
+	return buttons.length > 0;
 }
 
-function hasEditedMarker(boundary: Element): boolean {
-	return headingButtons(boundary).some((button) => isEditedLabel(button.getAttribute("aria-label")));
+function hasEditedMarker(buttons: HTMLElement[]): boolean {
+	return buttons.some((button) => isEditedLabel(button.getAttribute("aria-label")));
 }
 
 // Plain text messages only. Captions and attachment edits were not tested,
@@ -797,8 +806,11 @@ function readEdited(
 	standaloneLike: boolean | undefined,
 ): boolean | null {
 	if (!boundary || !unique || unsent || standaloneLike || attachments > 0 || isGroupSystemEvent(boundary)) return null;
-	if (hasEditedMarker(boundary)) return true;
-	if (hasHeadingButton(boundary)) return null;
+	// One DOM query: the edited marker and the heading-button fallback read
+	// the same buttons.
+	const buttons = headingButtons(boundary);
+	if (hasEditedMarker(buttons)) return true;
+	if (hasHeadingButton(buttons)) return null;
 	return false;
 }
 
@@ -812,7 +824,7 @@ function readReply(boundary: Element): ConversationSnapshot["messages"][number][
 	// An edited reply may put the marker in the same h4 that supplies the
 	// context. Its heading structure is unknown, so a co-occurring heading
 	// button makes the context uncertain instead of guessed.
-	const uncertainContext = hasHeadingButton(boundary);
+	const uncertainContext = hasHeadingButton(headingButtons(boundary));
 	return {
 		text:
 			!quote || unsentPlaceholder.test(quoteText) || unavailableQuote.test(quoteText)
@@ -927,14 +939,9 @@ function getQuotedAttachments(button: Element): { element: HTMLImageElement; att
 	for (const image of images) {
 		const label = quotedImageLabel(image);
 		// Anything the reader cannot name stays unsupported.
-		if (
-			/(?:^|\s)(?:sticker|voice(?: message)?|audio(?: message)?|video|file attachment|naklejka|wiadomość głosowa|plik)(?:$|[\s:.,])/i.test(
-				label,
-			)
-		)
-			continue;
+		if (QUOTED_ATTACHMENT_WORD.test(label)) continue;
 		if (isGifLabel(label)) {
-			quoted.push({ element: image, attachment: { type: "gif", url: null, description: null, media: null } });
+			quoted.push({ element: image, attachment: bareAttachment("gif", null) });
 			continue;
 		}
 		if (/photo|image|zdjęci|obraz/i.test(label)) {
@@ -946,13 +953,13 @@ function getQuotedAttachments(button: Element): { element: HTMLImageElement; att
 		const url = remoteSourceUrl(image.currentSrc) ?? remoteSourceUrl(image.getAttribute("src"));
 		if (!image.getAttribute("alt")?.trim()) {
 			if (gifChrome) {
-				quoted.push({ element: image, attachment: { type: "gif", url, description: null, media: null } });
+				quoted.push({ element: image, attachment: bareAttachment("gif", url) });
 			} else if (url && images.length === 1 && !src.startsWith("blob:")) {
-				quoted.push({ element: image, attachment: { type: "video", url, description: null, media: null } });
+				quoted.push({ element: image, attachment: bareAttachment("video", url) });
 			}
 			continue;
 		}
-		quoted.push({ element: image, attachment: { type: "sticker", url, description: null, media: null } });
+		quoted.push({ element: image, attachment: bareAttachment("sticker", url) });
 	}
 	return quoted;
 }
@@ -1483,7 +1490,7 @@ function imageFingerprint(rendered: RenderedMessage[]): string[][] {
 				return [viewer.getAttribute("href") ?? "", ...rendered.map((image) => imageSource(image))];
 			}),
 			...videos.flatMap((viewer) => {
-				const video = viewer.matches("video") ? viewer : viewer.querySelector<HTMLVideoElement>("video");
+				const video = videoSource(viewer);
 				return [video?.currentSrc || video?.getAttribute("src") || ""];
 			}),
 			...stickers.map((sticker) => sticker.getAttribute("aria-label") ?? ""),
