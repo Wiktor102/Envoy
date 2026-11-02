@@ -272,8 +272,10 @@ function clearInput(value: unknown) {
 	return { connectorId: string(item.connectorId), taskId: string(item.taskId) };
 }
 
+export const healthResponse: HealthResponse = { status: "ok", service: "envoy-backend" };
+
 export const appRouter = t.router({
-	health: t.procedure.query((): HealthResponse => ({ status: "ok", service: "envoy-backend" })),
+	health: t.procedure.query((): HealthResponse => healthResponse),
 	task: t.router({
 		start: t.procedure
 			.input(startInput)

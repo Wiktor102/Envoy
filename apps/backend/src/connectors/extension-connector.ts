@@ -1,9 +1,11 @@
 import type { ConversationSnapshot, SendReplyCommand } from "@envoy/contracts";
-import type { BrowserConnector } from "./browser-connector.js";
+import { sameConversation, type BrowserConnector } from "./browser-connector.js";
 
 // The extension provides snapshots and retrieves claimed commands through the
 // router. A command ID is handed out at most once, even if a poll is retried.
 export class ExtensionConnector implements BrowserConnector {
+	// Command IDs accumulate for the life of this connector. The task service
+	// replaces the connector on start and erase, so the set stays bounded.
 	private conversation: ConversationSnapshot | null = null;
 	private readonly claimed = new Set<string>();
 
@@ -15,11 +17,13 @@ export class ExtensionConnector implements BrowserConnector {
 		return this.conversation;
 	}
 
+	// Claim issues a command at most once; authorize (in the task service)
+	// confirms it again immediately before the tab sends. The two phases stay
+	// separate so a stale poll result can never authorize a send.
 	claimSend(command: SendReplyCommand): SendReplyCommand | null {
 		if (
 			this.claimed.has(command.commandId) ||
-			this.conversation?.chatId !== command.chatId ||
-			this.conversation.revision !== command.expectedRevision
+			!sameConversation(this.conversation, command.chatId, command.expectedRevision)
 		) {
 			return null;
 		}
