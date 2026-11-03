@@ -61,8 +61,9 @@ function preferenceStorage(initial: Record<string, unknown> = { envoyDeveloperMo
 	};
 }
 
-function setup(t: TestContext, storage = preferenceStorage()) {
+function setup(t: TestContext, storage = preferenceStorage(), lang = "") {
 	const dom = new JSDOM("", { url: "https://www.messenger.com/t/chat-1" });
+	dom.window.document.documentElement.lang = lang;
 	Object.assign(globalThis, {
 		window: dom.window,
 		document: dom.window.document,
@@ -110,6 +111,9 @@ function setup(t: TestContext, storage = preferenceStorage()) {
 		texts,
 		element<T extends HTMLElement = HTMLElement>(id: string) {
 			return (view.panel.getRootNode() as ShadowRoot).querySelector<T>(`#envoy-${id}`)!;
+		},
+		query<T extends HTMLElement = HTMLElement>(selector: string) {
+			return (view.panel.getRootNode() as ShadowRoot).querySelector<T>(selector)!;
 		},
 		setText(id: string, value: string) {
 			const field = (view.panel.getRootNode() as ShadowRoot).querySelector<HTMLTextAreaElement>(`#envoy-${id}`)!;
@@ -791,4 +795,56 @@ test("paused, ended, and unowned tasks keep recovery actions without reply actio
 	assert.equal(ui.element("reply-controls").hidden, true);
 	assert.equal(ui.element("pause").hidden, true);
 	assert.equal(ui.element("footer").hidden, true);
+});
+
+test("a polish page renders a polish panel", async (t) => {
+	const ui = setup(t, preferenceStorage(), "pl");
+	await flushPreferences();
+	assert.equal(ui.query("#chats-tab").textContent, "Czaty");
+	assert.equal(ui.query(".tabs").getAttribute("aria-label"), "Pasek boczny czatów");
+	assert.equal(ui.element("start").textContent, "Rozpocznij zadanie");
+	assert.equal(ui.element("goal-title").textContent, "Twoje instrukcje");
+	assert.equal(
+		ui.element<HTMLTextAreaElement>("goal").placeholder,
+		"Umów się na kawę w przyszłym tygodniu. Mogę we wtorek lub czwartek po 15:00. Zapytaj mnie przed potwierdzeniem miejsca.",
+	);
+	assert.equal(ui.element("delay-hint").textContent, "Odpowiedzi wyślą się po odliczaniu 10 s.");
+	assert.equal(ui.element("goal-hint").textContent, `0 / ${MAX_TASK_TEXT_LENGTH} znaków`);
+	assert.equal(ui.element("pause").getAttribute("aria-label"), "Wstrzymaj");
+	assert.equal(ui.element("conversation-empty").textContent, "Nie załadowano jeszcze żadnych wiadomości.");
+	const senders = () => [...ui.element("conversation").querySelectorAll("li strong")].map((sender) => sender.textContent);
+	assert.deepEqual(senders(), ["Inna osoba"]);
+	ui.update({ task: { ...task, status: "waiting" }, isOwner: true });
+	assert.equal(ui.element("agent-state").textContent, "Oczekiwanie na nową wiadomość.");
+	ui.update({
+		task: {
+			...task,
+			status: "pending",
+			pendingReply: { commandId: "c1", chatId: task.chatId, expectedRevision: "revision-1", text: "Hi", sendAt: null },
+		},
+	});
+	assert.equal(ui.element("countdown").textContent, "Automatyczne wysyłanie jest zatrzymane.");
+	ui.update({ task: { ...task, status: "waiting" }, isOwner: false });
+	assert.equal(ui.element("owner-hint").textContent, "To zadanie jest sterowane z innej karty.");
+	ui.update({ snapshot: { ...snapshot, chatId: "another-chat" } });
+	assert.equal(
+		ui.element("task-notice").textContent,
+		"To zadanie należy do innej rozmowy. Otwórz jej dedykowaną kartę, aby kontynuować.",
+	);
+});
+
+test("the panel follows a page language switch without reload", async (t) => {
+	const ui = setup(t);
+	ui.update({ task: { ...task, status: "waiting" }, isOwner: true });
+	assert.equal(ui.query("#chats-tab").textContent, "Chats");
+	assert.equal(ui.element("agent-state").textContent, "Waiting for a new message.");
+	document.documentElement.lang = "pl";
+	await flushPreferences();
+	assert.equal(ui.query("#chats-tab").textContent, "Czaty");
+	assert.equal(ui.element("agent-state").textContent, "Oczekiwanie na nową wiadomość.");
+	assert.equal(ui.element("start").textContent, "Rozpocznij zadanie");
+	document.documentElement.lang = "en";
+	await flushPreferences();
+	assert.equal(ui.query("#chats-tab").textContent, "Chats");
+	assert.equal(ui.element("agent-state").textContent, "Waiting for a new message.");
 });

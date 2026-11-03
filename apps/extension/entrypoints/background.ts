@@ -1,5 +1,6 @@
 import { defineBackground } from "wxt/utils/define-background";
 import { MAX_TASK_TEXT_LENGTH, normalizeReplySettings } from "@envoy/contracts";
+import { getStrings } from "../src/i18n";
 import type { BackendRequest } from "../src/messaging";
 import { createBackendClient } from "../src/backend-client";
 import { OWNER_HEARTBEAT_PORT, startBackgroundHeartbeat } from "../src/heartbeat";
@@ -121,7 +122,7 @@ export default defineBackground(() => {
 					error:
 						error instanceof Error && safeErrors.has(error.message)
 							? error.message
-							: "Backend unavailable or request rejected. Check the task and try again.",
+							: getStrings().backendRejected,
 				}),
 		);
 		return true;

@@ -1,5 +1,6 @@
 import { isTaskEnded } from "@envoy/contracts";
 import type { ConversationSnapshot, SendReplyCommand, SendResult, TaskControlAction, TaskState } from "@envoy/contracts";
+import { detectLocale, getStrings, loadedMessagesText } from "./i18n";
 import { callBackend } from "./messaging";
 import { messengerChatAdapter, type MessengerChatAdapter } from "./messenger/chat-adapter";
 import { conversationErrorStatus, watchConversation } from "./ui/conversation";
@@ -43,7 +44,7 @@ export function createEnvoyController(
 	const heartbeat = dependencies.heartbeat ?? startOwnerHeartbeat;
 	let state: ControllerState = {
 		snapshot: null,
-		conversationStatus: "Open a conversation to read its messages.",
+		conversationStatus: getStrings().openConversation,
 		task: null,
 		isOwner: false,
 		error: null,
@@ -124,7 +125,7 @@ export function createEnvoyController(
 				// A lost port cannot prove the tab is still receiving changes.
 				// Disconnect before any later read can resume the task automatically.
 				connectionLossVersion++;
-				observe(null, "Agent tab connection interrupted. Envoy is paused.");
+				observe(null, getStrings().connectionInterrupted);
 				requestSync();
 			});
 		} catch {
@@ -157,7 +158,7 @@ export function createEnvoyController(
 					refreshRequested = true;
 					continue;
 				}
-				observe(snapshot, snapshot ? `${snapshot.messages.length} loaded messages.` : status);
+				observe(snapshot, snapshot ? loadedMessagesText(detectLocale(), snapshot.messages.length) : status);
 				requestSync();
 			}
 		})().finally(() => {
@@ -207,7 +208,7 @@ export function createEnvoyController(
 		try {
 			await transport({ type: "envoy:report", commandId: command.commandId, result });
 		} catch {
-			if (!stopped) publish({ error: "Could not report the send result. Check Messenger before taking over." });
+			if (!stopped) publish({ error: getStrings().reportFailed });
 		}
 		requestSync();
 	}
@@ -251,7 +252,7 @@ export function createEnvoyController(
 					reconcileHeartbeat();
 					if (result.command) void execute(result.command, requestEpoch);
 				} catch {
-					if (!stopped) publish({ error: "Backend connection unavailable. Pending sends will pause." });
+					if (!stopped) publish({ error: getStrings().backendDown });
 				}
 			}
 		})().finally(() => {
@@ -271,14 +272,13 @@ export function createEnvoyController(
 	requestSync();
 
 	async function runAction(action: () => Promise<TaskState | null>) {
-		if (actionInFlight || stopped || suspended)
-			throw new Error("The tab is unavailable or another action is in progress.");
+		if (actionInFlight || stopped || suspended) throw new Error(getStrings().tabBusy);
 		actionInFlight = true;
 		epoch++;
 		try {
 			// Do not let an older heartbeat overtake a newly started task.
 			if (syncPromise) await syncPromise;
-			if (stopped || suspended || !controlsAvailable) throw new Error("The Envoy controls are unavailable.");
+			if (stopped || suspended || !controlsAvailable) throw new Error(getStrings().controlsUnavailable);
 			activeAction = action();
 			const task = await activeAction;
 			if (!stopped && !suspended) {
@@ -286,7 +286,7 @@ export function createEnvoyController(
 				reconcileHeartbeat();
 			}
 		} catch (error) {
-			if (!stopped) publish({ error: error instanceof Error ? error.message : "The action failed." });
+			if (!stopped) publish({ error: error instanceof Error ? error.message : getStrings().actionFailed });
 			throw error;
 		} finally {
 			activeAction = null;
@@ -307,7 +307,7 @@ export function createEnvoyController(
 			identity(fresh) !== identity(current) ||
 			identity(state.snapshot) !== identity(current)
 		) {
-			throw new Error("The conversation changed. Try again once it has loaded.");
+			throw new Error(getStrings().conversationChanged);
 		}
 		return fresh;
 	}
@@ -358,7 +358,7 @@ export function createEnvoyController(
 		async start(goal) {
 			await runAction(async () => {
 				const current = state.snapshot;
-				if (!current) throw new Error("Open a conversation and wait for it to load.");
+				if (!current) throw new Error(getStrings().openAndWait);
 				const fresh = await readUnchanged(current);
 				return transport({ type: "envoy:start", goal, snapshot: fresh });
 			});
@@ -368,7 +368,7 @@ export function createEnvoyController(
 				const current = state.snapshot;
 				const task = state.task;
 				if (!current || !task || current.chatId !== task.chatId) {
-					throw new Error("Open the task's conversation before reconnecting.");
+					throw new Error(getStrings().openTaskChat);
 				}
 				const fresh = await readUnchanged(current);
 				return transport({ type: "envoy:attach", taskId: task.id, snapshot: fresh });
@@ -376,7 +376,7 @@ export function createEnvoyController(
 		},
 		async control(action, text) {
 			await runAction(async () => {
-				if (!state.task || !state.isOwner) throw new Error("This tab does not control the task.");
+				if (!state.task || !state.isOwner) throw new Error(getStrings().notOwner);
 				return transport({
 					type: "envoy:control",
 					taskId: state.task.id,
@@ -387,7 +387,7 @@ export function createEnvoyController(
 		},
 		async clear() {
 			await runAction(async () => {
-				if (!state.task) throw new Error("There is no task to delete.");
+				if (!state.task) throw new Error(getStrings().noTaskToDelete);
 				await transport({ type: "envoy:clear", taskId: state.task.id });
 				return null;
 			});
