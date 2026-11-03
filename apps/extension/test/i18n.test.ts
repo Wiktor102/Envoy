@@ -63,9 +63,24 @@ test("both locales define the same non-empty keys with matching placeholders", (
 	assert.deepEqual(Object.keys(STRINGS.pl).sort(), Object.keys(STRINGS.en).sort());
 	for (const [key, english] of Object.entries(STRINGS.en)) {
 		const polish = STRINGS.pl[key as keyof typeof STRINGS.pl];
-		assert.ok(english.length > 0, key);
-		assert.ok(polish.length > 0, key);
-		assert.deepEqual(placeholders(polish), placeholders(english), key);
+		if (typeof english === "string" && typeof polish === "string") {
+			assert.ok(english.length > 0, key);
+			assert.ok(polish.length > 0, key);
+			assert.deepEqual(placeholders(polish), placeholders(english), key);
+			continue;
+		}
+		assert.equal(key, "details");
+		const enDetails = english as Record<string, string>;
+		const plDetails = polish as Record<string, string>;
+		assert.ok(typeof enDetails === "object" && enDetails !== null, key);
+		assert.ok(typeof plDetails === "object" && plDetails !== null, key);
+		assert.deepEqual(Object.keys(plDetails).sort(), Object.keys(enDetails).sort());
+		for (const [code, enText] of Object.entries(enDetails)) {
+			const plText = plDetails[code]!;
+			assert.ok(enText.length > 0, `details.${code}`);
+			assert.ok(plText.length > 0, `details.${code}`);
+			assert.deepEqual(placeholders(plText), placeholders(enText), `details.${code}`);
+		}
 	}
 });
 
@@ -76,4 +91,18 @@ test("polish strings translate the panel", () => {
 	assert.equal(strings.sendNow, "Wyślij teraz");
 	assert.equal(strings.statusWaiting, "Oczekiwanie na nową wiadomość");
 	assert.equal(format(strings.sendingIn, { seconds: 7 }), "Wysłanie za 7 s.");
+	assert.equal(
+		strings.details.auto_send_off,
+		"Automatyczne wysyłanie jest wyłączone. Wybierz Wyślij teraz, gdy odpowiedź będzie gotowa.",
+	);
+});
+
+test("english detail codes keep the legacy backend wording", () => {
+	const strings = getStrings("en");
+	assert.equal(strings.details.auto_send_off, "Automatic sending is off. Choose Send now when it is ready.");
+	assert.equal(strings.details.considering_conversation, "Considering the conversation.");
+	assert.equal(
+		strings.details.tab_disconnected_send_uncertain,
+		"The agent tab disconnected. A send may have completed; check the conversation.",
+	);
 });

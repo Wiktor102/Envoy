@@ -10,6 +10,7 @@ import type {
 	SendReplyCommand,
 	SendResult,
 	TaskControlAction,
+	TaskDetailCode,
 	TaskState,
 } from "@envoy/contracts";
 import {
@@ -28,7 +29,25 @@ const LEASE_MS = 8_000;
 const SEND_RESULT_TIMEOUT_MS = 30_000;
 const TERMINAL_RETENTION_MS = 60 * 60 * 1000;
 const MAX_AGENT_CHAT = 50;
-const AUTO_SEND_OFF = "Automatic sending is off. Choose Send now when it is ready.";
+
+type PauseBaseCode =
+	| "tab_changed_conversations"
+	| "conversation_unavailable_resumable"
+	| "conversation_unavailable"
+	| "conversation_unverifiable"
+	| "reply_unverifiable"
+	| "tab_disconnected"
+	| "tab_stopped_checking_in";
+
+const PAUSE_UNCERTAIN_DETAIL: Record<PauseBaseCode, TaskDetailCode> = {
+	tab_changed_conversations: "tab_changed_conversations_send_uncertain",
+	conversation_unavailable_resumable: "conversation_unavailable_resumable_send_uncertain",
+	conversation_unavailable: "conversation_unavailable_send_uncertain",
+	conversation_unverifiable: "conversation_unverifiable_send_uncertain",
+	reply_unverifiable: "reply_unverifiable_send_uncertain",
+	tab_disconnected: "tab_disconnected_send_uncertain",
+	tab_stopped_checking_in: "tab_stopped_checking_in_send_uncertain",
+};
 
 type Attempt = {
 	command: SendReplyCommand;
@@ -146,9 +165,7 @@ export class TaskService {
 			goal: goal.trim(),
 			status: this.requiresVerification ? "needs_user" : "waiting",
 			pendingReply: null,
-			detail: this.requiresVerification
-				? "The previous send may have completed. Check the conversation before resuming."
-				: null,
+			detail: this.requiresVerification ? { code: "previous_send_may_have_completed" } : null,
 			agentChat: [],
 		};
 		this.touch();
@@ -176,8 +193,8 @@ export class TaskService {
 		this.touch();
 		// Preserve a warning about an uncertain send until the user has seen it.
 		this.task.detail = this.requiresVerification
-			? "Reconnected. A send may have completed; check the conversation before resuming."
-			: "Reconnected. Resume when you are ready.";
+			? { code: "reconnected_send_may_have_completed" }
+			: { code: "reconnected_resume_ready" };
 		return this.state()!;
 	}
 
@@ -206,7 +223,7 @@ export class TaskService {
 					if (this.inFlight.authorized) {
 						this.invalidate(true);
 						task.status = "needs_user";
-						task.detail = "The send may have completed. Check the conversation before editing.";
+						task.detail = { code: "send_may_have_completed_before_editing" };
 						break;
 					}
 					const command = this.inFlight.command;
@@ -217,7 +234,7 @@ export class TaskService {
 				if (task.status !== "pending" || !task.pendingReply) throw new Error("There is no reply to edit.");
 				task.pendingReply.sendAt = null;
 				task.status = "editing";
-				task.detail = "The countdown is stopped while you edit.";
+				task.detail = { code: "countdown_stopped_while_editing" };
 				break;
 			}
 			case "save-edit": {
@@ -226,7 +243,7 @@ export class TaskService {
 				task.pendingReply.text = updated;
 				task.pendingReply.sendAt = null;
 				task.status = "pending";
-				task.detail = "Edited reply saved. Choose Send now when it is ready.";
+				task.detail = { code: "edited_reply_saved" };
 				this.appendAgentChat("event", `Reply edited to: ${updated}`);
 				break;
 			}
@@ -240,7 +257,7 @@ export class TaskService {
 				if (task.status !== "pending" || !task.pendingReply) throw new Error("There is no reply ready to send.");
 				if (!this.leaseActive()) throw new Error("The agent tab is disconnected.");
 				task.pendingReply.sendAt = this.now();
-				task.detail = "Sending when the agent tab checks in.";
+				task.detail = { code: "sending_when_tab_checks_in" };
 				break;
 			}
 			case "cancel": {
@@ -256,8 +273,8 @@ export class TaskService {
 				task.pendingReply = null;
 				task.status = uncertain ? "needs_user" : "waiting";
 				task.detail = uncertain
-					? "The send may have completed. Check the conversation before resuming."
-					: "Reply cancelled. Waiting for a new message.";
+					? { code: "send_may_have_completed_before_resuming" }
+					: { code: "reply_cancelled_waiting" };
 				this.appendAgentChat(
 					"event",
 					uncertain ? "Cancel requested; the send may have completed." : "Reply cancelled.",
@@ -275,10 +292,10 @@ export class TaskService {
 				task.status = "paused";
 				task.detail =
 					uncertain || this.requiresVerification
-						? "Paused. The send may have completed; check the conversation before resuming."
+						? { code: "paused_send_may_have_completed" }
 						: this.hasAwaitingRetiredResult()
-							? "Paused. Checking whether the previous send completed."
-							: "Paused by you.";
+							? { code: "paused_checking_previous_send" }
+							: { code: "paused_by_you" };
 				break;
 			}
 			case "resume": {
@@ -303,10 +320,10 @@ export class TaskService {
 				task.status = "taken_over";
 				task.detail =
 					uncertain || this.requiresVerification
-						? "You are in control. A send may have completed; check the conversation."
+						? { code: "taken_over_send_may_have_completed" }
 						: this.hasAwaitingRetiredResult()
-							? "You are in control. Checking whether the previous send completed."
-							: "You are in control of this conversation.";
+							? { code: "taken_over_checking_previous_send" }
+							: { code: "taken_over_in_control" };
 				this.scheduleRetention(task.id);
 				break;
 			}
@@ -326,7 +343,7 @@ export class TaskService {
 				task.pendingReply = null;
 				if (uncertain || this.requiresVerification) {
 					task.status = wasPaused ? "paused" : "needs_user";
-					task.detail = "The send may have completed. Check the conversation before resuming.";
+					task.detail = { code: "send_may_have_completed_before_resuming" };
 				} else {
 					this.processedRevisions.clear();
 					this.evaluationReason = "instructions_updated";
@@ -380,10 +397,10 @@ export class TaskService {
 			else this.leaseUntil = 0;
 			this.pauseForDisconnect(
 				snapshot
-					? "The agent tab changed conversations."
+					? "tab_changed_conversations"
 					: resumable
-						? "The conversation is unavailable. Envoy resumes when it can read the latest messages."
-						: "The conversation is unavailable.",
+						? "conversation_unavailable_resumable"
+						: "conversation_unavailable",
 			);
 			this.resumeWhenReadable = resumable;
 			this.connector.updateConversation(null);
@@ -396,7 +413,7 @@ export class TaskService {
 		if (replySettings) this.applyReplySettings(replySettings);
 		const copy = structuredClone(snapshot);
 		if (previous && previous.revision === copy.revision && semanticMessages(previous) !== semanticMessages(copy)) {
-			this.pauseForDisconnect("The conversation could not be verified. Reopen it and resume.");
+			this.pauseForDisconnect("conversation_unverifiable");
 			this.connector.updateConversation(null);
 			this.leaseUntil = 0;
 			return { task: this.state(), isOwner: true, command: null };
@@ -417,7 +434,7 @@ export class TaskService {
 				task.pendingReply = null;
 				if (uncertain) {
 					task.status = "needs_user";
-					task.detail = "The send may have completed. Check the conversation before resuming.";
+					task.detail = { code: "send_may_have_completed_before_resuming" };
 					this.appendAgentChat("event", "The send may have completed.");
 				} else if (!["paused", "needs_user", "completed", "taken_over"].includes(task.status)) {
 					task.status = "waiting";
@@ -439,7 +456,7 @@ export class TaskService {
 		if (task.status === "pending" && task.pendingReply?.sendAt !== null && task.pendingReply?.sendAt !== undefined) {
 			if (task.pendingReply.sendAt <= this.now()) {
 				if (this.hasAwaitingRetiredResult()) {
-					task.detail = "Checking whether the previous send completed before sending this reply.";
+					task.detail = { code: "checking_previous_send_before_sending" };
 					return { task: this.state(), isOwner: true, command: null };
 				}
 				const { commandId, chatId, expectedRevision, text } = task.pendingReply;
@@ -461,9 +478,9 @@ export class TaskService {
 					this.scheduleAttemptTimeout();
 					task.pendingReply = null;
 					task.status = "sending";
-					task.detail = "Checking the conversation before sending.";
+					task.detail = { code: "checking_conversation_before_sending" };
 				} else {
-					this.pauseForDisconnect("The reply could not be verified. Check the conversation before resuming.");
+					this.pauseForDisconnect("reply_unverifiable");
 				}
 			}
 		}
@@ -517,7 +534,7 @@ export class TaskService {
 				// remain usable for the same conversation.
 				if (this.task.status === "waiting") this.maybeGenerate();
 				if (isTaskEnded(this.task.status)) {
-					this.task.detail = "You are in control of this conversation.";
+					this.task.detail = { code: "taken_over_in_control" };
 					this.scheduleRetention(this.task.id);
 				}
 			} else {
@@ -547,8 +564,8 @@ export class TaskService {
 			};
 			this.task.status = "pending";
 			this.task.detail = attempt.sendNowRequested
-				? "Sending when the agent tab checks in."
-				: "The reply was not sent. Choose Send now to try again, or cancel it.";
+				? { code: "sending_when_tab_checks_in" }
+				: { code: "reply_not_sent_retry" };
 			this.appendAgentChat("event", "The reply was not sent.");
 			return returnState();
 		}
@@ -557,15 +574,15 @@ export class TaskService {
 		if (this.task.status !== "sending") return returnState();
 		if (result === "sent" && attempt.authorized) {
 			this.task.status = "waiting";
-			this.task.detail = "Reply sent. Waiting for a new message.";
+			this.task.detail = { code: "reply_sent_waiting" };
 			this.appendAgentChat("event", "Reply sent.", attempt.command.text);
 		} else {
 			if (result !== "rejected") this.requiresVerification = true;
 			this.task.status = "needs_user";
 			this.task.detail =
 				result === "rejected"
-					? "The reply was not sent. Check the conversation before resuming."
-					: "The send could not be confirmed. Check the conversation before resuming.";
+					? { code: "reply_not_sent_check_conversation" }
+					: { code: "send_unconfirmed_check_conversation" };
 			this.appendAgentChat(
 				"event",
 				result === "rejected" ? "The reply was not sent." : "The send could not be confirmed.",
@@ -578,7 +595,7 @@ export class TaskService {
 		this.expireLease();
 		if (!this.task || connectorId !== this.owner) return;
 		this.leaseUntil = 0;
-		this.pauseForDisconnect("The agent tab disconnected.");
+		this.pauseForDisconnect("tab_disconnected");
 		this.connector.updateConversation(null);
 	}
 
@@ -645,7 +662,7 @@ export class TaskService {
 		const pending = task?.pendingReply;
 		if (settings.autoSend || task?.status !== "pending" || !pending || pending.commandId !== this.autoCountdown) return;
 		pending.sendAt = null;
-		task.detail = AUTO_SEND_OFF;
+		task.detail = { code: "auto_send_off" };
 		this.autoCountdown = null;
 	}
 
@@ -695,7 +712,7 @@ export class TaskService {
 	private expireLease(): void {
 		if (this.task && this.leaseUntil && !this.leaseActive()) {
 			this.leaseUntil = 0;
-			this.pauseForDisconnect("The agent tab stopped checking in.");
+			this.pauseForDisconnect("tab_stopped_checking_in");
 			this.connector.updateConversation(null);
 		}
 		this.expireAttempt();
@@ -728,7 +745,7 @@ export class TaskService {
 			this.invalidate();
 			if (this.task?.status === "sending") {
 				this.task.status = "needs_user";
-				this.task.detail = "The send could not be confirmed. Check the conversation before resuming.";
+				this.task.detail = { code: "send_unconfirmed_check_conversation" };
 				this.appendAgentChat("event", "The send could not be confirmed.");
 			}
 		}
@@ -752,16 +769,16 @@ export class TaskService {
 		if (isTaskEnded(this.task.status)) {
 			if (this.retentionTimer) clearTimeout(this.retentionTimer);
 			this.retentionTimer = undefined;
-			this.task.detail = "A previous send may have completed. Check the conversation before starting another task.";
+			this.task.detail = { code: "previous_send_may_have_completed_before_new_task" };
 		} else if (this.task.status === "paused") {
-			this.task.detail = "Paused. A previous send may have completed; check the conversation before resuming.";
+			this.task.detail = { code: "paused_previous_send_may_have_completed" };
 		} else {
 			this.task.status = "needs_user";
-			this.task.detail = "A previous send may have completed. Check the conversation before resuming.";
+			this.task.detail = { code: "previous_send_may_have_completed_before_resuming" };
 		}
 	}
 
-	private pauseForDisconnect(message: string): void {
+	private pauseForDisconnect(code: PauseBaseCode): void {
 		this.resumeWhenReadable = false;
 		if (!this.task || isTaskEnded(this.task.status)) return;
 		const discarded = this.task.pendingReply;
@@ -769,10 +786,7 @@ export class TaskService {
 		if (discarded && !uncertain) this.processedRevisions.delete(discarded.expectedRevision);
 		this.task.pendingReply = null;
 		this.task.status = "paused";
-		this.task.detail =
-			uncertain || this.requiresVerification
-				? `${message} A send may have completed; check the conversation.`
-				: message;
+		this.task.detail = uncertain || this.requiresVerification ? { code: PAUSE_UNCERTAIN_DETAIL[code] } : { code };
 	}
 
 	// Abort in-progress work and retire any handed-out command. Even a command
@@ -805,11 +819,11 @@ export class TaskService {
 			return;
 		if (this.requiresVerification) {
 			task.status = "needs_user";
-			task.detail = "The send could not be confirmed. Check the conversation before resuming.";
+			task.detail = { code: "send_unconfirmed_check_conversation" };
 			return;
 		}
 		if (this.hasAwaitingRetiredResult()) {
-			task.detail = "Checking whether the previous send completed.";
+			task.detail = { code: "checking_previous_send" };
 			return;
 		}
 		if (
@@ -822,16 +836,16 @@ export class TaskService {
 		const latest = [...snapshot.messages].reverse().find((message) => message.direction !== "system" || message.unsent);
 		if (latest?.unsent) {
 			task.status = "needs_user";
-			task.detail = "The latest message was unsent. Check the conversation before resuming.";
+			task.detail = { code: "latest_unsent_check_conversation" };
 			return;
 		}
 		if ((!latest || latest.direction === "outgoing") && this.evaluationReason === "new_message") {
-			task.detail = "Waiting for a new incoming message.";
+			task.detail = { code: "waiting_for_incoming" };
 			return;
 		}
 		if (latest?.direction === "unknown") {
 			task.status = "needs_user";
-			task.detail = "The latest message has an unknown sender. Check the conversation before resuming.";
+			task.detail = { code: "latest_unknown_sender" };
 			return;
 		}
 		if (latest && !readableLatest(snapshot.messages, latest)) {
@@ -840,14 +854,14 @@ export class TaskService {
 			// causes this pause. Name it: the general message hides what happened.
 			const quoted = latest.replyTo?.attachments ?? [];
 			task.detail = !quoted.length
-				? "The latest message contains content Envoy cannot interpret."
+				? { code: "latest_unreadable" }
 				: quoted.every((attachment) => attachment.type === "image")
-					? "The latest message quotes an image Envoy cannot read. Take over to reply yourself."
-					: "The latest message quotes media Envoy cannot read. Take over to reply yourself.";
+					? { code: "latest_quotes_image" }
+					: { code: "latest_quotes_media" };
 			return;
 		}
 		task.status = "thinking";
-		task.detail = "Considering the conversation.";
+		task.detail = { code: "considering_conversation" };
 		const epoch = ++this.epoch;
 		const abort = new AbortController();
 		this.generation = abort;
@@ -860,8 +874,8 @@ export class TaskService {
 				this.generation = null;
 				this.task.status = "needs_user";
 				this.task.detail = process.env.MODEL_API_KEY?.trim()
-					? "The model could not produce a decision. Check its configuration and resume."
-					: "Set MODEL_API_KEY on the backend and resume.";
+					? { code: "model_no_decision" }
+					: { code: "model_key_missing" };
 			},
 		);
 	}
@@ -888,7 +902,7 @@ export class TaskService {
 					if (this.developerMode) text = checkedReply(`> ${text}`);
 				} catch {
 					task.status = "needs_user";
-					task.detail = "The model returned an invalid reply. Check the conversation.";
+					task.detail = { code: "model_invalid_reply" };
 					return;
 				}
 				const delay = this.nextReplyDelayMs();
@@ -901,22 +915,22 @@ export class TaskService {
 				};
 				task.pendingReply = pending;
 				task.status = "pending";
-				task.detail = delay === null ? AUTO_SEND_OFF : "Review the reply before it sends.";
+				task.detail = delay === null ? { code: "auto_send_off" } : { code: "review_reply_before_send" };
 				this.autoCountdown = delay === null ? null : pending.commandId;
 				break;
 			}
 			case "wait":
 				task.status = "waiting";
-				task.detail = "Waiting for a new message.";
+				task.detail = { code: "waiting_for_message" };
 				break;
 			case "ask":
 				task.status = "needs_user";
-				task.detail = decision.text;
+				task.detail = { code: "agent_message", text: decision.text };
 				this.appendAgentChat("agent", decision.text);
 				break;
 			case "finish":
 				task.status = "completed";
-				task.detail = decision.text;
+				task.detail = { code: "agent_message", text: decision.text };
 				this.appendAgentChat("agent", decision.text);
 				this.scheduleRetention(task.id);
 				break;

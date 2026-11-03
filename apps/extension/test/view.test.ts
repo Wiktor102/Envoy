@@ -216,7 +216,7 @@ test("developer mode hides history and diagnostics by default but keeps actionab
 	for (const id of ["chat-id", "task-id", "task-chat", "conversation", "health"]) {
 		assert.equal(developerDetails.contains(ui.element(id)), true, id);
 	}
-	ui.update({ task: { ...task, detail: "Can you meet on Friday?" }, isOwner: true });
+	ui.update({ task: { ...task, detail: { code: "agent_message", text: "Can you meet on Friday?" } }, isOwner: true });
 	assert.equal(ui.element("task-id").textContent, "Task ID: task-1");
 	assert.equal(ui.element("agent-state").hidden, false);
 	assert.equal(ui.element("agent-state").closest("#envoy-developer-details"), null);
@@ -507,7 +507,7 @@ test("agent thread renders questions, answers, and events without a frame", (t) 
 		task: {
 			...task,
 			status: "needs_user",
-			detail: "Is Friday allowed?",
+			detail: { code: "agent_message", text: "Is Friday allowed?" },
 			agentChat: [
 				{ id: "q1", role: "agent", text: "Is Friday allowed?", body: null, createdAt: 1 },
 				{ id: "a1", role: "user", text: "Yes, after 3.", body: null, createdAt: 2 },
@@ -536,7 +536,10 @@ test("agent thread renders questions, answers, and events without a frame", (t) 
 
 test("answers send to the agent without rewriting the goal", async (t) => {
 	const ui = setup(t);
-	ui.update({ task: { ...task, status: "needs_user", detail: "Is Friday allowed?" }, isOwner: true });
+	ui.update({
+		task: { ...task, status: "needs_user", detail: { code: "agent_message", text: "Is Friday allowed?" } },
+		isOwner: true,
+	});
 	const goal = ui.element<HTMLTextAreaElement>("goal");
 	assert.equal(goal.value, "Arrange a meeting");
 	assert.equal(ui.element("footer").hidden, false);
@@ -568,7 +571,10 @@ test("limited inputs show character counts and block over-limit submits", (t) =>
 	);
 	assert.equal(start.disabled, true);
 
-	ui.update({ task: { ...task, status: "needs_user", detail: "Is Friday allowed?" }, isOwner: true });
+	ui.update({
+		task: { ...task, status: "needs_user", detail: { code: "agent_message", text: "Is Friday allowed?" } },
+		isOwner: true,
+	});
 	const updateGoal = ui.element<HTMLButtonElement>("update-goal");
 	ui.setText("goal", "Arrange a meeting");
 	assert.equal(
@@ -680,14 +686,14 @@ test("goal toggle opens the editor and updating closes it", async (t) => {
 
 test("agent state shows once and hides when it repeats the last Envoy message", (t) => {
 	const ui = setup(t);
-	ui.update({ task: { ...task, status: "thinking", detail: "Considering the conversation." }, isOwner: true });
+	ui.update({ task: { ...task, status: "thinking", detail: { code: "considering_conversation" } }, isOwner: true });
 	assert.equal(ui.element("agent-state").hidden, false);
 	assert.equal(ui.element("agent-state").textContent, "Considering the conversation.");
 	ui.update({
 		task: {
 			...task,
 			status: "needs_user",
-			detail: "Is Friday allowed?",
+			detail: { code: "agent_message", text: "Is Friday allowed?" },
 			agentChat: [{ id: "q1", role: "agent", text: "Is Friday allowed?", body: null, createdAt: 1 }],
 		},
 		isOwner: true,
@@ -727,7 +733,7 @@ test("open tool calls stay open across re-renders but reset for a new task", (t)
 
 test("thinking shows a subtle cancel link while reply buttons live in the pending card", async (t) => {
 	const ui = setup(t);
-	ui.update({ task: { ...task, status: "thinking", detail: "Considering the conversation." }, isOwner: true });
+	ui.update({ task: { ...task, status: "thinking", detail: { code: "considering_conversation" } }, isOwner: true });
 	assert.equal(ui.element("pending").hidden, true);
 	assert.equal(ui.element("cancel-thinking").hidden, false);
 	assert.equal(ui.element("reply-controls").parentElement?.id, "envoy-pending");
@@ -816,6 +822,11 @@ test("a polish page renders a polish panel", async (t) => {
 	assert.deepEqual(senders(), ["Inna osoba"]);
 	ui.update({ task: { ...task, status: "waiting" }, isOwner: true });
 	assert.equal(ui.element("agent-state").textContent, "Oczekiwanie na nową wiadomość.");
+	ui.update({ task: { ...task, status: "pending", detail: { code: "auto_send_off" } }, isOwner: true });
+	assert.equal(
+		ui.element("agent-state").textContent,
+		"Automatyczne wysyłanie jest wyłączone. Wybierz Wyślij teraz, gdy odpowiedź będzie gotowa.",
+	);
 	ui.update({
 		task: {
 			...task,
