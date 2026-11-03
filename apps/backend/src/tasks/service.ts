@@ -1,9 +1,8 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type {
 	AgentChatRole,
 	AgentDecision,
 	ConnectorSyncResult,
-	ConversationMessage,
 	ConversationSnapshot,
 	PendingReply,
 	ReplySettings,
@@ -13,17 +12,13 @@ import type {
 	TaskDetailCode,
 	TaskState,
 } from "@envoy/contracts";
-import {
-	DEFAULT_REPLY_DELAY_SECONDS,
-	forwardableMediaSlots,
-	hasControlCharacters,
-	isTaskEnded,
-	MAX_TASK_TEXT_LENGTH,
-	messageContent,
-} from "@envoy/contracts";
+import { DEFAULT_REPLY_DELAY_SECONDS, isTaskEnded } from "@envoy/contracts";
 import type { Agent, EvaluationReason } from "../agent/agent.js";
 import { type BrowserConnector, sameConversation } from "../connectors/browser-connector.js";
 import { ExtensionConnector } from "../connectors/extension-connector.js";
+import { latestMessage, readableLatest, semanticMessages, textContext } from "./conversation-checks.js";
+import { describeEdit, findEdits, type ObservedEdit, recordSeenTexts } from "./observed-edits.js";
+import { checkedReply, checkedText } from "./task-text.js";
 
 const LEASE_MS = 8_000;
 const SEND_RESULT_TIMEOUT_MS = 30_000;
@@ -72,19 +67,6 @@ type Options = {
 	leaseMs?: number;
 	connector?: () => BrowserConnector;
 };
-
-function editedMessageLabel(edit: ObservedEdit): string {
-	switch (edit.direction) {
-		case "incoming":
-			return edit.sender ? `incoming message from ${edit.sender}` : "incoming message";
-		case "outgoing":
-			return "outgoing message";
-		case "unknown":
-			return "message with unknown sender";
-		default:
-			return "message";
-	}
-}
 
 // The state is intentionally in backend memory. A backend restart cannot
 // revive a pending send. Only one connector can own a live task.
@@ -146,9 +128,6 @@ export class TaskService {
 		this.expireLease();
 		if (this.task && !isTaskEnded(this.task.status)) {
 			throw new Error("A task is already active. Take over the existing task first.");
-		}
-		if (this.hasAwaitingRetiredResult()) {
-			throw new Error("A previous send is still being checked. Try again shortly.");
 		}
 		this.assertNoRetiredCheck();
 		if (this.task && this.requiresVerification) {
@@ -230,182 +209,35 @@ export class TaskService {
 		const task = this.requireOwner(connectorId, taskId);
 		this.resumeWhenReadable = false;
 		switch (action) {
-			case "edit": {
-				if (task.status === "sending" && this.inFlight) {
-					if (this.inFlight.authorized) {
-						this.invalidate(true);
-						task.status = "needs_user";
-						task.detail = { code: "send_may_have_completed_before_editing" };
-						break;
-					}
-					const command = this.inFlight.command;
-					this.invalidate(true);
-					task.pendingReply = { ...command, commandId: randomUUID(), sendAt: null };
-					task.status = "pending";
-				}
-				if (task.status !== "pending" || !task.pendingReply) throw new Error("There is no reply to edit.");
-				task.pendingReply.sendAt = null;
-				task.status = "editing";
-				task.detail = { code: "countdown_stopped_while_editing" };
+			case "edit":
+				this.editReply(task);
 				break;
-			}
-			case "save-edit": {
-				if (task.status !== "editing" || !task.pendingReply) throw new Error("There is no reply being edited.");
-				const updated = checkedReply(text);
-				task.pendingReply.text = updated;
-				task.pendingReply.sendAt = null;
-				task.status = "pending";
-				task.detail = { code: "edited_reply_saved" };
-				this.appendAgentChat("event", `Reply edited to: ${updated}`);
+			case "save-edit":
+				this.saveEdit(task, text);
 				break;
-			}
-			case "send-now": {
-				// The countdown can hand the reply to the tab while this request is
-				// in flight. The tab may reject that claim, so keep the request.
-				if (task.status === "sending" && this.inFlight) {
-					if (!this.inFlight.authorized) this.inFlight.sendNowRequested = true;
-					break;
-				}
-				if (task.status !== "pending" || !task.pendingReply) throw new Error("There is no reply ready to send.");
-				if (!this.leaseActive()) throw new Error("The agent tab is disconnected.");
-				task.pendingReply.sendAt = this.now();
-				task.detail = { code: "sending_when_tab_checks_in" };
+			case "send-now":
+				this.sendNow(task);
 				break;
-			}
-			case "cancel": {
-				if (!["thinking", "pending", "editing", "sending"].includes(task.status)) {
-					throw new Error("There is no reply to cancel.");
-				}
-				const snapshot = this.connector.readConversation();
-				if (snapshot) this.suppressAttempt(snapshot.revision, textContext(snapshot));
-				const uncertain = this.invalidate(true);
-				task.pendingReply = null;
-				// Cancelling during the post-send completion check must leave the
-				// task waiting, not re-run the check on the next sync.
-				this.evaluationReason = "new_message";
-				task.status = uncertain ? "needs_user" : "waiting";
-				task.detail = uncertain
-					? { code: "send_may_have_completed_before_resuming" }
-					: { code: "reply_cancelled_waiting" };
-				this.appendAgentChat(
-					"event",
-					uncertain ? "Cancel requested; the send may have completed." : "Reply cancelled.",
-				);
+			case "cancel":
+				this.cancelReply(task);
 				break;
-			}
-			case "regenerate": {
-				const cancelledWaiting = task.status === "waiting" && task.detail?.code === "reply_cancelled_waiting";
-				if (!((task.status === "pending" || task.status === "editing") && task.pendingReply) && !cancelledWaiting) {
-					throw new Error("There is no reply to regenerate.");
-				}
-				if (this.hasAwaitingRetiredResult() || this.requiresVerification) {
-					throw new Error("A previous send is still being checked. Try again shortly.");
-				}
-				const snapshot = this.connector.readConversation();
-				if (!this.leaseActive() || !snapshot || snapshot.chatId !== task.chatId) {
-					throw new Error("Reconnect the agent tab to the original conversation first.");
-				}
-				const rejected = task.pendingReply?.text ?? null;
-				const uncertain = this.invalidate(true);
-				if (uncertain) {
-					task.pendingReply = null;
-					task.status = "needs_user";
-					task.detail = { code: "send_may_have_completed_before_resuming" };
-					this.appendAgentChat("event", "Regenerate requested; the send may have completed.");
-					break;
-				}
-				if (rejected)
-					this.appendAgentChat("event", "Previous proposal discarded; drafting a fresh alternative.", rejected);
-				else this.appendAgentChat("event", "Regenerating a fresh proposal.");
-				this.autoCountdown = null;
-				this.processedRevisions.delete(snapshot.revision);
-				this.suppressedRevisions.delete(snapshot.revision);
-				this.suppressedContexts.delete(textContext(snapshot));
-				this.evaluationReason = "regenerate_requested";
-				task.pendingReply = null;
-				task.status = "waiting";
-				task.detail = null;
-				this.maybeGenerate();
+			case "regenerate":
+				this.regenerateReply(task);
 				break;
-			}
-			case "pause": {
-				if (isTaskEnded(task.status)) throw new Error("This task has ended.");
-				const discarded = task.pendingReply;
-				const unstarted = this.inFlight && !this.inFlight.authorized ? this.inFlight.command : null;
-				const uncertain = this.invalidate(true);
-				if (discarded && !uncertain) this.processedRevisions.delete(discarded.expectedRevision);
-				if (unstarted && !uncertain) this.processedRevisions.delete(unstarted.expectedRevision);
-				task.pendingReply = null;
-				task.status = "paused";
-				task.detail =
-					uncertain || this.requiresVerification
-						? { code: "paused_send_may_have_completed" }
-						: this.hasAwaitingRetiredResult()
-							? { code: "paused_checking_previous_send" }
-							: { code: "paused_by_you" };
+			case "pause":
+				this.pauseTask(task);
 				break;
-			}
-			case "resume": {
-				if (task.status !== "paused" && task.status !== "needs_user") throw new Error("The task is not paused.");
-				const snapshot = this.connector.readConversation();
-				if (!this.leaseActive() || !snapshot || snapshot.chatId !== task.chatId) {
-					throw new Error("Reconnect the agent tab to the original conversation first.");
-				}
-				this.invalidate();
-				this.requiresVerification = false;
-				this.evaluationReason = "user_resumed";
-				this.processedRevisions.delete(snapshot.revision);
-				task.pendingReply = null;
-				task.status = "waiting";
-				task.detail = null;
-				this.maybeGenerate();
+			case "resume":
+				this.resumeTask(task);
 				break;
-			}
-			case "take-over": {
-				const uncertain = this.invalidate(true);
-				task.pendingReply = null;
-				task.status = "taken_over";
-				task.detail =
-					uncertain || this.requiresVerification
-						? { code: "taken_over_send_may_have_completed" }
-						: this.hasAwaitingRetiredResult()
-							? { code: "taken_over_checking_previous_send" }
-							: { code: "taken_over_in_control" };
-				this.scheduleRetention(task.id);
+			case "take-over":
+				this.takeOverTask(task);
 				break;
-			}
 			// New instructions and answers both feed the next evaluation.
 			case "update-goal":
-			case "answer-agent": {
-				if (isTaskEnded(task.status)) throw new Error("This task has ended.");
-				const value = checkedText(text);
-				const wasPaused = task.status === "paused";
-				const uncertain = this.invalidate(true);
-				if (action === "update-goal") {
-					task.goal = value;
-					this.appendAgentChat("event", "Instructions updated.");
-				} else {
-					this.appendAgentChat("user", value);
-				}
-				task.pendingReply = null;
-				if (uncertain || this.requiresVerification) {
-					task.status = wasPaused ? "paused" : "needs_user";
-					task.detail = { code: "send_may_have_completed_before_resuming" };
-					break;
-				}
-				this.processedRevisions.clear();
-				const current = this.connector.readConversation();
-				if (current && current.chatId === task.chatId) {
-					this.suppressedRevisions.delete(current.revision);
-					this.suppressedContexts.delete(textContext(current));
-				}
-				this.evaluationReason = "instructions_updated";
-				if (task.status === "paused") break;
-				task.status = "waiting";
-				task.detail = null;
-				this.maybeGenerate();
+			case "answer-agent":
+				this.acceptUserText(task, action, text);
 				break;
-			}
 		}
 		return this.state()!;
 	}
@@ -433,27 +265,7 @@ export class TaskService {
 		}
 		const previous = this.connector.readConversation();
 		if (!snapshot || snapshot.chatId !== task.chatId) {
-			// A photo that is still loading or a brief scroll can make the view
-			// unreadable across several syncs. Preserve only this automatic pause.
-			const resumable =
-				!snapshot &&
-				(["waiting", "thinking"].includes(task.status) ||
-					(task.status === "pending" && task.pendingReply?.sendAt != null) ||
-					(task.status === "paused" && this.resumeWhenReadable)) &&
-				!this.inFlight &&
-				!this.requiresVerification;
-			// Failed reads still prove the owner is connected. A missing heartbeat
-			// must expire this recovery permission just like any other connection.
-			if (resumable) this.touch();
-			else this.leaseUntil = 0;
-			this.pauseForDisconnect(
-				snapshot
-					? "tab_changed_conversations"
-					: resumable
-						? "conversation_unavailable_resumable"
-						: "conversation_unavailable",
-			);
-			this.resumeWhenReadable = resumable;
+			this.pauseForUnreadableView(task, snapshot);
 			this.connector.updateConversation(null);
 			return { task: this.state(), isOwner: true, command: null };
 		}
@@ -475,35 +287,7 @@ export class TaskService {
 		// previous version and is labeled by its edited flag alone.
 		const edits = findEdits(this.lastSeenTexts, copy);
 		for (const edit of edits) this.appendEditEvent(edit);
-		if (previous && previous.revision !== copy.revision) {
-			// Our own outgoing bubble can land while the post-send completion
-			// check is running. Re-run that check on the new snapshot instead
-			// of dropping it to the outgoing guard; genuinely new incoming
-			// content still invalidates into a full evaluation.
-			const postSendRerun =
-				task.status === "thinking" &&
-				this.generation !== null &&
-				this.evaluationReason === "reply_sent" &&
-				latestMessage(copy)?.direction === "outgoing";
-			if (!["paused", "needs_user"].includes(task.status)) {
-				this.evaluationReason = edits.length ? "message_edited" : "new_message";
-				if (postSendRerun) this.evaluationReason = "reply_sent";
-			}
-			// After authorization, a new revision can be the outgoing bubble
-			// itself. Keep the attempt until its explicit report arrives.
-			if (!(task.status === "sending" && this.inFlight?.authorized)) {
-				const uncertain = this.invalidate();
-				task.pendingReply = null;
-				if (uncertain) {
-					task.status = "needs_user";
-					task.detail = { code: "send_may_have_completed_before_resuming" };
-					this.appendAgentChat("event", "The send may have completed.");
-				} else if (!["paused", "needs_user", "completed", "taken_over"].includes(task.status)) {
-					task.status = "waiting";
-					task.detail = null;
-				}
-			}
-		}
+		if (previous && previous.revision !== copy.revision) this.applyRevisionChange(task, copy, edits.length > 0);
 		this.connector.updateConversation(copy);
 		recordSeenTexts(this.lastSeenTexts, copy);
 		if (this.resumeWhenReadable) {
@@ -514,38 +298,7 @@ export class TaskService {
 			}
 		}
 		if (task.status === "waiting") this.maybeGenerate();
-		let command: SendReplyCommand | null = null;
-		if (task.status === "pending" && task.pendingReply?.sendAt != null) {
-			if (task.pendingReply.sendAt <= this.now()) {
-				if (this.hasAwaitingRetiredResult()) {
-					task.detail = { code: "checking_previous_send_before_sending" };
-					return { task: this.state(), isOwner: true, command: null };
-				}
-				const { commandId, chatId, expectedRevision, text } = task.pendingReply;
-				command = this.connector.claimSend({ commandId, chatId, expectedRevision, text });
-				if (command) {
-					const attempt = {
-						command,
-						taskId: task.id,
-						connectorId,
-						context: textContext(copy),
-						authorized: false,
-						retired: false,
-						awaitingRetiredResult: false,
-						sendNowRequested: false,
-						deadline: this.now() + SEND_RESULT_TIMEOUT_MS,
-					};
-					this.inFlight = attempt;
-					this.attempts.set(commandId, attempt);
-					this.scheduleAttemptTimeout();
-					task.pendingReply = null;
-					task.status = "sending";
-					task.detail = { code: "checking_conversation_before_sending" };
-				} else {
-					this.pauseForDisconnect("reply_unverifiable");
-				}
-			}
-		}
+		const command = this.claimDueSend(task, connectorId, copy);
 		return { task: this.state(), isOwner: true, command };
 	}
 
@@ -641,7 +394,6 @@ export class TaskService {
 			// A confirmed send ends with a one-shot completion check instead of
 			// idling behind the outgoing guard. Racing incoming content keeps
 			// its full evaluation, which may still reply.
-			const current = this.connector.readConversation();
 			const latest = current && latestMessage(current);
 			if (!current || current.revision === attempt.command.expectedRevision || latest?.direction !== "incoming") {
 				this.evaluationReason = "reply_sent";
@@ -670,6 +422,263 @@ export class TaskService {
 		this.connector.updateConversation(null);
 	}
 
+	private editReply(task: TaskState): void {
+		if (task.status === "sending" && this.inFlight) {
+			if (this.inFlight.authorized) {
+				this.invalidate(true);
+				task.status = "needs_user";
+				task.detail = { code: "send_may_have_completed_before_editing" };
+				return;
+			}
+			const command = this.inFlight.command;
+			this.invalidate(true);
+			task.pendingReply = { ...command, commandId: randomUUID(), sendAt: null };
+			task.status = "pending";
+		}
+		if (task.status !== "pending" || !task.pendingReply) throw new Error("There is no reply to edit.");
+		task.pendingReply.sendAt = null;
+		task.status = "editing";
+		task.detail = { code: "countdown_stopped_while_editing" };
+	}
+
+	private saveEdit(task: TaskState, text: string | undefined): void {
+		if (task.status !== "editing" || !task.pendingReply) throw new Error("There is no reply being edited.");
+		const updated = checkedReply(text);
+		task.pendingReply.text = updated;
+		task.pendingReply.sendAt = null;
+		task.status = "pending";
+		task.detail = { code: "edited_reply_saved" };
+		this.appendAgentChat("event", `Reply edited to: ${updated}`);
+	}
+
+	private sendNow(task: TaskState): void {
+		// The countdown can hand the reply to the tab while this request is
+		// in flight. The tab may reject that claim, so keep the request.
+		if (task.status === "sending" && this.inFlight) {
+			if (!this.inFlight.authorized) this.inFlight.sendNowRequested = true;
+			return;
+		}
+		if (task.status !== "pending" || !task.pendingReply) throw new Error("There is no reply ready to send.");
+		if (!this.leaseActive()) throw new Error("The agent tab is disconnected.");
+		task.pendingReply.sendAt = this.now();
+		task.detail = { code: "sending_when_tab_checks_in" };
+	}
+
+	private cancelReply(task: TaskState): void {
+		if (!["thinking", "pending", "editing", "sending"].includes(task.status)) {
+			throw new Error("There is no reply to cancel.");
+		}
+		const snapshot = this.connector.readConversation();
+		if (snapshot) this.suppressAttempt(snapshot.revision, textContext(snapshot));
+		const uncertain = this.invalidate(true);
+		task.pendingReply = null;
+		// Cancelling during the post-send completion check must leave the
+		// task waiting, not re-run the check on the next sync.
+		this.evaluationReason = "new_message";
+		task.status = uncertain ? "needs_user" : "waiting";
+		task.detail = uncertain ? { code: "send_may_have_completed_before_resuming" } : { code: "reply_cancelled_waiting" };
+		this.appendAgentChat("event", uncertain ? "Cancel requested; the send may have completed." : "Reply cancelled.");
+	}
+
+	private regenerateReply(task: TaskState): void {
+		const cancelledWaiting = task.status === "waiting" && task.detail?.code === "reply_cancelled_waiting";
+		if (!((task.status === "pending" || task.status === "editing") && task.pendingReply) && !cancelledWaiting) {
+			throw new Error("There is no reply to regenerate.");
+		}
+		if (this.hasAwaitingRetiredResult() || this.requiresVerification) {
+			throw new Error("A previous send is still being checked. Try again shortly.");
+		}
+		const snapshot = this.connector.readConversation();
+		if (!this.leaseActive() || !snapshot || snapshot.chatId !== task.chatId) {
+			throw new Error("Reconnect the agent tab to the original conversation first.");
+		}
+		const rejected = task.pendingReply?.text ?? null;
+		const uncertain = this.invalidate(true);
+		if (uncertain) {
+			task.pendingReply = null;
+			task.status = "needs_user";
+			task.detail = { code: "send_may_have_completed_before_resuming" };
+			this.appendAgentChat("event", "Regenerate requested; the send may have completed.");
+			return;
+		}
+		if (rejected) this.appendAgentChat("event", "Previous proposal discarded; drafting a fresh alternative.", rejected);
+		else this.appendAgentChat("event", "Regenerating a fresh proposal.");
+		this.autoCountdown = null;
+		this.processedRevisions.delete(snapshot.revision);
+		this.suppressedRevisions.delete(snapshot.revision);
+		this.suppressedContexts.delete(textContext(snapshot));
+		this.evaluationReason = "regenerate_requested";
+		task.pendingReply = null;
+		task.status = "waiting";
+		task.detail = null;
+		this.maybeGenerate();
+	}
+
+	private pauseTask(task: TaskState): void {
+		if (isTaskEnded(task.status)) throw new Error("This task has ended.");
+		const discarded = task.pendingReply;
+		const unstarted = this.inFlight && !this.inFlight.authorized ? this.inFlight.command : null;
+		const uncertain = this.invalidate(true);
+		if (discarded && !uncertain) this.processedRevisions.delete(discarded.expectedRevision);
+		if (unstarted && !uncertain) this.processedRevisions.delete(unstarted.expectedRevision);
+		task.pendingReply = null;
+		task.status = "paused";
+		task.detail =
+			uncertain || this.requiresVerification
+				? { code: "paused_send_may_have_completed" }
+				: this.hasAwaitingRetiredResult()
+					? { code: "paused_checking_previous_send" }
+					: { code: "paused_by_you" };
+		return;
+	}
+
+	private resumeTask(task: TaskState): void {
+		if (task.status !== "paused" && task.status !== "needs_user") throw new Error("The task is not paused.");
+		const snapshot = this.connector.readConversation();
+		if (!this.leaseActive() || !snapshot || snapshot.chatId !== task.chatId) {
+			throw new Error("Reconnect the agent tab to the original conversation first.");
+		}
+		this.invalidate();
+		this.requiresVerification = false;
+		this.evaluationReason = "user_resumed";
+		this.processedRevisions.delete(snapshot.revision);
+		task.pendingReply = null;
+		task.status = "waiting";
+		task.detail = null;
+		this.maybeGenerate();
+	}
+
+	private takeOverTask(task: TaskState): void {
+		const uncertain = this.invalidate(true);
+		task.pendingReply = null;
+		task.status = "taken_over";
+		task.detail =
+			uncertain || this.requiresVerification
+				? { code: "taken_over_send_may_have_completed" }
+				: this.hasAwaitingRetiredResult()
+					? { code: "taken_over_checking_previous_send" }
+					: { code: "taken_over_in_control" };
+		this.scheduleRetention(task.id);
+	}
+
+	private acceptUserText(task: TaskState, action: "update-goal" | "answer-agent", text: string | undefined): void {
+		if (isTaskEnded(task.status)) throw new Error("This task has ended.");
+		const value = checkedText(text);
+		const wasPaused = task.status === "paused";
+		const uncertain = this.invalidate(true);
+		if (action === "update-goal") {
+			task.goal = value;
+			this.appendAgentChat("event", "Instructions updated.");
+		} else {
+			this.appendAgentChat("user", value);
+		}
+		task.pendingReply = null;
+		if (uncertain || this.requiresVerification) {
+			task.status = wasPaused ? "paused" : "needs_user";
+			task.detail = { code: "send_may_have_completed_before_resuming" };
+			return;
+		}
+		this.processedRevisions.clear();
+		const current = this.connector.readConversation();
+		if (current && current.chatId === task.chatId) {
+			this.suppressedRevisions.delete(current.revision);
+			this.suppressedContexts.delete(textContext(current));
+		}
+		this.evaluationReason = "instructions_updated";
+		if (task.status === "paused") return;
+		task.status = "waiting";
+		task.detail = null;
+		this.maybeGenerate();
+	}
+
+	private pauseForUnreadableView(task: TaskState, snapshot: ConversationSnapshot | null): void {
+		// A photo that is still loading or a brief scroll can make the view
+		// unreadable across several syncs. Preserve only this automatic pause.
+		const resumable =
+			!snapshot &&
+			(["waiting", "thinking"].includes(task.status) ||
+				(task.status === "pending" && task.pendingReply?.sendAt != null) ||
+				(task.status === "paused" && this.resumeWhenReadable)) &&
+			!this.inFlight &&
+			!this.requiresVerification;
+		// Failed reads still prove the owner is connected. A missing heartbeat
+		// must expire this recovery permission just like any other connection.
+		if (resumable) this.touch();
+		else this.leaseUntil = 0;
+		this.pauseForDisconnect(
+			snapshot
+				? "tab_changed_conversations"
+				: resumable
+					? "conversation_unavailable_resumable"
+					: "conversation_unavailable",
+		);
+		this.resumeWhenReadable = resumable;
+	}
+
+	private applyRevisionChange(task: TaskState, copy: ConversationSnapshot, edited: boolean): void {
+		// Our own outgoing bubble can land while the post-send completion
+		// check is running. Re-run that check on the new snapshot instead
+		// of dropping it to the outgoing guard; genuinely new incoming
+		// content still invalidates into a full evaluation.
+		const postSendRerun =
+			task.status === "thinking" &&
+			this.generation !== null &&
+			this.evaluationReason === "reply_sent" &&
+			latestMessage(copy)?.direction === "outgoing";
+		if (!["paused", "needs_user"].includes(task.status)) {
+			this.evaluationReason = edited ? "message_edited" : "new_message";
+			if (postSendRerun) this.evaluationReason = "reply_sent";
+		}
+		// After authorization, a new revision can be the outgoing bubble
+		// itself. Keep the attempt until its explicit report arrives.
+		if (!(task.status === "sending" && this.inFlight?.authorized)) {
+			const uncertain = this.invalidate();
+			task.pendingReply = null;
+			if (uncertain) {
+				task.status = "needs_user";
+				task.detail = { code: "send_may_have_completed_before_resuming" };
+				this.appendAgentChat("event", "The send may have completed.");
+			} else if (!["paused", "needs_user", "completed", "taken_over"].includes(task.status)) {
+				task.status = "waiting";
+				task.detail = null;
+			}
+		}
+	}
+
+	// Hand a due reply to the owning tab. A failed claim pauses the task.
+	private claimDueSend(task: TaskState, connectorId: string, snapshot: ConversationSnapshot): SendReplyCommand | null {
+		const pending = task.pendingReply;
+		if (task.status !== "pending" || pending?.sendAt == null || pending.sendAt > this.now()) return null;
+		if (this.hasAwaitingRetiredResult()) {
+			task.detail = { code: "checking_previous_send_before_sending" };
+			return null;
+		}
+		const { commandId, chatId, expectedRevision, text } = pending;
+		const command = this.connector.claimSend({ commandId, chatId, expectedRevision, text });
+		if (!command) {
+			this.pauseForDisconnect("reply_unverifiable");
+			return null;
+		}
+		const attempt = {
+			command,
+			taskId: task.id,
+			connectorId,
+			context: textContext(snapshot),
+			authorized: false,
+			retired: false,
+			awaitingRetiredResult: false,
+			sendNowRequested: false,
+			deadline: this.now() + SEND_RESULT_TIMEOUT_MS,
+		};
+		this.inFlight = attempt;
+		this.attempts.set(commandId, attempt);
+		this.scheduleAttemptTimeout();
+		task.pendingReply = null;
+		task.status = "sending";
+		task.detail = { code: "checking_conversation_before_sending" };
+		return command;
+	}
+
 	private state(): TaskState | null {
 		return this.task ? structuredClone(this.task) : null;
 	}
@@ -683,16 +692,8 @@ export class TaskService {
 	}
 
 	private appendEditEvent(edit: ObservedEdit): void {
-		const who = editedMessageLabel(edit);
-		const article = /^[aeiou]/i.test(who) ? "An" : "A";
-		// Untrusted conversation history, like the conversation itself. The
-		// current text in the snapshot is the sender's statement; the previous
-		// text is only what it said before.
-		this.appendAgentChat(
-			"event",
-			`${article} ${who} was corrected (not a new message).`,
-			`Previous text: ${edit.before}\nCurrent text: ${edit.after}`,
-		);
+		const { text, body } = describeEdit(edit);
+		this.appendAgentChat("event", text, body);
 	}
 
 	private erase(): void {
@@ -910,21 +911,27 @@ export class TaskService {
 				this.suppressedContexts.has(textContext(snapshot)))
 		)
 			return;
+		if (this.holdForLatestMessage(task, snapshot)) return;
+		this.startEvaluation(task, snapshot);
+	}
+
+	// Reports whether the latest message keeps the model from being consulted.
+	private holdForLatestMessage(task: TaskState, snapshot: ConversationSnapshot): boolean {
 		// An unsent group event still withdraws the message before it.
 		const latest = latestMessage(snapshot);
 		if (latest?.unsent) {
 			task.status = "needs_user";
 			task.detail = { code: "latest_unsent_check_conversation" };
-			return;
+			return true;
 		}
 		if ((!latest || latest.direction === "outgoing") && this.evaluationReason === "new_message") {
 			task.detail = { code: "waiting_for_incoming" };
-			return;
+			return true;
 		}
 		if (latest?.direction === "unknown") {
 			task.status = "needs_user";
 			task.detail = { code: "latest_unknown_sender" };
-			return;
+			return true;
 		}
 		if (latest && !readableLatest(snapshot.messages, latest)) {
 			task.status = "needs_user";
@@ -936,8 +943,12 @@ export class TaskService {
 				: quoted.every((attachment) => attachment.type === "image")
 					? { code: "latest_quotes_image" }
 					: { code: "latest_quotes_media" };
-			return;
+			return true;
 		}
+		return false;
+	}
+
+	private startEvaluation(task: TaskState, snapshot: ConversationSnapshot): void {
 		task.status = "thinking";
 		task.detail =
 			this.evaluationReason === "reply_sent"
@@ -951,24 +962,24 @@ export class TaskService {
 		const taskCopy = this.state()!;
 		void this.agent.run(taskCopy, captured, reason, abort.signal).then(
 			(decision) => this.acceptDecision(epoch, captured, reason, decision),
-			() => {
-				if (this.epoch !== epoch || !this.task || this.task.status !== "thinking") return;
-				this.generation = null;
-				// A failed completion check must not block the user over a send
-				// that already succeeded: degrade to waiting, never needs_user.
-				if (reason === "reply_sent") {
-					this.processedRevisions.add(captured.revision);
-					this.evaluationReason = "new_message";
-					this.task.status = "waiting";
-					this.task.detail = { code: "reply_sent_waiting" };
-					return;
-				}
-				this.task.status = "needs_user";
-				this.task.detail = process.env.MODEL_API_KEY?.trim()
-					? { code: "model_no_decision" }
-					: { code: "model_key_missing" };
-			},
+			() => this.rejectEvaluation(epoch, captured, reason),
 		);
+	}
+
+	private rejectEvaluation(epoch: number, snapshot: ConversationSnapshot, reason: EvaluationReason): void {
+		if (this.epoch !== epoch || !this.task || this.task.status !== "thinking") return;
+		this.generation = null;
+		// A failed completion check must not block the user over a send
+		// that already succeeded: degrade to waiting, never needs_user.
+		if (reason === "reply_sent") {
+			this.markProcessed(snapshot.revision);
+			this.evaluationReason = "new_message";
+			this.task.status = "waiting";
+			this.task.detail = { code: "reply_sent_waiting" };
+			return;
+		}
+		this.task.status = "needs_user";
+		this.task.detail = process.env.MODEL_API_KEY?.trim() ? { code: "model_no_decision" } : { code: "model_key_missing" };
 	}
 
 	private acceptDecision(
@@ -1001,27 +1012,7 @@ export class TaskService {
 					task.detail = { code: "reply_sent_waiting" };
 					break;
 				}
-				let text: string;
-				try {
-					text = checkedReply(decision.text);
-					if (this.developerMode) text = checkedReply(`> ${text}`);
-				} catch {
-					task.status = "needs_user";
-					task.detail = { code: "model_invalid_reply" };
-					return;
-				}
-				const delay = this.nextReplyDelayMs();
-				const pending: PendingReply = {
-					commandId: randomUUID(),
-					chatId: task.chatId,
-					expectedRevision: snapshot.revision,
-					text,
-					sendAt: delay === null ? null : this.now() + delay,
-				};
-				task.pendingReply = pending;
-				task.status = "pending";
-				task.detail = delay === null ? { code: "auto_send_off" } : { code: "review_reply_before_send" };
-				this.autoCountdown = delay === null ? null : pending.commandId;
+				this.proposeReply(task, snapshot, decision.text);
 				break;
 			}
 			case "wait":
@@ -1048,122 +1039,28 @@ export class TaskService {
 				break;
 		}
 	}
-}
 
-function checkedText(value: string | undefined): string {
-	const text = value?.trim();
-	if (!text || text.length > MAX_TASK_TEXT_LENGTH)
-		throw new Error(`Enter text between 1 and ${MAX_TASK_TEXT_LENGTH} characters.`);
-	return text;
-}
-
-function checkedReply(value: string | undefined): string {
-	if (value && hasControlCharacters(value)) {
-		throw new Error("Replies must be a single line without control characters.");
-	}
-	return checkedText(value);
-}
-
-function latestMessage(snapshot: ConversationSnapshot): ConversationMessage | undefined {
-	return [...snapshot.messages].reverse().find((message) => message.direction !== "system" || message.unsent);
-}
-
-function readableLatest(messages: readonly ConversationMessage[], latest: ConversationMessage): boolean {
-	// Only forwarded media reads as content. Anything else attached (files,
-	// sourceless media), or media past the per-snapshot cap, still pauses for
-	// the user.
-	const slots = forwardableMediaSlots(messages);
-	const index = messages.indexOf(latest);
-	if (
-		!latest.attachments.every(
-			(attachment, position) =>
-				(attachment.type === "image" ||
-					attachment.type === "video" ||
-					attachment.type === "gif" ||
-					attachment.type === "sticker") &&
-				slots[index]?.[position],
-		)
-	)
-		return false;
-	if (!latest.text.trim() && !latest.attachments.length) return false;
-	const quote = latest.replyTo;
-	return !quote || !(quote.attachments.length || !quote.text?.trim() || !quote.context?.trim());
-}
-
-function semanticMessages(snapshot: ConversationSnapshot): string {
-	// Sender labels are attribution-only metadata outside the revision. A
-	// loading rename must not read as unverifiable content at the same revision.
-	// Inline bytes are transport, not content: the same photo re-encoded must
-	// not read as unverifiable either.
-	return JSON.stringify(snapshot.messages.map(messageContent));
-}
-
-// Reactions and other cosmetic DOM changes must not trigger another reply to
-// the same text after a send or cancellation.
-function textContext(snapshot: ConversationSnapshot): string {
-	const contents = JSON.stringify(
-		snapshot.messages.map(({ direction, text, replyTo, unsent }) => ({ direction, text, replyTo, unsent })),
-	);
-	return createHash("sha256").update(contents).digest("hex");
-}
-
-type ObservedEdit = {
-	before: string;
-	after: string;
-	direction: ConversationMessage["direction"];
-	sender: string | null;
-};
-
-function stableKey(message: ConversationMessage): string | null {
-	const stable = message.stableId?.trim();
-	return stable ? stable : null;
-}
-
-// Plain text messages only. Captions and attachment edits were not tested,
-// so messages with attachments, withdrawals, and system events are never
-// matched for before/after text.
-function trackable(message: ConversationMessage): string | null {
-	const stable = stableKey(message);
-	if (!stable || message.attachments.length || message.unsent || message.direction === "system") return null;
-	return stable;
-}
-
-function stableCounts(snapshot: ConversationSnapshot): Map<string, number> {
-	const counts = new Map<string, number>();
-	for (const message of snapshot.messages) {
-		const stable = stableKey(message);
-		if (!stable) continue;
-		counts.set(stable, (counts.get(stable) ?? 0) + 1);
-	}
-	return counts;
-}
-
-function findEdits(lastSeen: ReadonlyMap<string, string>, snapshot: ConversationSnapshot): ObservedEdit[] {
-	const counts = stableCounts(snapshot);
-	const edits: ObservedEdit[] = [];
-	for (const message of snapshot.messages) {
-		const stable = trackable(message);
-		if (!stable || counts.get(stable) !== 1) continue;
-		const before = lastSeen.get(stable);
-		if (before === undefined || before === message.text) continue;
-		edits.push({ before, after: message.text, direction: message.direction, sender: message.sender ?? null });
-	}
-	return edits;
-}
-
-function recordSeenTexts(lastSeen: Map<string, string>, snapshot: ConversationSnapshot): void {
-	const counts = stableCounts(snapshot);
-	for (const message of snapshot.messages) {
-		const stable = stableKey(message);
-		if (!stable || counts.get(stable) !== 1) {
-			if (stable) lastSeen.delete(stable);
-			continue;
+	private proposeReply(task: TaskState, snapshot: ConversationSnapshot, proposed: string): void {
+		let text: string;
+		try {
+			text = checkedReply(proposed);
+			if (this.developerMode) text = checkedReply(`> ${text}`);
+		} catch {
+			task.status = "needs_user";
+			task.detail = { code: "model_invalid_reply" };
+			return;
 		}
-		const tracked = trackable(message);
-		if (!tracked) {
-			lastSeen.delete(stable);
-			continue;
-		}
-		lastSeen.set(tracked, message.text);
+		const delay = this.nextReplyDelayMs();
+		const pending: PendingReply = {
+			commandId: randomUUID(),
+			chatId: task.chatId,
+			expectedRevision: snapshot.revision,
+			text,
+			sendAt: delay === null ? null : this.now() + delay,
+		};
+		task.pendingReply = pending;
+		task.status = "pending";
+		task.detail = delay === null ? { code: "auto_send_off" } : { code: "review_reply_before_send" };
+		this.autoCountdown = delay === null ? null : pending.commandId;
 	}
 }
