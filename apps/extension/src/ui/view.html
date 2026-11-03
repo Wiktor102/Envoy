@@ -210,8 +210,12 @@
 		<div id="envoy-pending" class="pending-reply" hidden>
 			<div class="pending-header">
 				<h3 data-i18n="proposedReply">Proposed reply</h3>
-				<button type="button" id="envoy-regenerate" class="ghost-btn" data-i18n="regenerate" hidden>
-					Regenerate
+				<button type="button" id="envoy-regenerate" class="ghost-btn" hidden>
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+						<path d="M21 12a9 9 0 1 1-2.64-6.36" />
+						<polyline points="21 3 21 9 15 9" />
+					</svg>
+					<span data-i18n="regenerate">Regenerate</span>
 				</button>
 			</div>
 			<p id="envoy-pending-text" class="message-text" dir="auto"></p>
@@ -237,7 +241,13 @@
 		</div>
 		<p id="envoy-agent-state" class="agent-state" role="status" hidden></p>
 		<button type="button" id="envoy-cancel-thinking" class="cancel-thinking" data-i18n="cancel" hidden>Cancel</button>
-		<button type="button" id="envoy-regenerate-waiting" data-i18n="regenerate" hidden>Regenerate</button>
+		<button type="button" id="envoy-regenerate-waiting" hidden>
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+				<path d="M21 12a9 9 0 1 1-2.64-6.36" />
+				<polyline points="21 3 21 9 15 9" />
+			</svg>
+			<span data-i18n="regenerate">Regenerate</span>
+		</button>
 		<p id="envoy-owner-hint" class="hint" role="status" hidden></p>
 		<button type="button" id="envoy-reconnect" class="primary reconnect-btn" data-i18n="reconnect" hidden>
 			Reconnect

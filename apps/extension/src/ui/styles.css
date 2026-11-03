@@ -781,8 +781,25 @@ summary .hint {
 	font-weight: 600;
 }
 
+.ghost-btn,
+#envoy-regenerate-waiting {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.ghost-btn svg {
+	width: 13px;
+	height: 13px;
+}
+
 #envoy-regenerate-waiting {
 	margin-top: 8px;
+}
+
+#envoy-regenerate-waiting svg {
+	width: 14px;
+	height: 14px;
 }
 
 #envoy-pending-text {
