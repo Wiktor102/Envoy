@@ -1,7 +1,16 @@
 <div class="toolbar">
-	<div class="tabs" role="tablist" aria-label="Chats sidebar">
-		<button type="button" role="tab" id="chats-tab" aria-selected="true">Chats</button>
-		<button type="button" role="tab" id="envoy-tab" aria-selected="false" aria-controls="envoy-panel">Envoy</button>
+	<div class="tabs" role="tablist" aria-label="Chats sidebar" data-i18n-aria-label="tabsLabel">
+		<button type="button" role="tab" id="chats-tab" aria-selected="true" data-i18n="chatsTab">Chats</button>
+		<button
+			type="button"
+			role="tab"
+			id="envoy-tab"
+			aria-selected="false"
+			aria-controls="envoy-panel"
+			data-i18n="envoyTab"
+		>
+			Envoy
+		</button>
 	</div>
 	<button
 		type="button"
@@ -14,16 +23,16 @@
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 			<circle cx="12" cy="12" r="3" />
 			<path
-				d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+				d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
 			/>
 		</svg>
-		<span>Envoy settings</span>
+		<span data-i18n="envoySettings">Envoy settings</span>
 	</button>
 </div>
 <div id="envoy-panel" role="tabpanel" aria-labelledby="envoy-tab" tabindex="0" hidden>
-	<div id="envoy-settings-popover" role="dialog" aria-label="Envoy settings" hidden>
+	<div id="envoy-settings-popover" role="dialog" aria-label="Envoy settings" data-i18n-aria-label="envoySettings" hidden>
 		<fieldset class="reply-settings" aria-describedby="envoy-delay-hint">
-			<legend>Reply sending</legend>
+			<legend data-i18n="replySending">Reply sending</legend>
 			<div class="settings-card">
 				<button
 					type="button"
@@ -32,10 +41,11 @@
 					role="switch"
 					aria-checked="true"
 				>
-					Auto-send replies <span class="switch-track" aria-hidden="true"></span>
+					<span data-i18n="autoSendReplies">Auto-send replies</span>
+					<span class="switch-track" aria-hidden="true"></span>
 				</button>
 				<div id="envoy-delay" class="setting-row delay-range" role="group" aria-labelledby="envoy-delay-label">
-					<span id="envoy-delay-label">Send after</span>
+					<span id="envoy-delay-label" data-i18n="sendAfter">Send after</span>
 					<span class="delay-inputs">
 						<input
 							type="number"
@@ -45,6 +55,7 @@
 							step="1"
 							inputmode="numeric"
 							aria-label="Shortest delay in seconds"
+							data-i18n-aria-label="shortestDelay"
 						/>
 						<span aria-hidden="true">–</span>
 						<input
@@ -55,6 +66,7 @@
 							step="1"
 							inputmode="numeric"
 							aria-label="Longest delay in seconds"
+							data-i18n-aria-label="longestDelay"
 						/>
 						<span aria-hidden="true">s</span>
 					</span>
@@ -63,7 +75,7 @@
 			<p id="envoy-delay-hint" class="hint"></p>
 		</fieldset>
 		<fieldset class="developer-settings">
-			<legend>Developer</legend>
+			<legend data-i18n="developer">Developer</legend>
 			<div class="settings-card">
 				<button
 					type="button"
@@ -71,10 +83,11 @@
 					class="setting-row setting-switch"
 					role="switch"
 					aria-label="Developer mode"
+					data-i18n-aria-label="developerMode"
 					aria-checked="false"
 					aria-controls="envoy-developer-details"
 				>
-					Dev mode <span class="switch-track" aria-hidden="true"></span>
+					<span data-i18n="devMode">Dev mode</span> <span class="switch-track" aria-hidden="true"></span>
 				</button>
 			</div>
 		</fieldset>
@@ -87,28 +100,62 @@
 				class="goal-line"
 				aria-expanded="false"
 				title="Edit instructions"
+				data-i18n-title="editInstructions"
 				hidden
 			>
-				<span class="goal-label">Goal</span>
+				<span class="goal-label" data-i18n="goal">Goal</span>
 				<span id="envoy-goal-text"></span>
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 					<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
 				</svg>
 			</button>
 		</div>
-		<div id="envoy-header-actions" class="icon-actions" role="group" aria-label="Task actions">
-			<button type="button" id="envoy-pause" class="icon-btn" aria-label="Pause" title="Pause" hidden>
+		<div
+			id="envoy-header-actions"
+			class="icon-actions"
+			role="group"
+			aria-label="Task actions"
+			data-i18n-aria-label="taskActions"
+		>
+			<button
+				type="button"
+				id="envoy-pause"
+				class="icon-btn"
+				aria-label="Pause"
+				data-i18n-aria-label="pause"
+				title="Pause"
+				data-i18n-title="pause"
+				hidden
+			>
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
 					<line x1="9" y1="5" x2="9" y2="19" />
 					<line x1="15" y1="5" x2="15" y2="19" />
 				</svg>
 			</button>
-			<button type="button" id="envoy-resume" class="icon-btn" aria-label="Resume" title="Resume" hidden>
+			<button
+				type="button"
+				id="envoy-resume"
+				class="icon-btn"
+				aria-label="Resume"
+				data-i18n-aria-label="resume"
+				title="Resume"
+				data-i18n-title="resume"
+				hidden
+			>
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 					<polygon points="6 4 20 12 6 20 6 4" />
 				</svg>
 			</button>
-			<button type="button" id="envoy-take-over" class="icon-btn" aria-label="Take over" title="Take over" hidden>
+			<button
+				type="button"
+				id="envoy-take-over"
+				class="icon-btn"
+				aria-label="Take over"
+				data-i18n-aria-label="takeOver"
+				title="Take over"
+				data-i18n-title="takeOver"
+				hidden
+			>
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 					<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
 					<polyline points="16 17 21 12 16 7" />
@@ -120,7 +167,9 @@
 				id="envoy-delete"
 				class="icon-btn danger"
 				aria-label="Delete task"
+				data-i18n-aria-label="deleteTask"
 				title="Delete task"
+				data-i18n-title="deleteTask"
 				hidden
 			>
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -134,45 +183,59 @@
 	</header>
 	<p id="envoy-error" role="alert" hidden></p>
 	<section id="envoy-instructions" aria-labelledby="envoy-goal-title" hidden>
-		<h2 id="envoy-goal-title">Your instructions</h2>
+		<h2 id="envoy-goal-title" data-i18n="yourInstructions">Your instructions</h2>
 		<p id="envoy-conversation-notice" class="hint" role="status" hidden></p>
-		<label for="envoy-goal">Goal and limits</label>
+		<label for="envoy-goal" data-i18n="goalAndLimits">Goal and limits</label>
 		<textarea
 			id="envoy-goal"
 			rows="4"
 			aria-describedby="envoy-goal-hint"
 			placeholder="Arrange a coffee next week. I’m free Tuesday or Thursday after 3 pm. Ask me before confirming a place."
+			data-i18n-placeholder="goalPlaceholder"
 		></textarea>
 		<p id="envoy-goal-hint" class="hint"></p>
 		<div class="controls goal-controls">
-			<button type="button" id="envoy-start" class="primary">Start task</button>
-			<button type="button" id="envoy-update-goal" class="primary" hidden>Update instructions</button>
+			<button type="button" id="envoy-start" class="primary" data-i18n="startTask">Start task</button>
+			<button type="button" id="envoy-update-goal" class="primary" data-i18n="updateInstructions" hidden>
+				Update instructions
+			</button>
 		</div>
 	</section>
-	<section id="envoy-thread" aria-label="Conversation with Envoy" hidden>
+	<section id="envoy-thread" aria-label="Conversation with Envoy" data-i18n-aria-label="conversationWithEnvoy" hidden>
 		<p id="envoy-task-notice" class="hint" role="status" hidden></p>
-		<p id="envoy-agent-empty" class="hint">Envoy's questions and your answers will appear here.</p>
-		<ol id="envoy-agent-messages" aria-label="Conversation with Envoy"></ol>
+		<p id="envoy-agent-empty" class="hint" data-i18n="agentEmpty">
+			Envoy's questions and your answers will appear here.
+		</p>
+		<ol id="envoy-agent-messages" aria-label="Conversation with Envoy" data-i18n-aria-label="conversationWithEnvoy"></ol>
 		<div id="envoy-pending" class="pending-reply" hidden>
-			<h3>Proposed reply</h3>
+			<h3 data-i18n="proposedReply">Proposed reply</h3>
 			<p id="envoy-pending-text" class="message-text" dir="auto"></p>
 			<p id="envoy-countdown"></p>
 			<div id="envoy-editor" hidden>
-				<label for="envoy-reply-edit">Edit reply</label>
+				<label for="envoy-reply-edit" data-i18n="editReply">Edit reply</label>
 				<textarea id="envoy-reply-edit" rows="4" aria-describedby="envoy-edit-hint"></textarea>
-				<button type="button" id="envoy-save-edit" class="primary">Save reply</button>
+				<button type="button" id="envoy-save-edit" class="primary" data-i18n="saveReply">Save reply</button>
 				<p id="envoy-edit-hint" class="hint">Saving keeps the reply paused. Use Send now when it is ready.</p>
 			</div>
-			<div id="envoy-reply-controls" class="controls reply-controls" aria-label="Reply controls" role="group" hidden>
-				<button type="button" id="envoy-send-now" class="primary">Send now</button>
-				<button type="button" id="envoy-edit">Edit</button>
-				<button type="button" id="envoy-cancel">Cancel reply</button>
+			<div
+				id="envoy-reply-controls"
+				class="controls reply-controls"
+				aria-label="Reply controls"
+				data-i18n-aria-label="replyControls"
+				role="group"
+				hidden
+			>
+				<button type="button" id="envoy-send-now" class="primary" data-i18n="sendNow">Send now</button>
+				<button type="button" id="envoy-edit" data-i18n="edit">Edit</button>
+				<button type="button" id="envoy-cancel" data-i18n="cancelReply">Cancel reply</button>
 			</div>
 		</div>
 		<p id="envoy-agent-state" class="agent-state" role="status" hidden></p>
-		<button type="button" id="envoy-cancel-thinking" class="cancel-thinking" hidden>Cancel</button>
+		<button type="button" id="envoy-cancel-thinking" class="cancel-thinking" data-i18n="cancel" hidden>Cancel</button>
 		<p id="envoy-owner-hint" class="hint" role="status" hidden></p>
-		<button type="button" id="envoy-reconnect" class="primary reconnect-btn" hidden>Reconnect</button>
+		<button type="button" id="envoy-reconnect" class="primary reconnect-btn" data-i18n="reconnect" hidden>
+			Reconnect
+		</button>
 		<p id="envoy-delete-hint" class="hint" hidden></p>
 	</section>
 	<footer id="envoy-footer" hidden>
@@ -181,15 +244,19 @@
 				id="envoy-answer-text"
 				rows="2"
 				aria-label="Answer Envoy"
+				data-i18n-aria-label="answerEnvoy"
 				aria-describedby="envoy-answer-hint"
 				placeholder="Answer Envoy; instructions stay as they are."
+				data-i18n-placeholder="answerPlaceholder"
 			></textarea>
 			<button
 				type="button"
 				id="envoy-answer-send"
 				class="icon-btn primary"
 				aria-label="Send answer"
+				data-i18n-aria-label="sendAnswer"
 				title="Send answer"
+				data-i18n-title="sendAnswer"
 			>
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 					<line x1="22" y1="2" x2="11" y2="13" />
@@ -201,22 +268,31 @@
 	</footer>
 	<div id="envoy-developer-details" hidden>
 		<section aria-labelledby="envoy-conversation-title">
-			<h2 id="envoy-conversation-title">Conversation diagnostics</h2>
+			<h2 id="envoy-conversation-title" data-i18n="conversationDiagnostics">Conversation diagnostics</h2>
 			<p id="envoy-chat-id" class="chat-id">No conversation selected.</p>
 			<p id="envoy-chat-name" class="chat-id" hidden></p>
 			<p id="envoy-task-id" class="chat-id" hidden></p>
 			<p id="envoy-task-chat" class="chat-id" hidden></p>
 			<p id="envoy-conversation-status" class="secondary-text">Open a conversation to read its messages.</p>
 			<details class="conversation-preview">
-				<summary>Message preview <span class="hint">Latest 5</span></summary>
-				<p class="hint">Only messages currently loaded in Messenger are available to Envoy.</p>
-				<p id="envoy-conversation-empty" class="empty-state">No messages loaded yet.</p>
-				<ol id="envoy-conversation" aria-label="Latest loaded messages"></ol>
+				<summary>
+					<span data-i18n="messagePreview">Message preview</span>
+					<span class="hint" data-i18n="latestFive">Latest 5</span>
+				</summary>
+				<p class="hint" data-i18n="previewScopeHint">
+					Only messages currently loaded in Messenger are available to Envoy.
+				</p>
+				<p id="envoy-conversation-empty" class="empty-state" data-i18n="noMessagesLoaded">No messages loaded yet.</p>
+				<ol
+					id="envoy-conversation"
+					aria-label="Latest loaded messages"
+					data-i18n-aria-label="latestLoadedMessages"
+				></ol>
 			</details>
 		</section>
 		<details class="diagnostics">
-			<summary>Backend connection</summary>
-			<button type="button" id="envoy-health">Check backend health</button>
+			<summary data-i18n="backendConnection">Backend connection</summary>
+			<button type="button" id="envoy-health" data-i18n="checkBackendHealth">Check backend health</button>
 			<p id="envoy-health-status" class="hint" role="status"></p>
 		</details>
 	</div>

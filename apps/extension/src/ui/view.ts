@@ -10,20 +10,21 @@ import {
 	type TaskStatus,
 } from "@envoy/contracts";
 import type { ControllerState, EnvoyController } from "../controller";
+import { detectLocale, format, getStrings, observeLocaleChange, type ExtensionStrings } from "../i18n";
 import { isolateTextInput } from "./text-input";
 import styles from "./styles.css?inline";
 import markup from "./view.html?raw";
 
-const statusLabels: Record<TaskStatus, string> = {
-	thinking: "Thinking",
-	waiting: "Waiting for a new message",
-	pending: "Reply ready",
-	editing: "Reply paused for editing",
-	sending: "Sending reply",
-	paused: "Paused",
-	needs_user: "Needs your input",
-	completed: "Completed",
-	taken_over: "Taken over",
+const statusKeys: Record<TaskStatus, keyof ExtensionStrings> = {
+	thinking: "statusThinking",
+	waiting: "statusWaiting",
+	pending: "statusPending",
+	editing: "statusEditing",
+	sending: "statusSending",
+	paused: "statusPaused",
+	needs_user: "statusNeedsUser",
+	completed: "statusCompleted",
+	taken_over: "statusTakenOver",
 };
 
 // Markup is static. Conversation and model text are inserted as text, never HTML.
@@ -50,6 +51,36 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const container = document.createElement("div");
 	container.innerHTML = markup;
 	shadow.append(style, container);
+
+	let strings = getStrings(detectLocale());
+
+	function localized(key: string | undefined): string | null {
+		if (!key || !(key in strings)) return null;
+		return strings[key as keyof ExtensionStrings];
+	}
+
+	// Static labels live in the markup under data-i18n attributes; dynamic
+	// text is set from the same table during render.
+	function applyStaticStrings() {
+		for (const target of container.querySelectorAll<HTMLElement>("[data-i18n]")) {
+			const text = localized(target.dataset.i18n);
+			if (text !== null) target.textContent = text;
+		}
+		const attributes = [
+			["i18nAriaLabel", "aria-label"],
+			["i18nTitle", "title"],
+			["i18nPlaceholder", "placeholder"],
+		] as const;
+		for (const target of container.querySelectorAll<HTMLElement>(
+			"[data-i18n-aria-label], [data-i18n-title], [data-i18n-placeholder]",
+		)) {
+			for (const [datasetKey, attribute] of attributes) {
+				const text = localized(target.dataset[datasetKey]);
+				if (text !== null) target.setAttribute(attribute, text);
+			}
+		}
+	}
+	applyStaticStrings();
 
 	function element<T extends HTMLElement>(selector: string): T {
 		const result = container.querySelector<T>(selector);
@@ -124,7 +155,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 
 	let state: ControllerState = {
 		snapshot: null,
-		conversationStatus: "Open a conversation to read its messages.",
+		conversationStatus: strings.openConversation,
 		task: null,
 		isOwner: false,
 		error: null,
@@ -284,11 +315,11 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 
 	function renderConversation() {
 		const snapshot = state.snapshot;
-		chatId.textContent = snapshot ? `Chat: ${snapshot.chatId}` : "No conversation selected.";
+		chatId.textContent = snapshot ? format(strings.chatLine, { id: snapshot.chatId }) : strings.noConversation;
 		// Unverified header display string. Hidden when the header is missing
 		// or ambiguous; never a verified-person claim.
 		const name = snapshot?.participants[0] ?? null;
-		chatName.textContent = name ? `Chat name: ${name}` : "";
+		chatName.textContent = name ? format(strings.chatNameLine, { name }) : "";
 		chatName.hidden = !name;
 		conversationStatus.textContent = state.conversationStatus;
 		conversationNotice.textContent = snapshot ? "" : state.conversationStatus;
@@ -304,25 +335,25 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		// Groups and ambiguous headers leave participants empty, keeping the
 		// generic label. A known per-message label names that bubble's sender
 		// instead; it is display data, never a verified identity.
-		const incomingLabel = snapshot.participants[0] ?? "Other person";
+		const incomingLabel = snapshot.participants[0] ?? strings.incomingLabel;
 		for (const message of snapshot.messages.slice(-5)) {
 			const item = document.createElement("li");
 			item.dataset.direction = message.direction;
 			const sender = document.createElement("strong");
 			sender.textContent =
 				message.direction === "outgoing"
-					? "You"
+					? strings.you
 					: message.direction === "incoming"
 						? (message.sender ?? incomingLabel)
 						: message.direction === "system"
-							? "System"
-							: "Unknown sender";
+							? strings.systemName
+							: strings.unknownSender;
 			const text = document.createElement("span");
 			text.className = "message-text";
 			text.dir = "auto";
 			text.textContent = message.unsent
-				? "[Unsent message]"
-				: message.text || (message.attachments.length ? "[Attachment]" : "[Empty message]");
+				? strings.unsentPlaceholder
+				: message.text || (message.attachments.length ? strings.attachmentPlaceholder : strings.emptyPlaceholder);
 			item.append(sender, text);
 			conversation.append(item);
 		}
@@ -331,14 +362,14 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	function renderCountdown() {
 		const task = state.task;
 		if (task?.status === "sending") {
-			countdown.textContent = "Sending...";
+			countdown.textContent = strings.sendingNow;
 		} else if (!task?.pendingReply) {
 			countdown.textContent = "";
 		} else if (task.pendingReply.sendAt !== null && task.status === "pending") {
 			const seconds = Math.max(0, Math.ceil((task.pendingReply.sendAt - Date.now()) / 1000));
-			countdown.textContent = seconds > 0 ? `Sending in ${seconds}s.` : "Waiting to send...";
+			countdown.textContent = seconds > 0 ? format(strings.sendingIn, { seconds }) : strings.waitingToSend;
 		} else {
-			countdown.textContent = replySettings.autoSend ? "Automatic sending is stopped." : "Waiting for Send now.";
+			countdown.textContent = replySettings.autoSend ? strings.autoSendStopped : strings.waitingSendNow;
 		}
 	}
 
@@ -347,8 +378,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	function countText(value: string): string {
 		const length = value.trim().length;
 		return (
-			`${length} / ${MAX_TASK_TEXT_LENGTH} characters` +
-			(length > MAX_TASK_TEXT_LENGTH ? ". Too long, shorten the text." : "")
+			`${length} / ${MAX_TASK_TEXT_LENGTH} ${strings.charsUnit}` +
+			(length > MAX_TASK_TEXT_LENGTH ? strings.tooLong : "")
 		);
 	}
 
@@ -369,8 +400,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		displayedTaskOwner = owner;
 
 		goal.disabled = busy || Boolean(active && !owner);
-		goalHint.textContent =
-			(active ? "Changes apply after you choose Update instructions. " : "") + countText(goal.value);
+		goalHint.textContent = (active ? strings.goalUpdateNote : "") + countText(goal.value);
 		goalHint.hidden = false;
 		const goalOverLimit = goal.value.trim().length > MAX_TASK_TEXT_LENGTH;
 		const { autoSend, minDelaySeconds, maxDelaySeconds } = replySettings;
@@ -380,11 +410,11 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		delayMax.disabled = !autoSend;
 		delayHint.textContent =
 			(!autoSend
-				? "Replies wait until you choose Send now."
+				? strings.delayManual
 				: minDelaySeconds === maxDelaySeconds
-					? `Replies send after a ${minDelaySeconds}-second countdown.`
-					: `Replies send after a random ${minDelaySeconds}–${maxDelaySeconds}-second countdown.`) +
-			(active ? " Changes apply right away." : "");
+					? format(strings.delayFixed, { min: minDelaySeconds })
+					: format(strings.delayRandom, { min: minDelaySeconds, max: maxDelaySeconds })) +
+			(active ? strings.delayAppliesNow : "");
 		startButton.hidden = active;
 		startButton.disabled = busy || !state.snapshot || !goal.value.trim() || goalOverLimit;
 		updateGoalButton.hidden = !active;
@@ -398,16 +428,16 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		thread.hidden = !task;
 		thread.dataset.status = task?.status ?? "idle";
 
-		taskId.textContent = task ? `Task ID: ${task.id}` : "";
+		taskId.textContent = task ? format(strings.taskIdLine, { id: task.id }) : "";
 		taskId.hidden = !task;
-		taskChat.textContent = task ? `Task chat: ${task.chatId}` : "";
+		taskChat.textContent = task ? format(strings.taskChatLine, { id: task.chatId }) : "";
 		taskChat.hidden = !task || currentChat;
-		taskNotice.textContent = "This task belongs to another conversation. Reopen its dedicated tab to continue.";
+		taskNotice.textContent = strings.taskElsewhere;
 		taskNotice.hidden = !task || !state.snapshot || currentChat;
 		const chat = owner && task ? task.agentChat : [];
-		const baseState = task ? (task.detail ?? `${statusLabels[task.status]}.`) : "";
+		const baseState = task ? (task.detail ?? `${strings[statusKeys[task.status]]}.`) : "";
 		const lastAgent = [...chat].reverse().find((message) => message.role === "agent");
-		agentState.textContent = baseState + (task && active && !owner ? " (Not connected to this tab.)" : "");
+		agentState.textContent = baseState + (task && active && !owner ? strings.notConnectedNote : "");
 		agentState.hidden = !task || baseState === lastAgent?.text;
 		agentState.dataset.status = task?.status ?? "idle";
 		agentEmpty.hidden = chat.length !== 0 || !active || !owner;
@@ -437,7 +467,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 				} else {
 					if (message.role !== "event") {
 						const sender = document.createElement("strong");
-						sender.textContent = message.role === "agent" ? "Envoy" : "You";
+						sender.textContent = message.role === "agent" ? strings.agentName : strings.you;
 						item.append(sender);
 					}
 					const text = document.createElement("span");
@@ -482,7 +512,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			busy || !owner || !currentChat || !(task?.status === "sending" || (task?.status === "pending" && pending));
 		cancelButton.disabled =
 			busy || !owner || !task || !["thinking", "pending", "editing", "sending"].includes(task.status);
-		editHint.textContent = `Saving keeps the reply paused. Use Send now when it is ready. ${countText(editText.value)}`;
+		editHint.textContent = `${strings.saveEditNote} ${countText(editText.value)}`;
 		saveEditButton.disabled =
 			busy || !editing || !editText.value.trim() || editText.value.trim().length > MAX_TASK_TEXT_LENGTH;
 		editText.disabled = busy;
@@ -501,13 +531,9 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			!task ||
 			(goalToggle.hidden && pauseButton.hidden && resumeButton.hidden && takeoverButton.hidden && deleteButton.hidden);
 		ownerHint.hidden = !(task && !owner && active);
-		ownerHint.textContent = showReconnect
-			? "This task is paused. Reconnect to control it from this tab."
-			: "This task is controlled by another tab.";
+		ownerHint.textContent = showReconnect ? strings.ownerPaused : strings.ownerElsewhere;
 		deleteHint.hidden = deleteButton.hidden;
-		deleteHint.textContent =
-			"Check the conversation for any unconfirmed send before deleting this task." +
-			(owner ? "" : " The original tab must disconnect first.");
+		deleteHint.textContent = strings.deleteCheck + (owner ? "" : strings.deleteDisconnect);
 		const message = localError ?? state.error;
 		error.textContent = message ?? "";
 		error.hidden = !message;
@@ -522,7 +548,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		try {
 			await action();
 		} catch {
-			localError = state.error ?? "Could not complete that action. Check the connection and try again.";
+			localError = state.error ?? strings.actionFailedFallback;
 		} finally {
 			busy = false;
 			render();
@@ -592,11 +618,13 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	});
 	healthButton.addEventListener("click", async () => {
 		healthButton.disabled = true;
-		healthStatus.textContent = "Checking backend...";
+		healthStatus.textContent = strings.checkingBackend;
 		try {
-			healthStatus.textContent = (await controller.checkHealth()) ? "Backend healthy." : "Backend unavailable.";
+			healthStatus.textContent = (await controller.checkHealth())
+				? strings.backendHealthy
+				: strings.backendUnavailable;
 		} catch {
-			healthStatus.textContent = "Backend unavailable.";
+			healthStatus.textContent = strings.backendUnavailable;
 		} finally {
 			healthButton.disabled = false;
 		}
@@ -604,6 +632,15 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 
 	const unsubscribe = controller.subscribe((next) => {
 		state = next;
+		render();
+	});
+	// Controller and conversation statuses keep the language they arrived in
+	// until their next update; everything rendered here switches right away.
+	const stopLocale = observeLocaleChange((next) => {
+		strings = getStrings(next);
+		renderedConversation = null;
+		renderedAgentChat = null;
+		applyStaticStrings();
 		render();
 	});
 	const countdownTimer = window.setInterval(renderCountdown, 1000);
@@ -616,6 +653,7 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		destroy() {
 			destroyed = true;
 			themeObserver.disconnect();
+			stopLocale();
 			unsubscribe();
 			document.removeEventListener("pointerdown", closeSettingsOnOutsidePointer);
 			window.clearInterval(countdownTimer);

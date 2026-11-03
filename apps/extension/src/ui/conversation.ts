@@ -1,21 +1,31 @@
 import { messageContent } from "@envoy/contracts";
 import type { ConversationSnapshot } from "@envoy/contracts";
+import { detectLocale, getStrings, loadedMessagesText } from "../i18n";
 import { ConversationUnavailableError, messengerChatAdapter } from "../messenger/chat-adapter";
 
 export function conversationErrorStatus(error: unknown): string {
+	const strings = getStrings();
 	if (error instanceof ConversationUnavailableError) {
 		switch (error.reason) {
 			case "navigated":
-				return "The selected chat changed. Reload this tab to use Envoy in it.";
+				return strings.chatChanged;
 			case "unsupported":
-				return "Some messages can't be read. Envoy is paused for this conversation.";
+				return strings.unreadablePaused;
 			case "not-latest":
-				return "Can't confirm the latest messages. Scroll to the bottom or reload this tab.";
+				return strings.confirmLatest;
 			case "no-chat":
-				return "Open a conversation and reload this tab to use Envoy in it.";
+				return strings.openAndReload;
 		}
 	}
-	return "Conversation messages are unavailable or still loading.";
+	return strings.messagesUnavailable;
+}
+
+function loadedStatus(count: number): string {
+	return loadedMessagesText(detectLocale(), count);
+}
+
+function loadingStatus(): string {
+	return getStrings().loadingConversation;
 }
 
 // Observe Messenger, not the shadow-root output, so rendering never triggers another read.
@@ -35,7 +45,7 @@ export function watchConversation(onUpdate: (snapshot: ConversationSnapshot | nu
 			previousMessages = lastMessages;
 			lastMessages = null;
 			sequence++;
-			onUpdate(null, "Loading the selected conversation...");
+			onUpdate(null, loadingStatus());
 		}
 		if (timer !== undefined) return;
 		timer = setTimeout(read, Math.max(100, readyAt - Date.now()));
@@ -54,12 +64,12 @@ export function watchConversation(onUpdate: (snapshot: ConversationSnapshot | nu
 				// not a new conversation.
 				const messages = JSON.stringify(snapshot.messages.map(messageContent));
 				if (previousMessages && previousMessages !== "[]" && previousMessages === messages) {
-					onUpdate(null, "Loading the selected conversation...");
+					onUpdate(null, loadingStatus());
 					return;
 				}
 				previousMessages = null;
 				lastMessages = messages;
-				onUpdate(snapshot, `${snapshot.messages.length} loaded messages.`);
+				onUpdate(snapshot, loadedStatus(snapshot.messages.length));
 			}
 		} catch (error) {
 			if (stopped || current !== sequence) return;

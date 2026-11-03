@@ -1,4 +1,5 @@
 import type { ConnectorSyncResult, ConversationSnapshot, SendResult, TaskControlAction, TaskState } from "@envoy/contracts";
+import { getStrings } from "./i18n";
 
 // The background worker derives connector identity from Chrome's sender metadata.
 export type BackendRequest =
@@ -28,6 +29,6 @@ type BackendResponse<T> = { ok: true; value: T } | { ok: false; error: string };
 
 export async function callBackend<T extends BackendRequest>(request: T): Promise<BackendResults[T["type"]]> {
 	const response = await chrome.runtime.sendMessage<BackendRequest, BackendResponse<BackendResults[T["type"]]>>(request);
-	if (!response?.ok) throw new Error(response?.error ?? "Extension connection unavailable. Reload Messenger.");
+	if (!response?.ok) throw new Error(response?.error ?? getStrings().extensionDown);
 	return response.value;
 }
