@@ -97,10 +97,14 @@ export function createSidebarController(
 		if (!sidebar || !host.isConnected) return;
 		const sidebarRect = sidebar.getBoundingClientRect();
 		const tabRect = host.getBoundingClientRect();
+		// The detected sidebar can extend below the fold when the page
+		// scrolls. Clamp the panel to the viewport so its tail — pending
+		// reply, reply controls, answer box — stays reachable.
+		const bottom = Math.min(sidebarRect.bottom, window.innerHeight);
 		panel.style.left = `${sidebarRect.left}px`;
 		panel.style.top = `${tabRect.bottom}px`;
 		panel.style.width = `${sidebarRect.width}px`;
-		panel.style.height = `${Math.max(0, sidebarRect.bottom - tabRect.bottom)}px`;
+		panel.style.height = `${Math.max(0, bottom - tabRect.bottom)}px`;
 		// A transformed Facebook ancestor can change the origin of fixed elements.
 		if (!panel.hidden) {
 			const panelRect = panel.getBoundingClientRect();
