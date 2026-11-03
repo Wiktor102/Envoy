@@ -1,13 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ConversationMessage, MessageAttachment } from "../src/index.js";
-import {
-	attachmentIdentity,
-	forwardableImageSlots,
-	forwardableMediaSlots,
-	MAX_SNAPSHOT_IMAGES,
-	messageContent,
-} from "../src/index.js";
+import { attachmentIdentity, forwardableMediaSlots, MAX_SNAPSHOT_IMAGES, messageContent } from "../src/index.js";
 
 const media = { mime: "image/jpeg" as const, data: "AAAA", width: 4, height: 4 };
 
@@ -65,7 +59,7 @@ test("forwardable slots cover the newest images and skip the rest", () => {
 		]),
 		message([remote("http://example.test/plain"), remote(null)]),
 	];
-	assert.deepEqual(forwardableImageSlots(messages), [
+	assert.deepEqual(forwardableMediaSlots(messages), [
 		[true, true],
 		[false, true, false, true],
 		[false, false],
@@ -75,7 +69,7 @@ test("forwardable slots cover the newest images and skip the rest", () => {
 
 test("forwardable slots stop at the snapshot cap, oldest first", () => {
 	const messages = [message([remote(), remote(), remote()]), message([remote(), remote(), remote()])];
-	assert.deepEqual(forwardableImageSlots(messages), [
+	assert.deepEqual(forwardableMediaSlots(messages), [
 		[false, false, true],
 		[true, true, true],
 	]);

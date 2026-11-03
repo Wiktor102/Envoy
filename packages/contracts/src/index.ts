@@ -249,11 +249,6 @@ export type AgentDecision =
 	| { action: "ask"; text: string }
 	| { action: "finish"; text: string };
 
-export interface ConnectorSync {
-	connectorId: string;
-	snapshot: ConversationSnapshot | null;
-}
-
 export interface ConnectorSyncResult {
 	task: TaskState | null;
 	isOwner: boolean;
@@ -273,12 +268,6 @@ export type TaskControlAction =
 	| "take-over"
 	| "update-goal"
 	| "answer-agent";
-
-export interface HealthRequest {
-	type: "envoy:health";
-}
-
-export type HealthReply = { ok: true; health: HealthResponse } | { ok: false; error: "backend-unavailable" };
 
 // Transport bytes never identify content. The rendered source already feeds
 // the revision through the fingerprint; hashing base64 would only churn.
@@ -354,9 +343,4 @@ export function forwardableMediaSlots(messages: readonly ConversationMessage[]):
 		}
 	}
 	return slots;
-}
-
-// Historical name for the shared media selection above.
-export function forwardableImageSlots(messages: readonly ConversationMessage[]): boolean[][] {
-	return forwardableMediaSlots(messages);
 }
