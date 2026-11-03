@@ -805,7 +805,7 @@ test("paused, ended, and unowned tasks keep recovery actions without reply actio
 
 test("a polish page renders a polish panel", async (t) => {
 	const ui = setup(t, preferenceStorage(), "pl");
-	await flushPreferences();
+	await flush();
 	assert.equal(ui.query("#chats-tab").textContent, "Czaty");
 	assert.equal(ui.query(".tabs").getAttribute("aria-label"), "Pasek boczny czatów");
 	assert.equal(ui.element("start").textContent, "Rozpocznij zadanie");
@@ -850,12 +850,12 @@ test("the panel follows a page language switch without reload", async (t) => {
 	assert.equal(ui.query("#chats-tab").textContent, "Chats");
 	assert.equal(ui.element("agent-state").textContent, "Waiting for a new message.");
 	document.documentElement.lang = "pl";
-	await flushPreferences();
+	await flush();
 	assert.equal(ui.query("#chats-tab").textContent, "Czaty");
 	assert.equal(ui.element("agent-state").textContent, "Oczekiwanie na nową wiadomość.");
 	assert.equal(ui.element("start").textContent, "Rozpocznij zadanie");
 	document.documentElement.lang = "en";
-	await flushPreferences();
+	await flush();
 	assert.equal(ui.query("#chats-tab").textContent, "Chats");
 	assert.equal(ui.element("agent-state").textContent, "Waiting for a new message.");
 });
