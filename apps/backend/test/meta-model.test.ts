@@ -1177,6 +1177,32 @@ test("the Meta request marks edited messages and explains corrections", async ()
 	}
 });
 
+test("the system prompt invites a fresh alternative on regenerate_requested", async () => {
+	const previousKey = process.env.MODEL_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.MODEL_API_KEY = "test-key";
+	let body: any;
+	globalThis.fetch = async (input, init) => {
+		body = await new Request(input, init).json();
+		return new Response(
+			JSON.stringify({ choices: [{ message: { role: "assistant", content: '{"action":"wait"}' } }] }),
+			{
+				status: 200,
+				headers: { "content-type": "application/json" },
+			},
+		);
+	};
+	try {
+		await new MetaModelAdapter().run(task, conversation, "regenerate_requested");
+		assert.match(body.messages[1].content, /Evaluation reason: regenerate_requested/);
+		assert.match(body.messages[0].content, /fresh alternative/);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.MODEL_API_KEY;
+		else process.env.MODEL_API_KEY = previousKey;
+	}
+});
+
 test("the Meta request defaults completion tokens to 16000 with an env override", async () => {
 	const previousKey = process.env.MODEL_API_KEY;
 	const previousCap = process.env.MODEL_MAX_COMPLETION_TOKENS;

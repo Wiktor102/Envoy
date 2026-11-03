@@ -481,6 +481,39 @@ test("reply controls keep interruption actions available during thinking and sen
 	assert.deepEqual(ui.actions, ["cancel"]);
 });
 
+test("regenerate sits next to the proposal and reappears after a cancel", async (t) => {
+	const ui = setup(t);
+	const pendingReply = {
+		commandId: "reply-1",
+		chatId: snapshot.chatId,
+		expectedRevision: snapshot.revision,
+		text: "Hi",
+		sendAt: null,
+	};
+	ui.update({ task: { ...task, status: "pending", pendingReply }, isOwner: true });
+	assert.equal(ui.element("regenerate").hidden, false);
+	assert.equal(ui.element("regenerate-waiting").hidden, true);
+	ui.update({ task: { ...task, status: "editing", pendingReply }, isOwner: true });
+	assert.equal(ui.element("regenerate").hidden, false);
+	ui.element<HTMLButtonElement>("regenerate").click();
+	await flush();
+	assert.deepEqual(ui.actions, ["regenerate"]);
+	ui.update({
+		task: { ...task, status: "waiting", pendingReply: null, detail: { code: "reply_cancelled_waiting" } },
+		isOwner: true,
+	});
+	assert.equal(ui.element("regenerate").hidden, true);
+	assert.equal(ui.element("regenerate-waiting").hidden, false);
+	ui.element<HTMLButtonElement>("regenerate-waiting").click();
+	await flush();
+	assert.deepEqual(ui.actions, ["regenerate", "regenerate"]);
+	ui.update({
+		task: { ...task, status: "waiting", pendingReply: null, detail: { code: "waiting_for_message" } },
+		isOwner: true,
+	});
+	assert.equal(ui.element("regenerate-waiting").hidden, true);
+});
+
 test("the reply text stays visible while it is being sent", (t) => {
 	const ui = setup(t);
 	const pendingReply = {

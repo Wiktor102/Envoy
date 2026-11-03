@@ -208,7 +208,12 @@
 		</p>
 		<ol id="envoy-agent-messages" aria-label="Conversation with Envoy" data-i18n-aria-label="conversationWithEnvoy"></ol>
 		<div id="envoy-pending" class="pending-reply" hidden>
-			<h3 data-i18n="proposedReply">Proposed reply</h3>
+			<div class="pending-header">
+				<h3 data-i18n="proposedReply">Proposed reply</h3>
+				<button type="button" id="envoy-regenerate" class="ghost-btn" data-i18n="regenerate" hidden>
+					Regenerate
+				</button>
+			</div>
 			<p id="envoy-pending-text" class="message-text" dir="auto"></p>
 			<p id="envoy-countdown"></p>
 			<div id="envoy-editor" hidden>
@@ -232,6 +237,7 @@
 		</div>
 		<p id="envoy-agent-state" class="agent-state" role="status" hidden></p>
 		<button type="button" id="envoy-cancel-thinking" class="cancel-thinking" data-i18n="cancel" hidden>Cancel</button>
+		<button type="button" id="envoy-regenerate-waiting" data-i18n="regenerate" hidden>Regenerate</button>
 		<p id="envoy-owner-hint" class="hint" role="status" hidden></p>
 		<button type="button" id="envoy-reconnect" class="primary reconnect-btn" data-i18n="reconnect" hidden>
 			Reconnect

@@ -761,6 +761,30 @@ summary .hint {
 	border-radius: 12px;
 }
 
+.pending-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.pending-header h3 {
+	margin: 0;
+}
+
+.ghost-btn {
+	min-height: 0;
+	padding: 4px 10px;
+	border-color: var(--envoy-control-border);
+	font-size: 12px;
+	font-weight: 600;
+}
+
+#envoy-regenerate-waiting {
+	margin-top: 8px;
+}
+
 #envoy-pending-text {
 	margin: 0;
 }
