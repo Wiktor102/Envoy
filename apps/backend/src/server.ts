@@ -13,11 +13,12 @@ const server = new WebSocketServer({
 });
 applyWSSHandler({ wss: server, router: appRouter });
 
+const bind = `host ${config.host}, port ${config.port}`;
 server.on("listening", () => {
-	console.info(`Envoy backend listening on host ${config.host}, port ${config.port}`);
+	console.info(`Envoy backend listening on ${bind}`);
 });
 server.on("error", () => {
-	console.error(`Envoy backend could not start. Check host ${config.host} and port ${config.port}.`);
+	console.error(`Envoy backend could not start. Check ${bind}.`);
 	process.exitCode = 1;
 });
 

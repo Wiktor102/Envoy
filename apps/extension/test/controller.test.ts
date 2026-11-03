@@ -431,14 +431,14 @@ test("an older pageshow cannot resume a document hidden again before disconnect 
 		}
 	});
 	t.after(() => harness.controller.destroy());
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	const syncsBeforeHide = harness.calls.filter((request) => request.type === "envoy:sync").length;
 	harness.lifecycle.dispatchEvent(new Event("pagehide"));
 	await disconnectRequested.promise;
 	harness.lifecycle.dispatchEvent(new Event("pageshow"));
 	harness.lifecycle.dispatchEvent(new Event("pagehide"));
 	disconnectResponse.resolve();
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	assert.equal(harness.calls.filter((request) => request.type === "envoy:sync").length, syncsBeforeHide);
 	await assert.rejects(harness.controller.start(activeTask.goal), /unavailable/);
 	watchForResume = true;
@@ -499,7 +499,7 @@ test("watcher and heartbeat keep the same failure notice until the read changes"
 		notices.push(status);
 	});
 	await harness.controller.start(activeTask.goal);
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	const unsupported = new ConversationUnavailableError("unsupported");
 	harness.setRead(async () => {
 		throw unsupported;
@@ -508,7 +508,7 @@ test("watcher and heartbeat keep the same failure notice until the read changes"
 	for (let i = 0; i < 3; i++) {
 		harness.observeFailure(unsupported);
 		harness.tick();
-		await new Promise<void>((resolve) => setImmediate(resolve));
+		await flush();
 	}
 	assert.ok(
 		notices
@@ -520,11 +520,11 @@ test("watcher and heartbeat keep the same failure notice until the read changes"
 		throw changed;
 	});
 	harness.tick();
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	assert.equal(status, "Can't confirm the latest messages. Scroll to the bottom or reload this tab.");
 	harness.setRead(async () => initialSnapshot);
 	harness.tick();
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	assert.equal(status, "1 loaded messages.");
 });
 
@@ -561,7 +561,7 @@ test("a failed fresh read is reported even when a later read succeeds", { timeou
 		throw new Error("unavailable");
 	});
 	harness.tick();
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	// A successful watcher read may arrive before the held network response.
 	harness.observe(initialSnapshot);
 	firstHeartbeat.resolve(syncResult(activeTask));
@@ -601,7 +601,7 @@ test("a stale heartbeat read cannot overwrite a newer watcher snapshot", { timeo
 	harness.setRead(async () => newest);
 	oldRead.resolve({ ...initialSnapshot, revision: "revision-2" });
 	await freshSynced.promise;
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	assert.equal(
 		harness.calls.some((request) => request.type === "envoy:sync" && request.snapshot?.revision === "revision-2"),
 		false,
@@ -700,11 +700,11 @@ for (const change of [
 				current = syncResult({ ...sendingTask, status: change });
 		}
 		harness.tick();
-		await new Promise<void>((resolve) => setImmediate(resolve));
+		await flush();
 		if (change === "paused then sending") {
 			current = syncResult(sendingTask);
 			harness.tick();
-			await new Promise<void>((resolve) => setImmediate(resolve));
+			await flush();
 		}
 		authorization.resolve(true);
 		const report = await reported.promise;
@@ -801,13 +801,13 @@ for (const status of ["taken_over", "completed"] as const) {
 		});
 		t.after(() => harness.controller.destroy());
 		await harness.controller.start(activeTask.goal);
-		await new Promise<void>((resolve) => setImmediate(resolve));
+		await flush();
 		if (status === "taken_over") await harness.controller.control("take-over");
 		else {
 			task = { ...activeTask, status };
 			harness.tick();
 		}
-		await new Promise<void>((resolve) => setImmediate(resolve));
+		await flush();
 		assert.equal(harness.heartbeatStops, 1);
 		const endedAt = harness.calls.length;
 		const newer = {
@@ -819,9 +819,9 @@ for (const status of ["taken_over", "completed"] as const) {
 			],
 		};
 		harness.observe(newer);
-		await new Promise<void>((resolve) => setImmediate(resolve));
+		await flush();
 		t.mock.timers.tick(1000);
-		await new Promise<void>((resolve) => setImmediate(resolve));
+		await flush();
 		const polls = harness.calls.slice(endedAt).filter((request) => request.type === "envoy:sync");
 		assert.ok(polls.length >= 2, "Both watcher updates and timer polls must be checked");
 		assert.ok(polls.every((request) => request.snapshot === null));

@@ -61,6 +61,8 @@ function preferenceStorage(initial: Record<string, unknown> = { envoyDeveloperMo
 	};
 }
 
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 function setup(t: TestContext, storage = preferenceStorage(), lang = "") {
 	const dom = new JSDOM("", { url: "https://www.messenger.com/t/chat-1" });
 	dom.window.document.documentElement.lang = lang;
@@ -210,7 +212,7 @@ test("setup shows the start form while the thread and footer stay hidden", (t) =
 
 test("developer mode hides history and diagnostics by default but keeps actionable notices visible", async (t) => {
 	const ui = setup(t);
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	const developerDetails = ui.element("developer-details");
 	assert.equal(developerDetails.hidden, true);
 	for (const id of ["chat-id", "task-id", "task-chat", "conversation", "health"]) {
@@ -231,7 +233,7 @@ test("developer mode hides history and diagnostics by default but keeps actionab
 
 test("settings popover holds the reply settings and the developer switch", async (t) => {
 	const ui = setup(t);
-	await flushPreferences();
+	await flush();
 	const settings = ui.element<HTMLButtonElement>("settings");
 	assert.equal(settings.getAttribute("aria-controls"), "envoy-settings-popover");
 	assert.equal(settings.getAttribute("aria-expanded"), "false");
@@ -277,7 +279,7 @@ test("settings popover holds the reply settings and the developer switch", async
 test("developer switch remembers both choices across remounts and stays outside tab navigation", async (t) => {
 	const storage = preferenceStorage();
 	const ui = setup(t, storage);
-	const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 	await flush();
 	ui.element<HTMLButtonElement>("settings").click();
 	const toggle = ui.element<HTMLButtonElement>("developer-mode");
@@ -324,7 +326,7 @@ test("a late preference read cannot undo a toggle and slow writes preserve the l
 				});
 		},
 	});
-	const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 	const toggle = ui.element<HTMLButtonElement>("developer-mode");
 	toggle.click();
 	finishRead({ envoyDeveloperMode: false });
@@ -345,18 +347,16 @@ test("unavailable preference storage leaves the toggle usable", async (t) => {
 		throw new Error("Storage unavailable");
 	};
 	const ui = setup(t, { get: unavailable, set: unavailable });
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	assert.equal(ui.element("developer-details").hidden, true);
 	ui.element<HTMLButtonElement>("developer-mode").click();
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	assert.equal(ui.element("developer-details").hidden, false);
 });
 
-const flushPreferences = () => new Promise<void>((resolve) => setImmediate(resolve));
-
 test("reply sending defaults to auto-send after a 10-second countdown", async (t) => {
 	const ui = setup(t);
-	await flushPreferences();
+	await flush();
 	const toggle = ui.element<HTMLButtonElement>("auto-send");
 	assert.equal(toggle.getAttribute("role"), "switch");
 	assert.equal(toggle.getAttribute("aria-checked"), "true");
@@ -371,7 +371,7 @@ test("reply sending defaults to auto-send after a 10-second countdown", async (t
 test("the auto-send switch and delay range are remembered across remounts", async (t) => {
 	const storage = preferenceStorage();
 	const ui = setup(t, storage);
-	await flushPreferences();
+	await flush();
 	ui.changeField("delay-max", "25");
 	ui.changeField("delay-min", "5");
 	assert.equal(ui.element("delay-hint").textContent, "Replies send after a random 5–25-second countdown.");
@@ -380,14 +380,14 @@ test("the auto-send switch and delay range are remembered across remounts", asyn
 	assert.equal(ui.element<HTMLInputElement>("delay-max").disabled, true);
 	assert.equal(ui.element("delay").getAttribute("aria-disabled"), "true");
 	assert.equal(ui.element("delay-hint").textContent, "Replies wait until you choose Send now.");
-	await flushPreferences();
+	await flush();
 	assert.deepEqual((await storage.get()).envoyReplySettings, {
 		autoSend: false,
 		minDelaySeconds: 5,
 		maxDelaySeconds: 25,
 	});
 	ui.remount();
-	await flushPreferences();
+	await flush();
 	assert.equal(ui.element("auto-send").getAttribute("aria-checked"), "false");
 	assert.equal(ui.element<HTMLInputElement>("delay-min").value, "5");
 	assert.equal(ui.element<HTMLInputElement>("delay-max").value, "25");
@@ -396,7 +396,7 @@ test("the auto-send switch and delay range are remembered across remounts", asyn
 test("delay edits stay whole, bounded, and ordered", async (t) => {
 	const storage = preferenceStorage();
 	const ui = setup(t, storage);
-	await flushPreferences();
+	await flush();
 	const range = () => [ui.element<HTMLInputElement>("delay-min").value, ui.element<HTMLInputElement>("delay-max").value];
 	ui.changeField("delay-min", "30");
 	assert.deepEqual(range(), ["30", "30"]);
@@ -408,7 +408,7 @@ test("delay edits stay whole, bounded, and ordered", async (t) => {
 	assert.deepEqual(range(), ["1", "600"]);
 	ui.changeField("delay-min", "");
 	assert.deepEqual(range(), ["1", "600"]);
-	await flushPreferences();
+	await flush();
 	assert.deepEqual((await storage.get()).envoyReplySettings, {
 		autoSend: true,
 		minDelaySeconds: 1,
@@ -421,7 +421,7 @@ test("stored reply settings from older or broken data fall back to defaults", as
 		t,
 		preferenceStorage({ envoyReplySettings: { autoSend: "yes", minDelaySeconds: 40, maxDelaySeconds: 20 } }),
 	);
-	await flushPreferences();
+	await flush();
 	assert.equal(ui.element("auto-send").getAttribute("aria-checked"), "true");
 	assert.equal(ui.element<HTMLInputElement>("delay-min").value, "40");
 	assert.equal(ui.element<HTMLInputElement>("delay-max").value, "40");
@@ -429,7 +429,7 @@ test("stored reply settings from older or broken data fall back to defaults", as
 
 test("an active task notes that reply settings apply right away", async (t) => {
 	const ui = setup(t);
-	await flushPreferences();
+	await flush();
 	ui.update({ task, isOwner: true });
 	ui.element<HTMLButtonElement>("goal-toggle").click();
 	assert.equal(ui.element("goal-hint").hidden, false);
@@ -477,7 +477,7 @@ test("reply controls keep interruption actions available during thinking and sen
 		assert.equal(ui.element<HTMLButtonElement>("send-now").disabled, status !== "pending", status);
 	}
 	ui.element<HTMLButtonElement>("cancel").click();
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	assert.deepEqual(ui.actions, ["cancel"]);
 });
 
@@ -548,7 +548,7 @@ test("answers send to the agent without rewriting the goal", async (t) => {
 	ui.setText("answer-text", "Yes, after 3.");
 	assert.equal(send.disabled, false);
 	send.click();
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	assert.deepEqual(ui.actions, ["answer-agent"]);
 	assert.deepEqual(ui.texts, ["Yes, after 3."]);
 	assert.equal(ui.element<HTMLTextAreaElement>("answer-text").value, "");
@@ -677,7 +677,7 @@ test("goal toggle opens the editor and updating closes it", async (t) => {
 	toggle.click();
 	ui.setText("goal", "Arrange a meeting on Thursday");
 	ui.element<HTMLButtonElement>("update-goal").click();
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	assert.deepEqual(ui.actions, ["update-goal"]);
 	assert.deepEqual(ui.texts, ["Arrange a meeting on Thursday"]);
 	assert.equal(toggle.getAttribute("aria-expanded"), "false");
@@ -738,7 +738,7 @@ test("thinking shows a subtle cancel link while reply buttons live in the pendin
 	assert.equal(ui.element("cancel-thinking").hidden, false);
 	assert.equal(ui.element("reply-controls").parentElement?.id, "envoy-pending");
 	ui.element<HTMLButtonElement>("cancel-thinking").click();
-	await new Promise<void>((resolve) => setImmediate(resolve));
+	await flush();
 	assert.deepEqual(ui.actions, ["cancel"]);
 	ui.update({
 		task: {
@@ -805,7 +805,7 @@ test("paused, ended, and unowned tasks keep recovery actions without reply actio
 
 test("a polish page renders a polish panel", async (t) => {
 	const ui = setup(t, preferenceStorage(), "pl");
-	await flushPreferences();
+	await flush();
 	assert.equal(ui.query("#chats-tab").textContent, "Czaty");
 	assert.equal(ui.query(".tabs").getAttribute("aria-label"), "Pasek boczny czatów");
 	assert.equal(ui.element("start").textContent, "Rozpocznij zadanie");
@@ -850,12 +850,12 @@ test("the panel follows a page language switch without reload", async (t) => {
 	assert.equal(ui.query("#chats-tab").textContent, "Chats");
 	assert.equal(ui.element("agent-state").textContent, "Waiting for a new message.");
 	document.documentElement.lang = "pl";
-	await flushPreferences();
+	await flush();
 	assert.equal(ui.query("#chats-tab").textContent, "Czaty");
 	assert.equal(ui.element("agent-state").textContent, "Oczekiwanie na nową wiadomość.");
 	assert.equal(ui.element("start").textContent, "Rozpocznij zadanie");
 	document.documentElement.lang = "en";
-	await flushPreferences();
+	await flush();
 	assert.equal(ui.query("#chats-tab").textContent, "Chats");
 	assert.equal(ui.element("agent-state").textContent, "Waiting for a new message.");
 });

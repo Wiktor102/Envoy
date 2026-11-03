@@ -63,7 +63,10 @@ export function watchConversation(onUpdate: (snapshot: ConversationSnapshot | nu
 				// Sender labels are stripped the same way: a loading rename is
 				// not a new conversation.
 				const messages = JSON.stringify(snapshot.messages.map(messageContent));
-				if (previousMessages && previousMessages !== "[]" && previousMessages === messages) {
+				// An empty previous snapshot carries no content to compare, so
+				// only a non-empty match counts as still loading.
+				const stillLoading = previousMessages !== null && previousMessages !== "[]" && previousMessages === messages;
+				if (stillLoading) {
 					onUpdate(null, loadingStatus());
 					return;
 				}

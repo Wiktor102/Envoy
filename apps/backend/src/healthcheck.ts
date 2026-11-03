@@ -1,5 +1,5 @@
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
-import type { AppRouter } from "./router.js";
+import { type AppRouter, healthResponse } from "./router.js";
 import { backendUrl } from "./config.js";
 
 const connection = createWSClient({ url: backendUrl });
@@ -11,12 +11,12 @@ try {
 	const health = await client.health.query(undefined, {
 		signal: AbortSignal.timeout(5_000),
 	});
-	if (health.status !== "ok" || health.service !== "envoy-backend") {
+	if (health.status !== healthResponse.status || health.service !== healthResponse.service) {
 		throw new Error("Unexpected health response");
 	}
 	console.info(JSON.stringify(health));
-} catch {
-	console.error("Envoy health check failed. Start the backend first.");
+} catch (error) {
+	console.error("Envoy health check failed. Start the backend first.", error);
 	process.exitCode = 1;
 } finally {
 	await connection.close();

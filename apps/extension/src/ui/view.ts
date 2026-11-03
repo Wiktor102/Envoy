@@ -5,6 +5,7 @@ import {
 	MAX_TASK_TEXT_LENGTH,
 	MIN_REPLY_DELAY_SECONDS,
 	normalizeReplySettings,
+	type ConversationMessage,
 	type ReplySettings,
 	type TaskControlAction,
 	type TaskDetail,
@@ -36,6 +37,10 @@ function detailText(detail: TaskDetail, strings: ExtensionStrings): string {
 	return detail.code === "agent_message" ? detail.text : strings.details[detail.code];
 }
 
+// Interruptible states share one list so the reply and cancel controls
+// cannot drift apart when a status is added.
+const REPLY_ACTIVE_STATUSES = ["thinking", "pending", "editing", "sending"];
+
 // Markup is static. Conversation and model text are inserted as text, never HTML.
 export function createEnvoyView(onSelectionChange: () => void, controller: EnvoyController) {
 	const host = document.createElement("envoy-root");
@@ -46,8 +51,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	// Facebook marks its active theme on <html>; CSS falls back to the system theme.
 	function syncTheme() {
 		const classes = document.documentElement.classList;
-		const theme = classes.contains("__fb-dark-mode") ? "dark" : classes.contains("__fb-light-mode") ? "light" : null;
-		if (theme) host.setAttribute("data-theme", theme);
+		if (classes.contains("__fb-dark-mode")) host.setAttribute("data-theme", "dark");
+		else if (classes.contains("__fb-light-mode")) host.setAttribute("data-theme", "light");
 		else host.removeAttribute("data-theme");
 	}
 	syncTheme();
@@ -136,16 +141,13 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const editor = element<HTMLElement>("#envoy-editor");
 	const editText = element<HTMLTextAreaElement>("#envoy-reply-edit");
 	const editHint = element<HTMLElement>("#envoy-edit-hint");
-	isolateTextInput(goal);
-	isolateTextInput(editText);
-	isolateTextInput(answerText);
+	for (const input of [goal, editText, answerText]) isolateTextInput(input);
 	const autoSendToggle = element<HTMLButtonElement>("#envoy-auto-send");
 	const delayRange = element<HTMLElement>("#envoy-delay");
 	const delayMin = element<HTMLInputElement>("#envoy-delay-min");
 	const delayMax = element<HTMLInputElement>("#envoy-delay-max");
 	const delayHint = element<HTMLElement>("#envoy-delay-hint");
-	isolateTextInput(delayMin);
-	isolateTextInput(delayMax);
+	for (const input of [delayMin, delayMax]) isolateTextInput(input);
 	const saveEditButton = element<HTMLButtonElement>("#envoy-save-edit");
 	const replyControls = element<HTMLElement>("#envoy-reply-controls");
 	const cancelThinking = element<HTMLButtonElement>("#envoy-cancel-thinking");
@@ -323,6 +325,53 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		(showEnvoy ? envoyTab : chatsTab).focus();
 	});
 
+	function senderLabel(direction: string, sender: string | null, incomingLabel: string): string {
+		switch (direction) {
+			case "outgoing":
+				return strings.you;
+			case "incoming":
+				return sender ?? incomingLabel;
+			case "system":
+				return strings.systemName;
+			default:
+				return strings.unknownSender;
+		}
+	}
+
+	function makeSender(label: string): HTMLElement {
+		const sender = document.createElement("strong");
+		sender.textContent = label;
+		return sender;
+	}
+
+	function makeText(): HTMLSpanElement {
+		const text = document.createElement("span");
+		text.className = "message-text";
+		text.dir = "auto";
+		return text;
+	}
+
+	function isOverLimit(value: string): boolean {
+		return value.trim().length > MAX_TASK_TEXT_LENGTH;
+	}
+
+	function replyDelayHint({ autoSend, minDelaySeconds, maxDelaySeconds }: ReplySettings): string {
+		if (!autoSend) return strings.delayManual;
+		if (minDelaySeconds === maxDelaySeconds) return format(strings.delayFixed, { min: minDelaySeconds });
+		return format(strings.delayRandom, { min: minDelaySeconds, max: maxDelaySeconds });
+	}
+
+	function messagePreview(message: ConversationMessage): string {
+		if (message.unsent) return strings.unsentPlaceholder;
+		if (message.text) return message.text;
+		return message.attachments.length ? strings.attachmentPlaceholder : strings.emptyPlaceholder;
+	}
+
+	function setLine(element: HTMLElement, text: string, hide: boolean): void {
+		element.textContent = text;
+		element.hidden = hide;
+	}
+
 	function renderConversation() {
 		const snapshot = state.snapshot;
 		chatId.textContent = snapshot ? format(strings.chatLine, { id: snapshot.chatId }) : strings.noConversation;
@@ -349,21 +398,9 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		for (const message of snapshot.messages.slice(-5)) {
 			const item = document.createElement("li");
 			item.dataset.direction = message.direction;
-			const sender = document.createElement("strong");
-			sender.textContent =
-				message.direction === "outgoing"
-					? strings.you
-					: message.direction === "incoming"
-						? (message.sender ?? incomingLabel)
-						: message.direction === "system"
-							? strings.systemName
-							: strings.unknownSender;
-			const text = document.createElement("span");
-			text.className = "message-text";
-			text.dir = "auto";
-			text.textContent = message.unsent
-				? strings.unsentPlaceholder
-				: message.text || (message.attachments.length ? strings.attachmentPlaceholder : strings.emptyPlaceholder);
+			const sender = makeSender(senderLabel(message.direction, message.sender, incomingLabel));
+			const text = makeText();
+			text.textContent = messagePreview(message);
 			item.append(sender, text);
 			conversation.append(item);
 		}
@@ -373,14 +410,18 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		const task = state.task;
 		if (task?.status === "sending") {
 			countdown.textContent = strings.sendingNow;
-		} else if (!task?.pendingReply) {
+			return;
+		}
+		if (!task?.pendingReply) {
 			countdown.textContent = "";
-		} else if (task.pendingReply.sendAt !== null && task.status === "pending") {
+			return;
+		}
+		if (task.pendingReply.sendAt !== null && task.status === "pending") {
 			const seconds = Math.max(0, Math.ceil((task.pendingReply.sendAt - Date.now()) / 1000));
 			countdown.textContent = seconds > 0 ? format(strings.sendingIn, { seconds }) : strings.waitingToSend;
-		} else {
-			countdown.textContent = replySettings.autoSend ? strings.autoSendStopped : strings.waitingSendNow;
+			return;
 		}
+		countdown.textContent = replySettings.autoSend ? strings.autoSendStopped : strings.waitingSendNow;
 	}
 
 	// Each limited input has its own bound. The backend trims before checking,
@@ -412,19 +453,13 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		goal.disabled = busy || Boolean(active && !owner);
 		goalHint.textContent = (active ? strings.goalUpdateNote : "") + countText(goal.value);
 		goalHint.hidden = false;
-		const goalOverLimit = goal.value.trim().length > MAX_TASK_TEXT_LENGTH;
-		const { autoSend, minDelaySeconds, maxDelaySeconds } = replySettings;
+		const goalOverLimit = isOverLimit(goal.value);
+		const { autoSend } = replySettings;
 		autoSendToggle.setAttribute("aria-checked", String(autoSend));
 		delayRange.setAttribute("aria-disabled", String(!autoSend));
 		delayMin.disabled = !autoSend;
 		delayMax.disabled = !autoSend;
-		delayHint.textContent =
-			(!autoSend
-				? strings.delayManual
-				: minDelaySeconds === maxDelaySeconds
-					? format(strings.delayFixed, { min: minDelaySeconds })
-					: format(strings.delayRandom, { min: minDelaySeconds, max: maxDelaySeconds })) +
-			(active ? strings.delayAppliesNow : "");
+		delayHint.textContent = replyDelayHint(replySettings) + (active ? strings.delayAppliesNow : "");
 		startButton.hidden = active;
 		startButton.disabled = busy || !state.snapshot || !goal.value.trim() || goalOverLimit;
 		updateGoalButton.hidden = !active;
@@ -438,10 +473,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		thread.hidden = !task;
 		thread.dataset.status = task?.status ?? "idle";
 
-		taskId.textContent = task ? format(strings.taskIdLine, { id: task.id }) : "";
-		taskId.hidden = !task;
-		taskChat.textContent = task ? format(strings.taskChatLine, { id: task.chatId }) : "";
-		taskChat.hidden = !task || currentChat;
+		setLine(taskId, task ? format(strings.taskIdLine, { id: task.id }) : "", !task);
+		setLine(taskChat, task ? format(strings.taskChatLine, { id: task.chatId }) : "", !task || currentChat);
 		taskNotice.textContent = strings.taskElsewhere;
 		taskNotice.hidden = !task || !state.snapshot || currentChat;
 		const chat = owner && task ? task.agentChat : [];
@@ -480,13 +513,9 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 					item.append(details);
 				} else {
 					if (message.role !== "event") {
-						const sender = document.createElement("strong");
-						sender.textContent = message.role === "agent" ? strings.agentName : strings.you;
-						item.append(sender);
+						item.append(makeSender(message.role === "agent" ? strings.agentName : strings.you));
 					}
-					const text = document.createElement("span");
-					text.className = "message-text";
-					text.dir = "auto";
+					const text = makeText();
 					text.textContent = message.text;
 					item.append(text);
 				}
@@ -496,13 +525,14 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		footer.hidden = !owner || !active;
 		answerText.disabled = busy;
 		answerHint.textContent = countText(answerText.value);
-		answerSend.disabled = busy || !answerText.value.trim() || answerText.value.trim().length > MAX_TASK_TEXT_LENGTH;
+		answerSend.disabled = busy || !answerText.value.trim() || isOverLimit(answerText.value);
 		const pending = owner ? (task?.pendingReply ?? null) : null;
 		if (task && pending) sendingReply = { taskId: task.id, text: pending.text };
 		else if (task?.status !== "sending" || task.id !== sendingReply?.taskId) sendingReply = null;
 		const shownText = pending?.text ?? (owner ? sendingReply?.text : undefined) ?? null;
 		pendingSection.hidden = shownText === null;
-		const pendingKey = pending ? pending.commandId : sendingReply ? `sending:${task?.id}` : null;
+		const sendingKey = sendingReply ? `sending:${task?.id}` : null;
+		const pendingKey = pending?.commandId ?? sendingKey;
 		if (chat.length > lastChatCount || (pendingKey && pendingKey !== lastPendingKey)) {
 			panel.scrollTop = panel.scrollHeight;
 		}
@@ -518,22 +548,24 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 			editingCommandId = null;
 		}
 
-		replyControls.hidden = !owner || !task || !["thinking", "pending", "editing", "sending"].includes(task.status);
+		const canCancelReply = owner && !!task && REPLY_ACTIVE_STATUSES.includes(task.status);
+		const canSendReply = owner && currentChat && task?.status === "pending" && !!pending;
+		const canEditReply = canSendReply || (owner && currentChat && task?.status === "sending");
+		replyControls.hidden = !canCancelReply;
 		cancelThinking.hidden = !owner || task?.status !== "thinking";
 		cancelThinking.disabled = busy;
-		sendButton.disabled = busy || !owner || !currentChat || task?.status !== "pending" || !pending;
-		editButton.disabled =
-			busy || !owner || !currentChat || !(task?.status === "sending" || (task?.status === "pending" && pending));
-		cancelButton.disabled =
-			busy || !owner || !task || !["thinking", "pending", "editing", "sending"].includes(task.status);
+		sendButton.disabled = busy || !canSendReply;
+		editButton.disabled = busy || !canEditReply;
+		cancelButton.disabled = busy || !canCancelReply;
 		editHint.textContent = `${strings.saveEditNote} ${countText(editText.value)}`;
-		saveEditButton.disabled =
-			busy || !editing || !editText.value.trim() || editText.value.trim().length > MAX_TASK_TEXT_LENGTH;
+		saveEditButton.disabled = busy || !editing || !editText.value.trim() || isOverLimit(editText.value);
 		editText.disabled = busy;
-		pauseButton.hidden = !owner || !active || task?.status === "paused";
-		pauseButton.disabled = busy || task?.status === "paused";
-		resumeButton.hidden = !owner || (task?.status !== "paused" && task?.status !== "needs_user");
-		resumeButton.disabled = busy || !currentChat || (task?.status !== "paused" && task?.status !== "needs_user");
+		const isPaused = task?.status === "paused";
+		const isResumable = task?.status === "paused" || task?.status === "needs_user";
+		pauseButton.hidden = !owner || !active || isPaused;
+		pauseButton.disabled = busy || isPaused;
+		resumeButton.hidden = !owner || !isResumable;
+		resumeButton.disabled = busy || !currentChat || !isResumable;
 		const showReconnect = task?.status === "paused" && !owner && currentChat;
 		reconnectButton.hidden = !showReconnect;
 		reconnectButton.disabled = busy;
@@ -541,9 +573,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		takeoverButton.disabled = busy || !active;
 		deleteButton.hidden = !task || active;
 		deleteButton.disabled = busy;
-		header.hidden =
-			!task ||
-			(goalToggle.hidden && pauseButton.hidden && resumeButton.hidden && takeoverButton.hidden && deleteButton.hidden);
+		const taskControls = [goalToggle, pauseButton, resumeButton, takeoverButton, deleteButton];
+		header.hidden = !task || taskControls.every((button) => button.hidden);
 		ownerHint.hidden = !(task && !owner && active);
 		ownerHint.textContent = showReconnect ? strings.ownerPaused : strings.ownerElsewhere;
 		deleteHint.hidden = deleteButton.hidden;
@@ -589,38 +620,60 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		render();
 		if (goalEditorOpen) goal.focus();
 	});
-	startButton.addEventListener("click", () => {
-		const value = goal.value.trim();
+	function submitInput(
+		input: HTMLTextAreaElement,
+		submit: (value: string) => Promise<void>,
+		after: (value: string) => void,
+	) {
+		const value = input.value.trim();
 		void run(async () => {
-			await controller.start(value);
-			goalEditorOpen = false;
-			if (goal.value.trim() === value) goalDirty = false;
+			await submit(value);
+			after(value);
 		});
-	});
-	updateGoalButton.addEventListener("click", () => {
-		const value = goal.value.trim();
-		void run(async () => {
-			await controller.control("update-goal", value);
-			goalEditorOpen = false;
-			if (goal.value.trim() === value) goalDirty = false;
-		});
-	});
-	answerSend.addEventListener("click", () => {
-		const value = answerText.value.trim();
-		void run(async () => {
-			await controller.control("answer-agent", value);
-			if (answerText.value.trim() === value) answerText.value = "";
-		});
-	});
-	sendButton.addEventListener("click", () => control("send-now"));
-	editButton.addEventListener("click", () => control("edit"));
+	}
+
+	startButton.addEventListener("click", () =>
+		submitInput(
+			goal,
+			(value) => controller.start(value),
+			(value) => {
+				goalEditorOpen = false;
+				if (goal.value.trim() === value) goalDirty = false;
+			},
+		),
+	);
+	updateGoalButton.addEventListener("click", () =>
+		submitInput(
+			goal,
+			(value) => controller.control("update-goal", value),
+			(value) => {
+				goalEditorOpen = false;
+				if (goal.value.trim() === value) goalDirty = false;
+			},
+		),
+	);
+	answerSend.addEventListener("click", () =>
+		submitInput(
+			answerText,
+			(value) => controller.control("answer-agent", value),
+			(value) => {
+				if (answerText.value.trim() === value) answerText.value = "";
+			},
+		),
+	);
+	// One row per control keeps the duplicate cancel wiring visible.
+	const wiredControls: [HTMLButtonElement, TaskControlAction][] = [
+		[sendButton, "send-now"],
+		[editButton, "edit"],
+		[cancelButton, "cancel"],
+		[cancelThinking, "cancel"],
+		[pauseButton, "pause"],
+		[resumeButton, "resume"],
+		[takeoverButton, "take-over"],
+	];
+	for (const [button, action] of wiredControls) button.addEventListener("click", () => control(action));
 	saveEditButton.addEventListener("click", () => control("save-edit", editText.value.trim()));
-	cancelButton.addEventListener("click", () => control("cancel"));
-	cancelThinking.addEventListener("click", () => control("cancel"));
-	pauseButton.addEventListener("click", () => control("pause"));
-	resumeButton.addEventListener("click", () => control("resume"));
 	reconnectButton.addEventListener("click", () => void run(() => controller.attach()));
-	takeoverButton.addEventListener("click", () => control("take-over"));
 	deleteButton.addEventListener("click", () => {
 		void run(async () => {
 			await controller.clear();

@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 import { JSDOM } from "jsdom";
 import { bindMessengerDocument, ConversationUnavailableError, messengerChatAdapter } from "../src/messenger/chat-adapter";
 import { watchConversation } from "../src/ui/conversation";
+
+// Each fixture closes its own DOM even when an assertion throws midway.
+const openDoms = new Set<JSDOM>();
+afterEach(() => {
+	for (const dom of openDoms) dom.window.close();
+	openDoms.clear();
+});
 
 function setup(path = "/t/123") {
 	const dom = new JSDOM('<main role="main"></main>', { url: `https://www.messenger.com${path}` });
@@ -21,6 +28,7 @@ function setup(path = "/t/123") {
 	Object.defineProperty(main, "clientHeight", { configurable: true, value: 400 });
 	Object.defineProperty(main, "scrollHeight", { configurable: true, value: 400 });
 	bindMessengerDocument();
+	openDoms.add(dom);
 	return dom;
 }
 
@@ -62,7 +70,6 @@ test("ignores date separator scopes but rejects unrecognized content beside them
 		messengerChatAdapter.readConversation(),
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 	);
-	dom.window.close();
 });
 
 test("ignores Messenger date scopes before, between, and after messages", async () => {
@@ -87,7 +94,6 @@ test("ignores Messenger date scopes before, between, and after messages", async 
 			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 		);
 	}
-	dom.window.close();
 });
 
 test("ignores the zero-height empty message scope beside Messenger's newest article", async () => {
@@ -111,7 +117,6 @@ test("ignores the zero-height empty message scope beside Messenger's newest arti
 	// An empty scope alone is not a readable conversation.
 	setMessages(empty);
 	await assert.rejects(messengerChatAdapter.readConversation(), ConversationUnavailableError);
-	dom.window.close();
 });
 
 test("does not hide message metadata or unsupported content in an empty-looking scope", async () => {
@@ -137,7 +142,6 @@ test("does not hide message metadata or unsupported content in an empty-looking 
 	const scope = document.querySelector<HTMLElement>('[data-scope="messages_table"]:last-child')!;
 	scope.getBoundingClientRect = () => ({ height: 20 }) as DOMRect;
 	await assert.rejects(messengerChatAdapter.readConversation(), ConversationUnavailableError);
-	dom.window.close();
 });
 
 test("does not classify message bodies in accessibility labels as attachment metadata", async () => {
@@ -158,7 +162,6 @@ test("does not classify message bodies in accessibility labels as attachment met
 		scope.insertAdjacentHTML("beforeend", '<div role="button" aria-label="Play voice message"></div>');
 		await assert.rejects(messengerChatAdapter.readConversation(), ConversationUnavailableError);
 	}
-	dom.window.close();
 });
 
 test("reads standalone Messenger Likes as messages with their sender and revision", async () => {
@@ -184,7 +187,6 @@ test("reads standalone Messenger Likes as messages with their sender and revisio
 		messengerChatAdapter.readConversation(),
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 	);
-	dom.window.close();
 });
 
 test("does not mistake reactions or mixed content for a standalone Like", async () => {
@@ -220,7 +222,6 @@ test("does not mistake reactions or mixed content for a standalone Like", async 
 		messengerChatAdapter.readConversation(),
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 	);
-	dom.window.close();
 });
 
 test("omits edit labels while preserving edited text, attribution, and revision changes", async () => {
@@ -248,7 +249,6 @@ test("omits edit labels while preserving edited text, attribution, and revision 
 		assert.equal(changed.messages[0]!.text, "Edited again");
 		assert.notEqual(changed.revision, original.revision);
 	}
-	dom.window.close();
 });
 
 test("preserves literal edit-label messages and uncertain text", async () => {
@@ -270,7 +270,6 @@ test("preserves literal edit-label messages and uncertain text", async () => {
 		);
 		assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.text, status);
 	}
-	dom.window.close();
 });
 
 test("ignores control wrappers by structure regardless of language or message labels", async () => {
@@ -292,7 +291,6 @@ test("ignores control wrappers by structure regardless of language or message la
 		setMessages(`<div data-scope="messages_table"><span dir="auto"><video></video>${control}</span></div>`);
 		await assert.rejects(messengerChatAdapter.readConversation(), ConversationUnavailableError);
 	}
-	dom.window.close();
 });
 
 test("reads loaded text in order, without nested duplicates or controls", async () => {
@@ -310,7 +308,6 @@ test("reads loaded text in order, without nested duplicates or controls", async 
 	const changed = await messengerChatAdapter.readConversation();
 	assert.equal(changed.messages[0]!.id, snapshot.messages[0]!.id);
 	assert.notEqual(changed.revision, snapshot.revision);
-	dom.window.close();
 });
 
 test("reads inline emoji in text and quoted replies and changes the revision with their alt text", async () => {
@@ -331,7 +328,6 @@ test("reads inline emoji in text and quoted replies and changes the revision wit
 	const changed = await messengerChatAdapter.readConversation();
 	assert.equal(changed.messages[0]!.text, "Sounds good 👎 🇵🇱 1️⃣");
 	assert.notEqual(changed.revision, original.revision);
-	dom.window.close();
 });
 
 for (const quoted of [false, true]) {
@@ -370,7 +366,6 @@ for (const quoted of [false, true]) {
 			assert.ok(!revisions.includes(changed.revision));
 			revisions.push(changed.revision);
 		}
-		dom.window.close();
 	});
 
 	test(`preserves rendered block separators in ${quoted ? "quoted replies" : "message text"}`, async () => {
@@ -407,7 +402,6 @@ for (const quoted of [false, true]) {
 			if (expected.includes("\n")) assert.notEqual(changed.revision, original.revision, content);
 			else assert.equal(changed.revision, original.revision, content);
 		}
-		dom.window.close();
 	});
 
 	test(`isolates block boundaries inside atomic inline boxes in ${quoted ? "quoted replies" : "message text"}`, async () => {
@@ -441,7 +435,6 @@ for (const quoted of [false, true]) {
 			const flattened = await messengerChatAdapter.readConversation();
 			assert.equal(flattened.revision, original.revision, display);
 		}
-		dom.window.close();
 	});
 }
 
@@ -454,7 +447,6 @@ test("rejects inline media whose alternative text is not exclusively emoji", asy
 			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 		);
 	}
-	dom.window.close();
 });
 
 test("rejects a snapshot if an inline emoji changes while its revision is hashing", async () => {
@@ -480,7 +472,6 @@ test("rejects a snapshot if an inline emoji changes while its revision is hashin
 		pending,
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "changed",
 	);
-	dom.window.close();
 });
 
 test("keeps the revision when identical content is rendered with new DOM nodes", async () => {
@@ -494,7 +485,6 @@ test("keeps the revision when identical content is rendered with new DOM nodes",
 		original.messages.map(({ id }) => id),
 	);
 	assert.equal(remounted.revision, original.revision);
-	firstDom.window.close();
 
 	const reloadedDom = setup();
 	setMessages(fixture);
@@ -504,7 +494,6 @@ test("keeps the revision when identical content is rendered with new DOM nodes",
 		original.messages.map(({ id }) => id),
 	);
 	assert.equal(reloaded.revision, original.revision);
-	reloadedDom.window.close();
 });
 
 test("revision reflects chat, message order, and repeated messages", async () => {
@@ -526,7 +515,6 @@ test("revision reflects chat, message order, and repeated messages", async () =>
 		messengerChatAdapter.readConversation(),
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "navigated",
 	);
-	dom.window.close();
 });
 
 test("uses only explicit sender metadata and includes direction in the revision", async () => {
@@ -547,7 +535,6 @@ test("uses only explicit sender metadata and includes direction in the revision"
 	const changed = await messengerChatAdapter.readConversation();
 	assert.equal(changed.messages[0]!.direction, "outgoing");
 	assert.notEqual(changed.revision, first.revision);
-	dom.window.close();
 });
 
 test("reads per-message Polish and English sender labels in direct and group chats", async () => {
@@ -580,7 +567,6 @@ test("reads per-message Polish and English sender labels in direct and group cha
 		first.removeAttribute("data-message-direction");
 		first.removeAttribute("aria-roledescription");
 		assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.direction, "unknown");
-		dom.window.close();
 	}
 });
 
@@ -597,11 +583,9 @@ test("requires a reload after navigation, even when the message DOM changes", as
 		messengerChatAdapter.readConversation(),
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "navigated",
 	);
-	dom.window.close();
 	const reloaded = setup("/t/456");
 	setMessages('<div data-scope="messages_table"><div dir="auto">New thread</div></div>');
 	assert.equal((await messengerChatAdapter.readConversation()).chatId, "456");
-	reloaded.window.close();
 });
 
 test("binds before the first read and remains blocked after navigating back", async () => {
@@ -614,7 +598,6 @@ test("binds before the first read and remains blocked after navigating back", as
 		messengerChatAdapter.readConversation(),
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "navigated",
 	);
-	dom.window.close();
 });
 
 // Structure based on the rendered Facebook Messenger message scopes; all content is synthetic.
@@ -656,7 +639,6 @@ test("associates quoted replies and reaction summaries with their messages", asy
 	const changed = await messengerChatAdapter.readConversation();
 	assert.equal(changed.messages[1]!.reactions[0]!.count, 2);
 	assert.notEqual(changed.revision, snapshot.revision);
-	dom.window.close();
 });
 
 test("changes the revision when a quoted reply changes", async () => {
@@ -666,7 +648,6 @@ test("changes the revision when a quoted reply changes", async () => {
 	document.querySelector('[role="button"][aria-label*="odpowiadasz"] [dir="auto"]')!.textContent = "Different quote";
 	const changed = await messengerChatAdapter.readConversation();
 	assert.notEqual(changed.revision, original.revision);
-	dom.window.close();
 });
 
 test("attributes fresh text and emoji bubbles sharing a container with a delivery status", async () => {
@@ -701,7 +682,6 @@ test("attributes fresh text and emoji bubbles sharing a container with a deliver
 			assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.direction, "unknown");
 		}
 	}
-	dom.window.close();
 });
 
 test("does not attribute shared-container text without a unique match to the message label", async () => {
@@ -714,7 +694,6 @@ test("does not attribute shared-container text without a unique match to the mes
 			["unknown", "unknown"],
 		);
 	}
-	dom.window.close();
 });
 
 test("does not attach metadata from a boundary shared by multiple messages", async () => {
@@ -728,7 +707,6 @@ test("does not attach metadata from a boundary shared by multiple messages", asy
 		snapshot.messages.map((message) => message.reactions),
 		[[], []],
 	);
-	dom.window.close();
 });
 
 test("rejects a snapshot when reaction metadata changes while hashing", async () => {
@@ -754,7 +732,6 @@ test("rejects a snapshot when reaction metadata changes while hashing", async ()
 		pending,
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "changed",
 	);
-	dom.window.close();
 });
 
 const photoFixture = `
@@ -812,7 +789,6 @@ test("reads encrypted photo buttons in direct and group conversations", async ()
 		assert.equal(snapshot.messages[0]!.reactions[0]!.count, 1);
 		document.querySelector('img[alt="Otwórz zdjęcie"]')!.setAttribute("src", "https://example.test/changed");
 		assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
-		dom.window.close();
 	}
 });
 
@@ -836,7 +812,6 @@ test("does not mistake photo previews, toolbar images, or arbitrary buttons for 
 			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 		);
 	}
-	dom.window.close();
 });
 
 test("invalidates encrypted photos when a data source changes without a public URL", async () => {
@@ -851,7 +826,6 @@ test("invalidates encrypted photos when a data source changes without a public U
 	assert.equal(changed.messages[0]!.attachments[0]!.url, null);
 	assert.notEqual(changed.revision, original.revision);
 	assert.ok(!JSON.stringify(changed).includes("base64"));
-	dom.window.close();
 });
 
 test("keeps image revisions stable when the same messages are remounted", async () => {
@@ -865,7 +839,6 @@ test("keeps image revisions stable when the same messages are remounted", async 
 		original.messages.map(({ id }) => id),
 	);
 	assert.equal(remounted.revision, original.revision);
-	dom.window.close();
 });
 
 test("reads image URLs for image-only, mixed, and quoted messages", async () => {
@@ -901,7 +874,6 @@ test("reads image URLs for image-only, mixed, and quoted messages", async () => 
 	const changed = await messengerChatAdapter.readConversation();
 	assert.notEqual(changed.revision, snapshot.revision);
 	assert.equal(changed.messages[0]!.id, snapshot.messages[0]!.id);
-	dom.window.close();
 });
 
 test("handles unloaded, relative, and non-web image sources", async () => {
@@ -920,7 +892,6 @@ test("handles unloaded, relative, and non-web image sources", async () => {
 	const changed = await messengerChatAdapter.readConversation();
 	assert.equal(changed.messages[0]!.attachments[0]!.url, "https://example.test/loaded.jpg");
 	assert.notEqual(changed.revision, snapshot.revision);
-	dom.window.close();
 });
 
 test("prefers the browser-selected image source", async () => {
@@ -930,7 +901,6 @@ test("prefers the browser-selected image source", async () => {
 	Object.defineProperty(image, "currentSrc", { configurable: true, value: "https://example.test/selected.jpg" });
 	const snapshot = await messengerChatAdapter.readConversation();
 	assert.equal(snapshot.messages[0]!.attachments[0]!.url, "https://example.test/selected.jpg");
-	dom.window.close();
 });
 
 test("does not misidentify inline emoji or unlabeled icons in reply previews", async () => {
@@ -941,7 +911,6 @@ test("does not misidentify inline emoji or unlabeled icons in reply previews", a
 		</div><span dir="auto">Answer</span></div>`);
 	const snapshot = await messengerChatAdapter.readConversation();
 	assert.deepEqual(snapshot.messages[0]!.replyTo?.attachments, []);
-	dom.window.close();
 });
 
 test("rejects a snapshot if an image link changes while hashing", async () => {
@@ -967,7 +936,6 @@ test("rejects a snapshot if an image link changes while hashing", async () => {
 		pending,
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "changed",
 	);
-	dom.window.close();
 });
 
 test("fails closed without a thread or an identifiable message table", async () => {
@@ -976,13 +944,11 @@ test("fails closed without a thread or an identifiable message table", async () 
 		messengerChatAdapter.readConversation(),
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "not-ready",
 	);
-	dom.window.close();
 	const noThread = setup("/");
 	await assert.rejects(
 		messengerChatAdapter.readConversation(),
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "no-chat",
 	);
-	noThread.window.close();
 });
 
 test("requires a measurable message scroll area at its bottom", async () => {
@@ -1003,7 +969,6 @@ test("requires a measurable message scroll area at its bottom", async () => {
 	);
 	main.scrollTop = 600;
 	assert.equal((await messengerChatAdapter.readConversation()).messages.length, 2);
-	dom.window.close();
 });
 
 test("rejects an unrecognized row after readable incoming text", async () => {
@@ -1026,7 +991,6 @@ test("rejects an unrecognized row after readable incoming text", async () => {
 		messengerChatAdapter.readConversation(),
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 	);
-	dom.window.close();
 });
 
 test("rejects text messages containing unsupported media", async () => {
@@ -1038,7 +1002,6 @@ test("rejects text messages containing unsupported media", async () => {
 			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 		);
 	}
-	dom.window.close();
 });
 
 test("rejects a snapshot when the message table changes while hashing", async () => {
@@ -1064,7 +1027,6 @@ test("rejects a snapshot when the message table changes while hashing", async ()
 		pending,
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "changed",
 	);
-	dom.window.close();
 });
 
 test("updates the watched snapshot when only a reaction label changes", async () => {
@@ -1085,7 +1047,6 @@ test("updates the watched snapshot when only a reaction label changes", async ()
 		await waitFor(() => counts.includes(2));
 	} finally {
 		stop();
-		dom.window.close();
 	}
 });
 
@@ -1109,7 +1070,6 @@ test("updates the watched revision when an image link changes", async () => {
 		await waitFor(() => revisions.some((revision) => revision !== first));
 	} finally {
 		stop();
-		dom.window.close();
 	}
 });
 
@@ -1143,7 +1103,6 @@ test("clears the old chat and asks for a reload after navigation", async () => {
 		assert.equal(updates.at(-1)?.status, "The selected chat changed. Reload this tab to use Envoy in it.");
 	} finally {
 		stop();
-		dom.window.close();
 	}
 });
 
@@ -1169,7 +1128,6 @@ test("reads group events as system context and omits the group introduction", as
 	assert.deepEqual((await messengerChatAdapter.readConversation()).messages, snapshot.messages);
 	document.querySelectorAll('[role="presentation"] span[dir="auto"] div')[0]!.textContent = "Another event";
 	assert.notEqual((await messengerChatAdapter.readConversation()).revision, snapshot.revision);
-	dom.window.close();
 });
 
 test("omits the 1-1 encrypted introduction notice in English and Polish", async () => {
@@ -1192,7 +1150,6 @@ test("omits the 1-1 encrypted introduction notice in English and Polish", async 
 			[["Hello", "incoming"]],
 		);
 	}
-	dom.window.close();
 });
 
 test("keeps h4 messages and h3 scopes with message metadata or media", async () => {
@@ -1215,7 +1172,6 @@ test("keeps h4 messages and h3 scopes with message metadata or media", async () 
 		messengerChatAdapter.readConversation(),
 		(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 	);
-	dom.window.close();
 });
 
 test("reads an animated preview as an unreadable attachment and tracks its blob source", async () => {
@@ -1250,7 +1206,6 @@ test("reads an animated preview as an unreadable attachment and tracks its blob 
 			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 		);
 	}
-	dom.window.close();
 });
 
 test("reads the observed GIPHY image link while rejecting ambiguous media", async () => {
@@ -1280,7 +1235,6 @@ test("reads the observed GIPHY image link while rejecting ambiguous media", asyn
 		setMessages(unsafe);
 		await assert.rejects(messengerChatAdapter.readConversation(), ConversationUnavailableError);
 	}
-	dom.window.close();
 });
 
 test("reads encrypted GIF buttons as presence-only without blocking the chat", async () => {
@@ -1313,7 +1267,6 @@ test("reads encrypted GIF buttons as presence-only without blocking the chat", a
 			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 		);
 	}
-	dom.window.close();
 });
 
 test("reads quoted GIFs as type-only without blocking the chat", async () => {
@@ -1358,7 +1311,6 @@ test("reads quoted GIFs as type-only without blocking the chat", async () => {
 			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 		);
 	}
-	dom.window.close();
 });
 
 test("reads unsent placeholders as unsent messages without placeholder text", async () => {
@@ -1380,7 +1332,6 @@ test("reads unsent placeholders as unsent messages without placeholder text", as
 			],
 		);
 	}
-	dom.window.close();
 });
 
 test("changes the revision when a message is unsent", async () => {
@@ -1391,7 +1342,6 @@ test("changes the revision when a message is unsent", async () => {
 	const changed = await messengerChatAdapter.readConversation();
 	assert.equal(changed.messages[0]!.unsent, true);
 	assert.notEqual(changed.revision, original.revision);
-	dom.window.close();
 });
 
 test("preserves Likes and ignores delivery footers when another message is unsent", async () => {
@@ -1421,7 +1371,6 @@ test("preserves Likes and ignores delivery footers when another message is unsen
 	assert.notEqual(changed.revision, original.revision);
 	message.querySelector('span[role="presentation"] span span')!.textContent = "Sent 2 minutes ago";
 	assert.equal((await messengerChatAdapter.readConversation()).revision, changed.revision);
-	dom.window.close();
 });
 
 test("does not read a quote of an unavailable message as quoted text", async () => {
@@ -1437,7 +1386,6 @@ test("does not read a quote of an unavailable message as quoted text", async () 
 		assert.equal(message!.unsent, false);
 		assert.equal(message!.replyTo?.text, null);
 	}
-	dom.window.close();
 });
 
 test("omits Messenger delivery footers without changing real text, emoji, or revisions", async () => {
@@ -1467,7 +1415,6 @@ test("omits Messenger delivery footers without changing real text, emoji, or rev
 		);
 		assert.equal((await messengerChatAdapter.readConversation()).messages.length, 2);
 	}
-	dom.window.close();
 });
 
 test("ignores typing-status announcements without changing messages or revision", async () => {
@@ -1509,7 +1456,6 @@ test("ignores typing-status announcements without changing messages or revision"
 		assert.deepEqual(content(recovered.messages), content(before.messages));
 		assert.equal(recovered.revision, before.revision);
 	}
-	dom.window.close();
 });
 
 test("does not hide message metadata or unsupported content in a typing-like scope", async () => {
@@ -1549,7 +1495,6 @@ test("does not hide message metadata or unsupported content in a typing-like sco
 		(await messengerChatAdapter.readConversation()).messages.map(({ text }) => text),
 		["Hello", "Real message"],
 	);
-	dom.window.close();
 });
 
 // Observed visible typing bubble: a live announcement plus an aria-hidden
@@ -1589,7 +1534,6 @@ test("ignores the visible typing bubble through its announcement-only residue", 
 		assert.deepEqual(gone.messages, before.messages);
 		assert.equal(gone.revision, before.revision);
 	}
-	dom.window.close();
 });
 
 test("does not hide message content in the typing bubble visual subtree", async () => {
@@ -1647,7 +1591,6 @@ test("does not hide message content in the typing bubble visual subtree", async 
 		(await messengerChatAdapter.readConversation()).messages.map(({ text }) => text),
 		["Hello", "Real message"],
 	);
-	dom.window.close();
 });
 
 test("reads a blockquote reply with its quote markers, attribution, and delivery footer", async () => {
@@ -1684,7 +1627,6 @@ test("reads a blockquote reply with its quote markers, attribution, and delivery
 		],
 	);
 	assert.notEqual(changed.revision, snapshot.revision);
-	dom.window.close();
 });
 
 test("restores quote markers for nested, multi-line, and mixed blockquotes", async () => {
@@ -1704,7 +1646,6 @@ test("restores quote markers for nested, multi-line, and mixed blockquotes", asy
 		assert.equal(snapshot.messages[0]!.text, expected, content);
 		assert.equal(snapshot.messages[0]!.direction, "incoming", content);
 	}
-	dom.window.close();
 });
 
 test("reads a recognized video as unavailable media without blocking later text", async () => {
@@ -1746,7 +1687,6 @@ test("reads a recognized video as unavailable media without blocking later text"
 	const latest = await messengerChatAdapter.readConversation();
 	assert.equal(latest.messages.length, 1);
 	assert.deepEqual(latest.messages[0]!.attachments, [{ type: "video", url: null, description: null, media: null }]);
-	dom.window.close();
 });
 
 test("reads recognized stickers as unavailable media without blocking later text", async () => {
@@ -1794,7 +1734,6 @@ test("reads recognized stickers as unavailable media without blocking later text
 	const latest = await messengerChatAdapter.readConversation();
 	assert.equal(latest.messages.length, 1);
 	assert.deepEqual(latest.messages[0]!.attachments, [{ type: "sticker", url: null, description: null, media: null }]);
-	dom.window.close();
 });
 
 test("keeps sticker detection narrow and fail-closed", async () => {
@@ -1829,7 +1768,6 @@ test("keeps sticker detection narrow and fail-closed", async () => {
 			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 		);
 	}
-	dom.window.close();
 });
 
 test("reads file rows as presence-only without failing the snapshot", async () => {
@@ -1855,7 +1793,6 @@ test("reads file rows as presence-only without failing the snapshot", async () =
 	setMessages(blobFile);
 	const latest = await messengerChatAdapter.readConversation();
 	assert.deepEqual(latest.messages[0]!.attachments, [{ type: "file" }]);
-	dom.window.close();
 });
 
 test("keeps file detection narrow and fail-closed", async () => {
@@ -1885,7 +1822,6 @@ test("keeps file detection narrow and fail-closed", async () => {
 			(error: unknown) => error instanceof ConversationUnavailableError && error.reason === "unsupported",
 		);
 	}
-	dom.window.close();
 });
 
 test("reads quoted video, sticker, GIF, and file previews as type-only", async () => {
@@ -1925,7 +1861,6 @@ test("reads quoted video, sticker, GIF, and file previews as type-only", async (
 		snapshot.messages.map((message) => message.attachments),
 		[[], [], [], []],
 	);
-	dom.window.close();
 });
 
 test("inlines a video poster frame for local clips", async () => {
@@ -1950,7 +1885,6 @@ test("inlines a video poster frame for local clips", async () => {
 		]);
 	} finally {
 		restoreCanvas();
-		dom.window.close();
 	}
 });
 
@@ -1987,7 +1921,6 @@ test("inlines the newest four media across photos, GIFs, stickers, and clips", a
 	} finally {
 		restoreImage();
 		restoreCanvas();
-		dom.window.close();
 	}
 });
 
@@ -2005,7 +1938,6 @@ test("reads the 1-1 chat name from the header in English and Polish", async () =
 			["Hello"],
 		);
 	}
-	dom.window.close();
 });
 
 test("keeps the revision stable when the chat name changes or is missing", async () => {
@@ -2021,7 +1953,6 @@ test("keeps the revision stable when the chat name changes or is missing", async
 	const missing = await messengerChatAdapter.readConversation();
 	assert.deepEqual(missing.participants, []);
 	assert.equal(missing.revision, first.revision);
-	dom.window.close();
 });
 
 test("leaves participants empty when the header is not a 1-1 profile link", async () => {
@@ -2046,7 +1977,6 @@ test("leaves participants empty when the header is not a 1-1 profile link", asyn
 			["Hello"],
 		);
 	}
-	dom.window.close();
 });
 
 // Mirrors the observed group runs: every bubble carries its own boundary
@@ -2113,7 +2043,6 @@ test("reads per-message sender labels across consecutive bubbles in English and 
 			bubbles.map(([label, heading, text, sender, direction]) => [text, direction, sender]),
 		);
 	}
-	dom.window.close();
 });
 
 test("reads the sender of an attachment-only label without a message body", async () => {
@@ -2131,7 +2060,6 @@ test("reads the sender of an attachment-only label without a message body", asyn
 		})),
 		[{ text: "", direction: "outgoing", sender: "Ty", urls: ["https://example.test/photo"] }],
 	);
-	dom.window.close();
 });
 
 test("leaves the sender null for missing or malformed labels while keeping attribution", async () => {
@@ -2148,7 +2076,6 @@ test("leaves the sender null for missing or malformed labels while keeping attri
 			["incoming", null],
 		],
 	);
-	dom.window.close();
 });
 
 test("leaves the sender null when a labeled boundary is shared by multiple messages", async () => {
@@ -2162,7 +2089,6 @@ test("leaves the sender null when a labeled boundary is shared by multiple messa
 			["unknown", null],
 		],
 	);
-	dom.window.close();
 });
 
 test("keeps the sender for the unique match sharing a container with a delivery status", async () => {
@@ -2181,7 +2107,6 @@ test("keeps the sender for the unique match sharing a container with a delivery 
 			["Wysłano", "unknown", null],
 		],
 	);
-	dom.window.close();
 });
 
 test("keeps the revision when a sender label changes during loading", async () => {
@@ -2200,7 +2125,6 @@ test("keeps the revision when a sender label changes during loading", async () =
 		renamed.messages.map(({ sender: _sender, ...message }) => message),
 		first.messages.map(({ sender: _sender, ...message }) => message),
 	);
-	dom.window.close();
 });
 
 test("stays current when a sender label changes while its revision is hashing", async () => {
@@ -2229,7 +2153,6 @@ test("stays current when a sender label changes while its revision is hashing", 
 		snapshot.messages.map(({ text, direction }) => [text, direction]),
 		[["Hello", "incoming"]],
 	);
-	dom.window.close();
 });
 
 test("leaves participants empty without a corroborating region heading", async () => {
@@ -2254,7 +2177,6 @@ test("leaves participants empty without a corroborating region heading", async (
 			["Hello"],
 		);
 	}
-	dom.window.close();
 });
 
 type StubSize = { width: number; height: number } | "error";
@@ -2338,7 +2260,6 @@ test("inlines local photo bytes for encrypted photo buttons", async () => {
 		assert.ok(JSON.stringify(snapshot).includes("AAAA"));
 	} finally {
 		restoreImage();
-		dom.window.close();
 	}
 });
 
@@ -2360,7 +2281,6 @@ test("downscales local photos past the max side to JPEG", async () => {
 	} finally {
 		restoreImage();
 		restoreCanvas();
-		dom.window.close();
 	}
 });
 
@@ -2397,7 +2317,6 @@ test("downscales large sources into the byte cap instead of dropping them", asyn
 	} finally {
 		restoreImage();
 		restoreCanvas();
-		dom.window.close();
 	}
 });
 
@@ -2420,7 +2339,6 @@ test("keeps local photos presence-only when their bytes cannot be used", async (
 		}
 	} finally {
 		restoreImage();
-		dom.window.close();
 	}
 	const failing = setup();
 	const restoreFailing = installImageStub({ "*": "error" });
@@ -2430,7 +2348,6 @@ test("keeps local photos presence-only when their bytes cannot be used", async (
 		assert.deepEqual(snapshot.messages[0]!.attachments, [{ type: "image", url: null, description: null, media: null }]);
 	} finally {
 		restoreFailing();
-		failing.window.close();
 	}
 	const unloaded = setup();
 	try {
@@ -2439,7 +2356,6 @@ test("keeps local photos presence-only when their bytes cannot be used", async (
 		const snapshot = await messengerChatAdapter.readConversation();
 		assert.deepEqual(snapshot.messages[0]!.attachments, [{ type: "image", url: null, description: null, media: null }]);
 	} finally {
-		unloaded.window.close();
 	}
 });
 
@@ -2460,7 +2376,6 @@ test("inlines only the newest four photos when more render", async () => {
 		);
 	} finally {
 		restoreImage();
-		dom.window.close();
 	}
 });
 
@@ -2481,7 +2396,6 @@ test("keeps quoted photos type-only while inlining message photos", async () => 
 		});
 	} finally {
 		restoreImage();
-		dom.window.close();
 	}
 });
 
@@ -2505,7 +2419,6 @@ test("prefers the GIF render in multi-image links regardless of order", async ()
 		setMessages(cat("g1").replace("https://example.test/cat", "https://example.test/other-cat"));
 		assert.notEqual((await messengerChatAdapter.readConversation()).revision, before.revision);
 	} finally {
-		dom.window.close();
 	}
 });
 
@@ -2533,7 +2446,6 @@ test("reads GIPHY-captioned links with tag-like alts as GIFs regardless of order
 			{ type: "image", url: "https://example.test/kiwi", description: null, media: null },
 		]);
 	} finally {
-		dom.window.close();
 	}
 });
 
@@ -2559,7 +2471,6 @@ test("inlines local GIF renders while keeping remote GIF links fetchable", async
 		]);
 	} finally {
 		restoreImage();
-		dom.window.close();
 	}
 });
 
@@ -2579,7 +2490,6 @@ test("keeps the revision independent of inline bytes", async () => {
 			restoreImage();
 		}
 	} finally {
-		dom.window.close();
 	}
 });
 
@@ -2626,7 +2536,6 @@ test("reads the edited marker and stable ID for plain text without polluting the
 		assert.equal(captioned.messages[0]!.attachments.length, 1);
 		assert.equal(captioned.messages[0]!.edited, null);
 	} finally {
-		dom.window.close();
 	}
 });
 
@@ -2660,6 +2569,5 @@ test("marks a reply context uncertain when a heading button co-occurs with the r
 		setMessages(reply(`You replied to Alex${marker}`));
 		assert.equal((await messengerChatAdapter.readConversation()).messages[0]!.edited, true);
 	} finally {
-		dom.window.close();
 	}
 });

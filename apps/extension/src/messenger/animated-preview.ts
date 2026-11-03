@@ -12,8 +12,15 @@ function isPlainMessageButton(button: HTMLElement, selector: string): boolean {
 }
 
 // Standalone "gif" word in Messenger-supplied labels and alt text.
+export const GIF_WORD_SOURCE = "(?:^|\\s)gif(?=$|[\\s:.,])";
+
 export function isGifLabel(value: string): boolean {
-	return /(?:^|\s)gif(?=$|[\s:.,])/i.test(value);
+	return new RegExp(GIF_WORD_SOURCE, "i").test(value);
+}
+
+function singleImage(button: HTMLElement): HTMLImageElement | null {
+	const images = button.querySelectorAll("img");
+	return images.length === 1 ? images[0]! : null;
 }
 
 // Service chrome around a GIF render: a caption naming GIPHY or a label
@@ -33,18 +40,17 @@ export function hasGifChrome(scope: Element): boolean {
 // gif never forwards bytes, so over-matching only pauses.
 export function isGifButton(button: HTMLElement): boolean {
 	if (!isPlainMessageButton(button, '[role="button"]')) return false;
-	const images = button.querySelectorAll("img");
-	if (images.length !== 1) return false;
-	return isGifLabel(images[0]!.getAttribute("alt") ?? "");
+	const image = singleImage(button);
+	if (!image) return false;
+	return isGifLabel(image.getAttribute("alt") ?? "");
 }
 
 // The observed Messenger animated preview is a blob image with a nested play
 // control. Require the exact play glyph and message boundary, not a label.
 export function isAnimatedPreview(button: HTMLElement): boolean {
 	if (!isPlainMessageButton(button, '[role="button"][tabindex]')) return false;
-	const images = button.querySelectorAll<HTMLImageElement>("img");
-	if (images.length !== 1 || images[0]!.getAttribute("alt") !== "" || !images[0]!.getAttribute("src")?.startsWith("blob:"))
-		return false;
+	const image = singleImage(button);
+	if (!image || image.getAttribute("alt") !== "" || !image.getAttribute("src")?.startsWith("blob:")) return false;
 	const controls = button.querySelectorAll<HTMLElement>('[role="button"][tabindex]');
 	if (controls.length !== 1) return false;
 	const control = controls[0]!;
@@ -53,6 +59,6 @@ export function isAnimatedPreview(button: HTMLElement): boolean {
 		svg &&
 		svg.querySelectorAll("path").length === 1 &&
 		svg.querySelector("path")?.getAttribute("d") === playPath &&
-		!control.contains(images[0]!),
+		!control.contains(image),
 	);
 }

@@ -4,7 +4,6 @@ import type {
 	ConversationSnapshot,
 	HealthResponse,
 	InlineImageMedia,
-	InlineImageMime,
 	MessageAttachment,
 	ReplySettings,
 	SendResult,
@@ -37,7 +36,7 @@ function object(value: unknown): Record<string, unknown> {
 	return value as Record<string, unknown>;
 }
 
-function string(value: unknown, max = 512, allowEmpty = false): string {
+function string(value: unknown, max = MAX_ID_LENGTH, allowEmpty = false): string {
 	if (typeof value !== "string" || value.length > max || (!allowEmpty && !value.trim())) return invalid();
 	return value;
 }
@@ -51,9 +50,20 @@ function array(value: unknown, max: number): unknown[] {
 	return value;
 }
 
+// Shared bounds for the shapes below. One edit point when a limit changes.
+const MAX_ID_LENGTH = 512;
+const MAX_URL_LENGTH = 8192;
+const MAX_DESCRIPTION_LENGTH = 4000;
+const MAX_TEXT_LENGTH = 20_000;
+const MAX_ATTACHMENTS = 50;
+const MAX_REACTIONS = 100;
+const MAX_EMOJIS = 100;
+const MAX_MESSAGES = 500;
+const MAX_PARTICIPANTS = 10;
+
 function inlineMedia(value: unknown): InlineImageMedia {
 	const item = object(value);
-	if (typeof item.mime !== "string" || !INLINE_IMAGE_MIMES.includes(item.mime as InlineImageMime)) return invalid();
+	const mime = enumOf(item.mime, INLINE_IMAGE_MIMES);
 	if (
 		typeof item.data !== "string" ||
 		!item.data.length ||
@@ -62,80 +72,72 @@ function inlineMedia(value: unknown): InlineImageMedia {
 		!/^[A-Za-z0-9+/]*={0,2}$/.test(item.data)
 	)
 		return invalid();
-	for (const side of [item.width, item.height]) {
-		if (!Number.isSafeInteger(side) || (side as number) < 1 || (side as number) > MAX_IMAGE_SIDE) return invalid();
-	}
 	return {
-		mime: item.mime as InlineImageMime,
+		mime,
 		data: item.data,
-		width: item.width as number,
-		height: item.height as number,
+		width: intInRange(item.width, 1, MAX_IMAGE_SIDE),
+		height: intInRange(item.height, 1, MAX_IMAGE_SIDE),
 	};
+}
+
+// Reply quotes stay type-only: their bytes never reach the backend.
+function optMedia(value: unknown, allowMedia: boolean): InlineImageMedia | null {
+	if (value == null) return null;
+	return allowMedia ? inlineMedia(value) : invalid();
 }
 
 function attachment(value: unknown, allowMedia: boolean): MessageAttachment {
 	const item = object(value);
 	// Files stay presence-only. Their bytes never reach the backend.
 	if (item.type === "file") {
-		if (item.url !== undefined && item.url !== null) return invalid();
-		if (item.description !== undefined && item.description !== null) return invalid();
-		if (item.media !== undefined && item.media !== null) return invalid();
+		for (const key of ["url", "description", "media"] as const) {
+			if (item[key] != null) return invalid();
+		}
 		return { type: "file" };
 	}
-	if (item.type === "image") {
-		// Reply quotes stay type-only: their bytes never reach the backend.
-		const media =
-			item.media === undefined || item.media === null ? null : allowMedia ? inlineMedia(item.media) : invalid();
+	const type = enumOf(item.type, ["image", "video", "sticker", "gif"] as const);
+	const media = optMedia(item.media, allowMedia);
+	if (type === "image") {
 		return {
-			type: "image",
-			url: optionalText(item.url, 8192),
-			description: optionalText(item.description, 4000),
+			type,
+			url: optionalText(item.url, MAX_URL_LENGTH),
+			description: optionalText(item.description, MAX_DESCRIPTION_LENGTH),
 			media,
 		};
 	}
-	if (item.type === "video" || item.type === "sticker" || item.type === "gif") {
-		const type = item.type as "video" | "sticker" | "gif";
-		// Reply quotes stay type-only: their bytes never reach the backend.
-		const media =
-			item.media === undefined || item.media === null ? null : allowMedia ? inlineMedia(item.media) : invalid();
-		if (item.description !== null && item.description !== undefined) return invalid();
-		return { type, url: optionalText(item.url, 8192), description: null, media };
-	}
-	return invalid();
+	if (item.description != null) return invalid();
+	return { type, url: optionalText(item.url, MAX_URL_LENGTH), description: null, media };
 }
 
 function message(value: unknown): ConversationMessage {
 	const item = object(value);
-	const direction = item.direction;
-	if (direction !== "incoming" && direction !== "outgoing" && direction !== "unknown" && direction !== "system")
-		return invalid();
+	const direction = enumOf(item.direction, ["incoming", "outgoing", "unknown", "system"] as const);
 	if (typeof item.unsent !== "boolean") return invalid();
-	if (item.edited !== undefined && item.edited !== null && typeof item.edited !== "boolean") return invalid();
-	if (item.stableId !== undefined && item.stableId !== null && typeof item.stableId !== "string") return invalid();
+	if (item.edited != null && typeof item.edited !== "boolean") return invalid();
 	const reply = item.replyTo === null ? null : object(item.replyTo);
 	return {
 		id: string(item.id),
 		// Stable matching key and edited marker. Older extension versions send
 		// no field; both default to unknown.
-		stableId: item.stableId === undefined || item.stableId === null ? null : string(item.stableId, 512, true) || null,
-		edited: item.edited === undefined ? null : (item.edited as boolean | null),
-		text: string(item.text, 20_000, true),
+		stableId: optionalText(item.stableId ?? null, MAX_ID_LENGTH) || null,
+		edited: (item.edited as boolean | null | undefined) ?? null,
+		text: string(item.text, MAX_TEXT_LENGTH, true),
 		direction,
 		// Per-message display label. Older extension versions send no field.
-		sender: item.sender === undefined ? null : optionalText(item.sender, 512),
+		sender: optionalText(item.sender ?? null, MAX_ID_LENGTH),
 		replyTo: reply && {
-			text: optionalText(reply.text, 20_000),
-			context: optionalText(reply.context, 4000),
-			attachments: array(reply.attachments, 50).map((value) => attachment(value, false)),
+			text: optionalText(reply.text, MAX_TEXT_LENGTH),
+			context: optionalText(reply.context, MAX_DESCRIPTION_LENGTH),
+			attachments: array(reply.attachments, MAX_ATTACHMENTS).map((value) => attachment(value, false)),
 		},
-		attachments: array(item.attachments, 50).map((value) => attachment(value, true)),
-		reactions: array(item.reactions, 100).map((value) => {
+		attachments: array(item.attachments, MAX_ATTACHMENTS).map((value) => attachment(value, true)),
+		reactions: array(item.reactions, MAX_REACTIONS).map((value) => {
 			const reaction = object(value);
 			if (reaction.count !== null && (!Number.isSafeInteger(reaction.count) || (reaction.count as number) < 0))
 				return invalid();
 			return {
-				label: string(reaction.label, 4000, true),
-				emojis: array(reaction.emojis, 100).map((emoji) => string(emoji, 256, true)),
+				label: string(reaction.label, MAX_DESCRIPTION_LENGTH, true),
+				emojis: array(reaction.emojis, MAX_EMOJIS).map((emoji) => string(emoji, 256, true)),
 				count: reaction.count as number | null,
 			};
 		}),
@@ -145,17 +147,15 @@ function message(value: unknown): ConversationMessage {
 
 function snapshot(value: unknown): ConversationSnapshot {
 	const item = object(value);
-	const messages = array(item.messages, 500).map(message);
+	const messages = array(item.messages, MAX_MESSAGES).map(message);
 	if (messages.reduce((size, item) => size + item.text.length + (item.replyTo?.text?.length ?? 0), 0) > 300_000)
 		return invalid();
 	let mediaCount = 0;
 	let mediaChars = 0;
 	for (const message of messages) {
 		for (const entry of message.attachments) {
-			if (
-				(entry.type === "image" || entry.type === "video" || entry.type === "gif" || entry.type === "sticker") &&
-				entry.media
-			) {
+			// Files stay presence-only and never carry media bytes.
+			if (entry.type !== "file" && entry.media) {
 				mediaCount++;
 				mediaChars += entry.media.data.length;
 			}
@@ -166,8 +166,8 @@ function snapshot(value: unknown): ConversationSnapshot {
 	const participants =
 		item.participants === undefined
 			? []
-			: array(item.participants, 10).map((name) => {
-					const trimmed = string(name, 512, true).trim();
+			: array(item.participants, MAX_PARTICIPANTS).map((name) => {
+					const trimmed = string(name, MAX_ID_LENGTH, true).trim();
 					if (!trimmed) return invalid();
 					return trimmed;
 				});
@@ -192,10 +192,26 @@ function optionalBoolean(value: unknown): boolean | undefined {
 	return value;
 }
 
-function delay(value: unknown): number {
-	if (!Number.isSafeInteger(value) || (value as number) < MIN_REPLY_DELAY_SECONDS) return invalid();
-	if ((value as number) > MAX_REPLY_DELAY_SECONDS) return invalid();
+function intInRange(value: unknown, min: number, max: number): number {
+	if (!Number.isSafeInteger(value) || (value as number) < min || (value as number) > max) return invalid();
 	return value as number;
+}
+
+function enumOf<T extends string>(value: unknown, list: readonly T[]): T {
+	if (typeof value !== "string" || !(list as readonly string[]).includes(value)) return invalid();
+	return value as T;
+}
+
+function delay(value: unknown): number {
+	return intInRange(value, MIN_REPLY_DELAY_SECONDS, MAX_REPLY_DELAY_SECONDS);
+}
+
+function cid(item: Record<string, unknown>): string {
+	return string(item.connectorId);
+}
+
+function tid(item: Record<string, unknown>): string {
+	return string(item.taskId);
 }
 
 // Older extension versions send no settings; the service then keeps its defaults.
@@ -212,7 +228,7 @@ function optionalReplySettings(value: unknown): ReplySettings | undefined {
 function startInput(value: unknown) {
 	const item = object(value);
 	return {
-		connectorId: string(item.connectorId),
+		connectorId: cid(item),
 		goal: string(item.goal, MAX_TASK_TEXT_LENGTH),
 		snapshot: snapshot(item.snapshot),
 		developerMode: optionalBoolean(item.developerMode),
@@ -222,11 +238,10 @@ function startInput(value: unknown) {
 
 function controlInput(value: unknown): { connectorId: string; taskId: string; action: TaskControlAction; text?: string } {
 	const item = object(value);
-	if (typeof item.action !== "string" || !actions.includes(item.action as TaskControlAction)) return invalid();
 	const result: { connectorId: string; taskId: string; action: TaskControlAction; text?: string } = {
-		connectorId: string(item.connectorId),
-		taskId: string(item.taskId),
-		action: item.action as TaskControlAction,
+		connectorId: cid(item),
+		taskId: tid(item),
+		action: enumOf(item.action, actions),
 	};
 	if (item.text !== undefined) result.text = string(item.text, MAX_TASK_TEXT_LENGTH, true);
 	return result;
@@ -234,13 +249,13 @@ function controlInput(value: unknown): { connectorId: string; taskId: string; ac
 
 function attachInput(value: unknown) {
 	const item = object(value);
-	return { connectorId: string(item.connectorId), taskId: string(item.taskId), snapshot: snapshot(item.snapshot) };
+	return { connectorId: cid(item), taskId: tid(item), snapshot: snapshot(item.snapshot) };
 }
 
 function syncInput(value: unknown) {
 	const item = object(value);
 	return {
-		connectorId: string(item.connectorId),
+		connectorId: cid(item),
 		snapshot: item.snapshot === null ? null : snapshot(item.snapshot),
 		developerMode: optionalBoolean(item.developerMode),
 		replySettings: optionalReplySettings(item.replySettings),
@@ -250,7 +265,7 @@ function syncInput(value: unknown) {
 function authorizeInput(value: unknown) {
 	const item = object(value);
 	return {
-		connectorId: string(item.connectorId),
+		connectorId: cid(item),
 		commandId: string(item.commandId),
 		chatId: string(item.chatId),
 		revision: string(item.revision),
@@ -259,21 +274,22 @@ function authorizeInput(value: unknown) {
 
 function reportInput(value: unknown) {
 	const item = object(value);
-	if (typeof item.result !== "string" || !results.includes(item.result as SendResult)) return invalid();
-	return { connectorId: string(item.connectorId), commandId: string(item.commandId), result: item.result as SendResult };
+	return { connectorId: cid(item), commandId: string(item.commandId), result: enumOf(item.result, results) };
 }
 
 function disconnectInput(value: unknown) {
-	return { connectorId: string(object(value).connectorId) };
+	return { connectorId: cid(object(value)) };
 }
 
 function clearInput(value: unknown) {
 	const item = object(value);
-	return { connectorId: string(item.connectorId), taskId: string(item.taskId) };
+	return { connectorId: cid(item), taskId: tid(item) };
 }
 
+export const healthResponse: HealthResponse = { status: "ok", service: "envoy-backend" };
+
 export const appRouter = t.router({
-	health: t.procedure.query((): HealthResponse => ({ status: "ok", service: "envoy-backend" })),
+	health: t.procedure.query((): HealthResponse => healthResponse),
 	task: t.router({
 		start: t.procedure
 			.input(startInput)
