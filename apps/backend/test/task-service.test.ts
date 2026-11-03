@@ -153,7 +153,7 @@ test("with auto-send off a reply waits for Send now", async () => {
 	const { task } = service.sync("owner", snapshot(), false, settings);
 	assert.equal(task?.status, "pending");
 	assert.equal(task?.pendingReply?.sendAt, null);
-	assert.equal(task?.detail, "Automatic sending is off. Choose Send now when it is ready.");
+	assert.deepEqual(task?.detail, { code: "auto_send_off" });
 	advance(60_000);
 	assert.equal(service.sync("owner", snapshot(), false, settings).command, null);
 	service.control("owner", task!.id, "send-now");
@@ -304,7 +304,7 @@ test("a rejected claim is not restored after the conversation changed", async ()
 	const state = service.report("owner", claim.commandId, "rejected")!;
 	assert.equal(state.status, "needs_user");
 	assert.equal(state.pendingReply, null);
-	assert.match(state.detail!, /not sent/);
+	assert.deepEqual(state.detail, { code: "reply_not_sent_check_conversation" });
 });
 
 test("a rejected retired claim does not suppress a paused edit on resume", async () => {
@@ -347,7 +347,7 @@ test("a late uncertain retired claim cancels a replacement edit and requires rev
 	const state = service.report("owner", claim.commandId, "uncertain")!;
 	assert.equal(state.status, "needs_user");
 	assert.equal(state.pendingReply, null);
-	assert.match(state.detail!, /may have completed/);
+	assert.deepEqual(state.detail, { code: "previous_send_may_have_completed_before_resuming" });
 	assert.equal(service.sync("owner", snapshot()).command, null);
 	assert.equal(service.control("owner", task.id, "resume").status, "waiting");
 	assert.equal(agent.calls.length, 1);
@@ -362,7 +362,7 @@ test("a retired claim gates takeover, replacement tasks, and deletion until its 
 		const claim = service.sync("owner", snapshot()).command!;
 		const takenOver = service.control("owner", task.id, "take-over");
 		assert.equal(takenOver.status, "taken_over");
-		assert.match(takenOver.detail!, /Checking/);
+		assert.deepEqual(takenOver.detail, { code: "taken_over_checking_previous_send" });
 		assert.throws(() => service.start("owner", "Try again", snapshot()), /still being checked/);
 		assert.throws(() => service.clear("owner", task.id), /still being checked/);
 		const reported = service.report("owner", claim.commandId, result)!;
@@ -370,7 +370,7 @@ test("a retired claim gates takeover, replacement tasks, and deletion until its 
 		if (result === "rejected") {
 			assert.equal(service.start("owner", "Try again", snapshot()).status, "thinking");
 		} else {
-			assert.match(reported.detail!, /may have completed/);
+			assert.deepEqual(reported.detail, { code: "previous_send_may_have_completed_before_new_task" });
 			assert.throws(() => service.start("owner", "Try again", snapshot()), /previous send may have completed/);
 		}
 	}
@@ -389,7 +389,7 @@ test("a lost retired report expires to uncertainty without allowing a replacemen
 	const expired = service.sync("owner", snapshot());
 	assert.equal(expired.command, null);
 	assert.equal(expired.task?.status, "needs_user");
-	assert.match(expired.task?.detail!, /may have completed/);
+	assert.deepEqual(expired.task?.detail, { code: "previous_send_may_have_completed_before_resuming" });
 	assert.equal(service.report("owner", claim.commandId, "rejected")?.status, "needs_user");
 });
 
@@ -403,7 +403,7 @@ test("a lost retired report after takeover blocks a new task until the user revi
 	advance(30_001);
 	const state = service.sync("owner", snapshot()).task!;
 	assert.equal(state.status, "taken_over");
-	assert.match(state.detail!, /may have completed/);
+	assert.deepEqual(state.detail, { code: "previous_send_may_have_completed_before_new_task" });
 	assert.throws(() => service.start("owner", "Try again", snapshot()), /previous send may have completed/);
 	service.clear("owner", task.id);
 	assert.equal(service.start("owner", "Try again", snapshot()).status, "thinking");
@@ -422,7 +422,7 @@ test("the original connector can settle a retired claim after a replacement atta
 	assert.equal(service.report("old-owner", claim.commandId, "uncertain"), null);
 	const state = service.sync("new-owner", snapshot()).task!;
 	assert.equal(state.status, "needs_user");
-	assert.match(state.detail!, /may have completed/);
+	assert.deepEqual(state.detail, { code: "previous_send_may_have_completed_before_resuming" });
 	assert.equal(agent.calls.length, 1);
 });
 
@@ -468,7 +468,7 @@ test("authorized sends cancelled or edited by the owner remain uncertain", async
 	assert.equal(service.authorize("owner", claim.commandId, claim.chatId, claim.expectedRevision), true);
 	const result = service.control("owner", task.id, "edit");
 	assert.equal(result.status, "needs_user");
-	assert.match(result.detail!, /may have completed/);
+	assert.deepEqual(result.detail, { code: "send_may_have_completed_before_editing" });
 	assert.equal(service.authorize("owner", claim.commandId, claim.chatId, claim.expectedRevision), false);
 	service.control("owner", task.id, "resume");
 	service.sync("owner", snapshot());
@@ -486,7 +486,7 @@ test("the outgoing bubble can arrive before the confirmed send report", async ()
 	assert.equal(service.sync("owner", outgoing).task?.status, "sending");
 	const reported = service.report("owner", claim.commandId, "sent")!;
 	assert.equal(reported.status, "thinking");
-	assert.equal(reported.detail, "Checking if the task is complete.");
+	assert.deepEqual(reported.detail, { code: "checking_if_task_complete" });
 	assert.equal(agent.calls[1]!.reason, "reply_sent");
 	assert.equal(agent.calls[1]!.snapshot.revision, "r2");
 	agent.calls[1]!.resolve({ action: "wait" });
@@ -508,7 +508,7 @@ test("a confirmed send runs one completion check that can finish the task", asyn
 	assert.equal(service.authorize("owner", claim.commandId, claim.chatId, claim.expectedRevision), true);
 	const reported = service.report("owner", claim.commandId, "sent")!;
 	assert.equal(reported.status, "thinking");
-	assert.equal(reported.detail, "Checking if the task is complete.");
+	assert.deepEqual(reported.detail, { code: "checking_if_task_complete" });
 	assert.equal(agent.calls.length, 2);
 	assert.equal(agent.calls[1]!.reason, "reply_sent");
 	// The check sees the sent text even before the outgoing bubble arrives.
@@ -518,7 +518,7 @@ test("a confirmed send runs one completion check that can finish the task", asyn
 	await Promise.resolve();
 	const completed = service.sync("owner", snapshot()).task!;
 	assert.equal(completed.status, "completed");
-	assert.equal(completed.detail, "Confirmed Friday 18:00.");
+	assert.deepEqual(completed.detail, { code: "agent_message", text: "Confirmed Friday 18:00." });
 	// Late follow-ups to the ended task are ignored, never re-evaluated.
 	service.sync("owner", snapshot("r2", "Actually, can we do 19:00?"));
 	assert.equal(agent.calls.length, 2);
@@ -538,11 +538,11 @@ test("the post-send check waits when the goal needs an acknowledgment", async ()
 	await Promise.resolve();
 	const waiting = service.sync("owner", snapshot()).task!;
 	assert.equal(waiting.status, "waiting");
-	assert.equal(waiting.detail, "Reply sent. Waiting for a new message.");
+	assert.deepEqual(waiting.detail, { code: "reply_sent_waiting" });
 	// The late outgoing bubble and repeat syncs never re-run the check.
 	const outgoing = snapshot("r2", "Shall we meet at the library?", "outgoing");
 	assert.equal(service.sync("owner", outgoing).task?.status, "waiting");
-	assert.equal(service.sync("owner", outgoing).task?.detail, "Waiting for a new incoming message.");
+	assert.deepEqual(service.sync("owner", outgoing).task?.detail, { code: "waiting_for_incoming" });
 	assert.equal(agent.calls.length, 2);
 });
 
@@ -559,7 +559,7 @@ test("a reply decision after a confirmed send never produces a pending reply", a
 	const waiting = service.sync("owner", snapshot()).task!;
 	assert.equal(waiting.status, "waiting");
 	assert.equal(waiting.pendingReply, null);
-	assert.equal(waiting.detail, "Reply sent. Waiting for a new message.");
+	assert.deepEqual(waiting.detail, { code: "reply_sent_waiting" });
 	advance(20_000);
 	assert.equal(service.sync("owner", snapshot()).command, null);
 	assert.equal(agent.calls.length, 2);
@@ -577,7 +577,7 @@ test("an ask decision after a confirmed send degrades to waiting", async () => {
 	await Promise.resolve();
 	const waiting = service.sync("owner", snapshot()).task!;
 	assert.equal(waiting.status, "waiting");
-	assert.equal(waiting.detail, "Reply sent. Waiting for a new message.");
+	assert.deepEqual(waiting.detail, { code: "reply_sent_waiting" });
 	assert.ok(!waiting.agentChat.some((entry) => entry.text === "Should I follow up?"));
 	assert.equal(agent.calls.length, 2);
 });
@@ -646,7 +646,7 @@ test("a failed post-send check degrades to waiting instead of blocking", async (
 	await Promise.resolve();
 	const waiting = service.sync("owner", snapshot()).task!;
 	assert.equal(waiting.status, "waiting");
-	assert.equal(waiting.detail, "Reply sent. Waiting for a new message.");
+	assert.deepEqual(waiting.detail, { code: "reply_sent_waiting" });
 	assert.equal(agent.calls.length, 2);
 	// A later incoming message still triggers a normal evaluation.
 	service.sync("owner", snapshot("r2", "Sounds good, see you then."));
@@ -746,7 +746,7 @@ test("lost report and expired lease pause the task; attach requires the same cha
 	assert.throws(() => service.attach("replacement", task.id, { ...snapshot(), chatId: "wrong" }));
 	const attached = service.attach("replacement", task.id, snapshot());
 	assert.equal(attached.status, "paused");
-	assert.match(attached.detail!, /may have completed/);
+	assert.deepEqual(attached.detail, { code: "reconnected_send_may_have_completed" });
 	assert.equal(service.authorize("old-owner", claim.commandId, claim.chatId, claim.expectedRevision), false);
 	service.control("replacement", task.id, "resume");
 	service.sync("replacement", snapshot());
@@ -763,7 +763,7 @@ test("a lost send report becomes uncertain even while the connector keeps checki
 	advance(30_001);
 	const result = service.sync("owner", snapshot());
 	assert.equal(result.task?.status, "needs_user");
-	assert.match(result.task?.detail!, /could not be confirmed/);
+	assert.deepEqual(result.task?.detail!, { code: "send_unconfirmed_check_conversation" });
 	assert.equal(service.report("owner", claim.commandId, "sent")?.status, "needs_user");
 	service.control("owner", task.id, "update-goal", "Arrange Thursday instead");
 	assert.equal(service.sync("owner", snapshot()).task?.status, "needs_user");
@@ -920,7 +920,7 @@ test("a quoted photo pauses with a specific message", () => {
 		content.messages[0]!.attachments = [{ type: "video", url: null, description: null, media: null }];
 		const result = service.start("owner", "Arrange a meeting", content);
 		assert.equal(result.status, "needs_user");
-		assert.equal(result.detail, "The latest message contains content Envoy cannot interpret.");
+		assert.deepEqual(result.detail, { code: "latest_unreadable" });
 		assert.equal(agent.calls.length, 0);
 	}
 	{
@@ -929,7 +929,7 @@ test("a quoted photo pauses with a specific message", () => {
 		content.messages[0]!.replyTo = { text: "Original", context: "Reply", attachments: [photo] };
 		const result = service.start("owner", "Arrange a meeting", content);
 		assert.equal(result.status, "needs_user");
-		assert.equal(result.detail, "The latest message quotes an image Envoy cannot read. Take over to reply yourself.");
+		assert.deepEqual(result.detail, { code: "latest_quotes_image" });
 		assert.equal(agent.calls.length, 0);
 	}
 	{
@@ -942,7 +942,7 @@ test("a quoted photo pauses with a specific message", () => {
 		};
 		const result = service.start("owner", "Arrange a meeting", content);
 		assert.equal(result.status, "needs_user");
-		assert.equal(result.detail, "The latest message quotes media Envoy cannot read. Take over to reply yourself.");
+		assert.deepEqual(result.detail, { code: "latest_quotes_media" });
 		assert.equal(agent.calls.length, 0);
 	}
 });
@@ -971,7 +971,7 @@ test("an unsent latest message, including an unsent group event, does not trigge
 		content.messages[0]!.unsent = true;
 		const result = service.start("owner", "Arrange a meeting", content);
 		assert.equal(result.status, "needs_user");
-		assert.match(result.detail!, /unsent/);
+		assert.deepEqual(result.detail!, { code: "latest_unsent_check_conversation" });
 		assert.equal(agent.calls.length, 0);
 	}
 	{
@@ -1004,7 +1004,7 @@ test("known incoming text can be considered with incomplete older history", asyn
 	await Promise.resolve();
 	const result = service.sync("owner", withHistory);
 	assert.equal(result.task?.status, "needs_user");
-	assert.equal(result.task?.detail, "Is the earlier photo relevant to Tuesday?");
+	assert.deepEqual(result.task?.detail, { code: "agent_message", text: "Is the earlier photo relevant to Tuesday?" });
 	assert.equal(result.command, null);
 });
 
@@ -1116,7 +1116,7 @@ test("a transient unreadable view resumes the agent once the same chat reads aga
 	const paused = service.sync("owner", null).task!;
 	assert.equal(paused.status, "paused");
 	assert.equal(paused.pendingReply, null);
-	assert.match(paused.detail!, /resumes when it can read/);
+	assert.deepEqual(paused.detail!, { code: "conversation_unavailable_resumable" });
 	const resumed = service.sync("owner", snapshot()).task!;
 	assert.equal(resumed.status, "thinking");
 	assert.equal(agent.calls.length, 2);
@@ -1147,7 +1147,7 @@ test("an unreadable view does not resume a send that may have completed", async 
 		for (let read = 0; read < 3; read++) assert.equal(service.sync("owner", null).task?.status, "paused");
 		const after = service.sync("owner", snapshot("r2", "Thursday instead?")).task!;
 		assert.equal(after.status, "paused");
-		assert.match(after.detail!, /may have completed/);
+		assert.deepEqual(after.detail!, { code: "conversation_unavailable_send_uncertain" });
 		assert.equal(service.authorize("owner", claim.commandId, claim.chatId, claim.expectedRevision), false);
 		assert.equal(agent.calls.length, 1);
 	}
@@ -1172,7 +1172,7 @@ test("repeated unreadable views recover with a fresh decision and full countdown
 			assert.equal(paused.task?.status, "paused");
 			assert.equal(paused.task?.pendingReply, null);
 			assert.equal(paused.command, null);
-			assert.match(paused.task!.detail!, /resumes when it can read/);
+			assert.deepEqual(paused.task!.detail!, { code: "conversation_unavailable_resumable" });
 		}
 		const current = snapshot("r2", "Thursday instead?");
 		const recovered = service.sync("owner", current);
@@ -1400,7 +1400,7 @@ test("instruction updates leave an uncertain paused send paused", async () => {
 	service.control("owner", task.id, "pause");
 	const updated = service.control("owner", task.id, "update-goal", "Ask about lunch instead");
 	assert.equal(updated.status, "paused");
-	assert.match(updated.detail!, /may have completed/);
+	assert.deepEqual(updated.detail!, { code: "send_may_have_completed_before_resuming" });
 	assert.equal(agent.calls.length, 1);
 });
 
@@ -1521,7 +1521,8 @@ test("a sender display rename at the same revision does not pause verification",
 	service.start("owner", "Arrange a meeting", named("Mikołaj Gaweł"));
 	const { task } = service.sync("owner", named("Mikołaj"));
 	assert.notEqual(task?.status, "paused");
-	assert.doesNotMatch(task?.detail ?? "", /could not be verified/);
+	assert.ok(task?.detail?.code !== "conversation_unverifiable");
+	assert.ok(task?.detail?.code !== "conversation_unverifiable_send_uncertain");
 });
 
 test("observed edits reach the agent once with before/after text, including repeated edits", async () => {

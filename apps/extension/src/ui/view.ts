@@ -7,6 +7,7 @@ import {
 	normalizeReplySettings,
 	type ReplySettings,
 	type TaskControlAction,
+	type TaskDetail,
 	type TaskStatus,
 } from "@envoy/contracts";
 import type { ControllerState, EnvoyController } from "../controller";
@@ -15,7 +16,11 @@ import { isolateTextInput } from "./text-input";
 import styles from "./styles.css?inline";
 import markup from "./view.html?raw";
 
-const statusKeys: Record<TaskStatus, keyof ExtensionStrings> = {
+type StringKeys = {
+	[K in keyof ExtensionStrings]: ExtensionStrings[K] extends string ? K : never;
+}[keyof ExtensionStrings];
+
+const statusKeys: Record<TaskStatus, StringKeys> = {
 	thinking: "statusThinking",
 	waiting: "statusWaiting",
 	pending: "statusPending",
@@ -26,6 +31,10 @@ const statusKeys: Record<TaskStatus, keyof ExtensionStrings> = {
 	completed: "statusCompleted",
 	taken_over: "statusTakenOver",
 };
+
+function detailText(detail: TaskDetail, strings: ExtensionStrings): string {
+	return detail.code === "agent_message" ? detail.text : strings.details[detail.code];
+}
 
 // Markup is static. Conversation and model text are inserted as text, never HTML.
 export function createEnvoyView(onSelectionChange: () => void, controller: EnvoyController) {
@@ -56,7 +65,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 
 	function localized(key: string | undefined): string | null {
 		if (!key || !(key in strings)) return null;
-		return strings[key as keyof ExtensionStrings];
+		const value = strings[key as keyof ExtensionStrings];
+		return typeof value === "string" ? value : null;
 	}
 
 	// Static labels live in the markup under data-i18n attributes; dynamic
@@ -435,7 +445,11 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		taskNotice.textContent = strings.taskElsewhere;
 		taskNotice.hidden = !task || !state.snapshot || currentChat;
 		const chat = owner && task ? task.agentChat : [];
-		const baseState = task ? (task.detail ?? `${strings[statusKeys[task.status]]}.`) : "";
+		const baseState = task
+			? task.detail
+				? detailText(task.detail, strings)
+				: `${strings[statusKeys[task.status]]}.`
+			: "";
 		const lastAgent = [...chat].reverse().find((message) => message.role === "agent");
 		agentState.textContent = baseState + (task && active && !owner ? strings.notConnectedNote : "");
 		agentState.hidden = !task || baseState === lastAgent?.text;

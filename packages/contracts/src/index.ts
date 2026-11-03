@@ -189,6 +189,65 @@ export interface AgentChatMessage {
 	createdAt: number;
 }
 
+export type TaskDetailCode =
+	| "previous_send_may_have_completed"
+	| "reconnected_send_may_have_completed"
+	| "reconnected_resume_ready"
+	| "send_may_have_completed_before_editing"
+	| "countdown_stopped_while_editing"
+	| "edited_reply_saved"
+	| "sending_when_tab_checks_in"
+	| "send_may_have_completed_before_resuming"
+	| "reply_cancelled_waiting"
+	| "paused_send_may_have_completed"
+	| "paused_checking_previous_send"
+	| "paused_by_you"
+	| "taken_over_send_may_have_completed"
+	| "taken_over_checking_previous_send"
+	| "taken_over_in_control"
+	| "checking_previous_send_before_sending"
+	| "checking_conversation_before_sending"
+	| "reply_not_sent_retry"
+	| "reply_sent_waiting"
+	| "reply_not_sent_check_conversation"
+	| "send_unconfirmed_check_conversation"
+	| "auto_send_off"
+	| "previous_send_may_have_completed_before_new_task"
+	| "paused_previous_send_may_have_completed"
+	| "previous_send_may_have_completed_before_resuming"
+	| "checking_previous_send"
+	| "latest_unsent_check_conversation"
+	| "waiting_for_incoming"
+	| "latest_unknown_sender"
+	| "latest_unreadable"
+	| "latest_quotes_image"
+	| "latest_quotes_media"
+	| "considering_conversation"
+	| "checking_if_task_complete"
+	| "model_no_decision"
+	| "model_key_missing"
+	| "model_invalid_reply"
+	| "review_reply_before_send"
+	| "waiting_for_message"
+	| "tab_changed_conversations"
+	| "conversation_unavailable_resumable"
+	| "conversation_unavailable"
+	| "conversation_unverifiable"
+	| "reply_unverifiable"
+	| "tab_disconnected"
+	| "tab_stopped_checking_in"
+	| "tab_changed_conversations_send_uncertain"
+	| "conversation_unavailable_resumable_send_uncertain"
+	| "conversation_unavailable_send_uncertain"
+	| "conversation_unverifiable_send_uncertain"
+	| "reply_unverifiable_send_uncertain"
+	| "tab_disconnected_send_uncertain"
+	| "tab_stopped_checking_in_send_uncertain";
+
+// Fixed backend statuses are codes the UI localizes; only ask/finish carry
+// model-written text.
+export type TaskDetail = { code: TaskDetailCode } | { code: "agent_message"; text: string };
+
 export interface TaskState {
 	id: string;
 	chatId: string;
@@ -196,7 +255,7 @@ export interface TaskState {
 	status: TaskStatus;
 	pendingReply: PendingReply | null;
 	// A short status or question for the user. Never an API error containing message bodies.
-	detail: string | null;
+	detail: TaskDetail | null;
 	// Private conversation with Envoy: agent questions, user answers, and reply
 	// outcomes. Task-local history; it dies with the task.
 	agentChat: AgentChatMessage[];
