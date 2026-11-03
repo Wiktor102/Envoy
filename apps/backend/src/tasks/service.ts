@@ -254,6 +254,9 @@ export class TaskService {
 				}
 				const uncertain = this.invalidate(true);
 				task.pendingReply = null;
+				// Cancelling during the post-send completion check must leave the
+				// task waiting, not re-run the check on the next sync.
+				this.evaluationReason = "new_message";
 				task.status = uncertain ? "needs_user" : "waiting";
 				task.detail = uncertain
 					? "The send may have completed. Check the conversation before resuming."
@@ -408,8 +411,19 @@ export class TaskService {
 		const edits = findEdits(this.lastSeenTexts, copy);
 		for (const edit of edits) this.appendEditEvent(edit);
 		if (previous && previous.revision !== copy.revision) {
-			if (!["paused", "needs_user"].includes(task.status))
+			// Our own outgoing bubble can land while the post-send completion
+			// check is running. Re-run that check on the new snapshot instead
+			// of dropping it to the outgoing guard; genuinely new incoming
+			// content still invalidates into a full evaluation.
+			const postSendRerun =
+				task.status === "thinking" &&
+				this.generation !== null &&
+				this.evaluationReason === "reply_sent" &&
+				latestMessage(copy)?.direction === "outgoing";
+			if (!["paused", "needs_user"].includes(task.status)) {
 				this.evaluationReason = edits.length ? "message_edited" : "new_message";
+				if (postSendRerun) this.evaluationReason = "reply_sent";
+			}
 			// After authorization, a new revision can be the outgoing bubble
 			// itself. Keep the attempt until its explicit report arrives.
 			if (!(task.status === "sending" && this.inFlight?.authorized)) {
@@ -559,6 +573,15 @@ export class TaskService {
 			this.task.status = "waiting";
 			this.task.detail = "Reply sent. Waiting for a new message.";
 			this.appendAgentChat("event", "Reply sent.", attempt.command.text);
+			// A confirmed send ends with a one-shot completion check instead of
+			// idling behind the outgoing guard. Racing incoming content keeps
+			// its full evaluation, which may still reply.
+			const current = this.connector.readConversation();
+			const latest = current && latestMessage(current);
+			if (!current || current.revision === attempt.command.expectedRevision || latest?.direction !== "incoming") {
+				this.evaluationReason = "reply_sent";
+			}
+			this.maybeGenerate();
 		} else {
 			if (result !== "rejected") this.requiresVerification = true;
 			this.task.status = "needs_user";
@@ -812,14 +835,17 @@ export class TaskService {
 			task.detail = "Checking whether the previous send completed.";
 			return;
 		}
+		// The post-send completion check runs once despite suppression: the
+		// sent context is suppressed against re-replies, not against finish.
 		if (
-			this.processedRevisions.has(snapshot.revision) ||
-			this.suppressedRevisions.has(snapshot.revision) ||
-			this.suppressedContexts.has(textContext(snapshot))
+			this.evaluationReason !== "reply_sent" &&
+			(this.processedRevisions.has(snapshot.revision) ||
+				this.suppressedRevisions.has(snapshot.revision) ||
+				this.suppressedContexts.has(textContext(snapshot)))
 		)
 			return;
 		// An unsent group event still withdraws the message before it.
-		const latest = [...snapshot.messages].reverse().find((message) => message.direction !== "system" || message.unsent);
+		const latest = latestMessage(snapshot);
 		if (latest?.unsent) {
 			task.status = "needs_user";
 			task.detail = "The latest message was unsent. Check the conversation before resuming.";
@@ -847,17 +873,28 @@ export class TaskService {
 			return;
 		}
 		task.status = "thinking";
-		task.detail = "Considering the conversation.";
+		task.detail =
+			this.evaluationReason === "reply_sent" ? "Checking if the task is complete." : "Considering the conversation.";
 		const epoch = ++this.epoch;
+		const reason = this.evaluationReason;
 		const abort = new AbortController();
 		this.generation = abort;
 		const captured = structuredClone(snapshot);
 		const taskCopy = this.state()!;
-		void this.agent.run(taskCopy, captured, this.evaluationReason, abort.signal).then(
-			(decision) => this.acceptDecision(epoch, captured, decision),
+		void this.agent.run(taskCopy, captured, reason, abort.signal).then(
+			(decision) => this.acceptDecision(epoch, captured, reason, decision),
 			() => {
 				if (this.epoch !== epoch || !this.task || this.task.status !== "thinking") return;
 				this.generation = null;
+				// A failed completion check must not block the user over a send
+				// that already succeeded: degrade to waiting, never needs_user.
+				if (reason === "reply_sent") {
+					this.processedRevisions.add(captured.revision);
+					this.evaluationReason = "new_message";
+					this.task.status = "waiting";
+					this.task.detail = "Reply sent. Waiting for a new message.";
+					return;
+				}
 				this.task.status = "needs_user";
 				this.task.detail = process.env.MODEL_API_KEY?.trim()
 					? "The model could not produce a decision. Check its configuration and resume."
@@ -866,7 +903,12 @@ export class TaskService {
 		);
 	}
 
-	private acceptDecision(epoch: number, snapshot: ConversationSnapshot, decision: AgentDecision): void {
+	private acceptDecision(
+		epoch: number,
+		snapshot: ConversationSnapshot,
+		reason: EvaluationReason,
+		decision: AgentDecision,
+	): void {
 		const task = this.task;
 		const current = this.connector.readConversation();
 		if (
@@ -880,8 +922,18 @@ export class TaskService {
 			return;
 		this.generation = null;
 		this.processedRevisions.add(snapshot.revision);
+		// The post-send check runs once: consume the reason so later syncs fall
+		// back to the outgoing guard instead of re-evaluating.
+		if (reason === "reply_sent") this.evaluationReason = "new_message";
 		switch (decision.action) {
 			case "reply": {
+				// A reply after a confirmed send would double-send. Treat it as
+				// invalid and wait instead; never create a pending reply here.
+				if (reason === "reply_sent") {
+					task.status = "waiting";
+					task.detail = "Reply sent. Waiting for a new message.";
+					break;
+				}
 				let text: string;
 				try {
 					text = checkedReply(decision.text);
@@ -907,9 +959,17 @@ export class TaskService {
 			}
 			case "wait":
 				task.status = "waiting";
-				task.detail = "Waiting for a new message.";
+				task.detail =
+					reason === "reply_sent" ? "Reply sent. Waiting for a new message." : "Waiting for a new message.";
 				break;
 			case "ask":
+				// Uncertainty after a send resolves to waiting: any later message
+				// re-evaluates, so asking would only interrupt the user.
+				if (reason === "reply_sent") {
+					task.status = "waiting";
+					task.detail = "Reply sent. Waiting for a new message.";
+					break;
+				}
 				task.status = "needs_user";
 				task.detail = decision.text;
 				this.appendAgentChat("agent", decision.text);
@@ -936,6 +996,10 @@ function checkedReply(value: string | undefined): string {
 		throw new Error("Replies must be a single line without control characters.");
 	}
 	return checkedText(value);
+}
+
+function latestMessage(snapshot: ConversationSnapshot): ConversationMessage | undefined {
+	return [...snapshot.messages].reverse().find((message) => message.direction !== "system" || message.unsent);
 }
 
 function readableLatest(messages: readonly ConversationMessage[], latest: ConversationMessage): boolean {
