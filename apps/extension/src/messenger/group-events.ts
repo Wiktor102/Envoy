@@ -3,7 +3,7 @@
 // the group-intro convention: structure only (tags, roles, attributes), never
 // classes, image URLs, or notice wording. Real messages carry message metadata
 // and use h4, not h3. A miss fails safe to unknown direction, never hides content.
-export function isDirectIntro(scope: Element): boolean {
+function isDirectIntro(scope: Element): boolean {
 	return (
 		scope.matches('[data-scope="messages_table"][data-release-focus-from="CLICK"][tabindex]') &&
 		!scope.matches("[data-message-id], [aria-roledescription], [data-message-type], [data-attachment-type]") &&
@@ -20,7 +20,7 @@ export function isThreadIntro(scope: Element): boolean {
 	return isGroupIntro(scope) || isDirectIntro(scope);
 }
 
-export function isGroupIntro(scope: Element): boolean {
+function isGroupIntro(scope: Element): boolean {
 	return (
 		scope.matches('[data-scope="messages_table"][data-release-focus-from="CLICK"][tabindex]') &&
 		!scope.matches("[data-message-id], [aria-roledescription]") &&
