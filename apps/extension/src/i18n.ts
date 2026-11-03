@@ -315,6 +315,7 @@ const en: ExtensionStrings = {
 		latest_quotes_image: "The latest message quotes an image Envoy cannot read. Take over to reply yourself.",
 		latest_quotes_media: "The latest message quotes media Envoy cannot read. Take over to reply yourself.",
 		considering_conversation: "Considering the conversation.",
+		checking_if_task_complete: "Checking if the task is complete.",
 		model_no_decision: "The model could not produce a decision. Check its configuration and resume.",
 		model_key_missing: "Set MODEL_API_KEY on the backend and resume.",
 		model_invalid_reply: "The model returned an invalid reply. Check the conversation.",
@@ -498,6 +499,7 @@ const pl: ExtensionStrings = {
 		latest_quotes_media:
 			"Najnowsza wiadomość cytuje multimedia, których Envoy nie odczytuje. Przejmij, aby odpowiedzieć samodzielnie.",
 		considering_conversation: "Analizowanie rozmowy.",
+		checking_if_task_complete: "Sprawdzanie, czy zadanie jest ukończone.",
 		model_no_decision: "Model nie zwrócił decyzji. Sprawdź jego konfigurację i wznów.",
 		model_key_missing: "Ustaw MODEL_API_KEY w backendzie i wznów.",
 		model_invalid_reply: "Model zwrócił nieprawidłową odpowiedź. Sprawdź rozmowę.",

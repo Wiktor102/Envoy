@@ -223,6 +223,7 @@ export type TaskDetailCode =
 	| "latest_quotes_image"
 	| "latest_quotes_media"
 	| "considering_conversation"
+	| "checking_if_task_complete"
 	| "model_no_decision"
 	| "model_key_missing"
 	| "model_invalid_reply"
