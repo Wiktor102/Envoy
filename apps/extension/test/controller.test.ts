@@ -875,10 +875,15 @@ for (const status of ["taken_over", "completed"] as const) {
 test("Send now during an in-flight claiming sync still sends the reply", { timeout: 5000 }, async (t) => {
 	let time = 1_000;
 	let agentCalls = 0;
+	let checkedAfterSend = false;
 	const service = new TaskService(
 		{
-			async run() {
+			async run(_task, _snapshot, reason) {
 				agentCalls++;
+				if (reason === "reply_sent") {
+					checkedAfterSend = true;
+					return { action: "wait" as const };
+				}
 				return { action: "reply", text: "Tuesday works." };
 			},
 		},
@@ -927,5 +932,7 @@ test("Send now during an in-flight claiming sync still sends the reply", { timeo
 	await sendNow;
 	for (let turn = 0; turn < 10 && harness.sent === 0; turn++) await flush();
 	assert.equal(harness.sent, 1);
-	assert.equal(agentCalls, 1);
+	for (let turn = 0; turn < 10 && !checkedAfterSend; turn++) await flush();
+	assert.equal(checkedAfterSend, true);
+	assert.equal(agentCalls, 2);
 });
