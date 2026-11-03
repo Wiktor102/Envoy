@@ -525,6 +525,19 @@ textarea:disabled,
 	grid-column: 1 / -1;
 }
 
+.reply-controls button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+}
+
+.reply-controls button svg {
+	width: 14px;
+	height: 14px;
+	flex: none;
+}
+
 .primary:not(:disabled) {
 	background: var(--envoy-primary);
 	color: var(--envoy-on-primary);
@@ -759,6 +772,47 @@ summary .hint {
 	padding: 12px;
 	border: 1px solid var(--envoy-control-border);
 	border-radius: 12px;
+}
+
+.pending-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.pending-header h3 {
+	margin: 0;
+}
+
+.ghost-btn {
+	min-height: 0;
+	padding: 4px 10px;
+	border-color: var(--envoy-control-border);
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.ghost-btn,
+#envoy-regenerate-waiting {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.ghost-btn svg {
+	width: 13px;
+	height: 13px;
+}
+
+#envoy-regenerate-waiting {
+	margin-top: 8px;
+}
+
+#envoy-regenerate-waiting svg {
+	width: 14px;
+	height: 14px;
 }
 
 #envoy-pending-text {

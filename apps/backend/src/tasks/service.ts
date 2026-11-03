@@ -293,6 +293,41 @@ export class TaskService {
 				);
 				break;
 			}
+			case "regenerate": {
+				const cancelledWaiting = task.status === "waiting" && task.detail?.code === "reply_cancelled_waiting";
+				if (!((task.status === "pending" || task.status === "editing") && task.pendingReply) && !cancelledWaiting) {
+					throw new Error("There is no reply to regenerate.");
+				}
+				if (this.hasAwaitingRetiredResult() || this.requiresVerification) {
+					throw new Error("A previous send is still being checked. Try again shortly.");
+				}
+				const snapshot = this.connector.readConversation();
+				if (!this.leaseActive() || !snapshot || snapshot.chatId !== task.chatId) {
+					throw new Error("Reconnect the agent tab to the original conversation first.");
+				}
+				const rejected = task.pendingReply?.text ?? null;
+				const uncertain = this.invalidate(true);
+				if (uncertain) {
+					task.pendingReply = null;
+					task.status = "needs_user";
+					task.detail = { code: "send_may_have_completed_before_resuming" };
+					this.appendAgentChat("event", "Regenerate requested; the send may have completed.");
+					break;
+				}
+				if (rejected)
+					this.appendAgentChat("event", "Previous proposal discarded; drafting a fresh alternative.", rejected);
+				else this.appendAgentChat("event", "Regenerating a fresh proposal.");
+				this.autoCountdown = null;
+				this.processedRevisions.delete(snapshot.revision);
+				this.suppressedRevisions.delete(snapshot.revision);
+				this.suppressedContexts.delete(textContext(snapshot));
+				this.evaluationReason = "regenerate_requested";
+				task.pendingReply = null;
+				task.status = "waiting";
+				task.detail = null;
+				this.maybeGenerate();
+				break;
+			}
 			case "pause": {
 				if (isTaskEnded(task.status)) throw new Error("This task has ended.");
 				const discarded = task.pendingReply;

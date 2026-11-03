@@ -179,6 +179,7 @@ const actions: readonly TaskControlAction[] = [
 	"edit",
 	"save-edit",
 	"cancel",
+	"regenerate",
 	"pause",
 	"resume",
 	"take-over",

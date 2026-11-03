@@ -82,6 +82,7 @@ export interface ExtensionStrings {
 	replyControls: string;
 	sendNow: string;
 	edit: string;
+	regenerate: string;
 	cancelReply: string;
 	cancel: string;
 	reconnect: string;
@@ -198,6 +199,7 @@ const en: ExtensionStrings = {
 	replyControls: "Reply controls",
 	sendNow: "Send now",
 	edit: "Edit",
+	regenerate: "Try again",
 	cancelReply: "Cancel reply",
 	cancel: "Cancel",
 	reconnect: "Reconnect",
@@ -379,6 +381,7 @@ const pl: ExtensionStrings = {
 	replyControls: "Sterowanie odpowiedzią",
 	sendNow: "Wyślij teraz",
 	edit: "Edytuj",
+	regenerate: "Spróbuj ponownie",
 	cancelReply: "Anuluj",
 	cancel: "Anuluj",
 	reconnect: "Połącz ponownie",

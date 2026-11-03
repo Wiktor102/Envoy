@@ -263,7 +263,16 @@ export interface ConnectorSyncResult {
 export type SendResult = "sent" | "rejected" | "uncertain";
 
 export type TaskControlAction =
-	"send-now" | "edit" | "save-edit" | "cancel" | "pause" | "resume" | "take-over" | "update-goal" | "answer-agent";
+	| "send-now"
+	| "edit"
+	| "save-edit"
+	| "cancel"
+	| "regenerate"
+	| "pause"
+	| "resume"
+	| "take-over"
+	| "update-goal"
+	| "answer-agent";
 
 export interface HealthRequest {
 	type: "envoy:health";

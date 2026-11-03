@@ -154,6 +154,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	const sendButton = element<HTMLButtonElement>("#envoy-send-now");
 	const editButton = element<HTMLButtonElement>("#envoy-edit");
 	const cancelButton = element<HTMLButtonElement>("#envoy-cancel");
+	const regenerateButton = element<HTMLButtonElement>("#envoy-regenerate");
+	const regenerateWaitingButton = element<HTMLButtonElement>("#envoy-regenerate-waiting");
 	const pauseButton = element<HTMLButtonElement>("#envoy-pause");
 	const resumeButton = element<HTMLButtonElement>("#envoy-resume");
 	const reconnectButton = element<HTMLButtonElement>("#envoy-reconnect");
@@ -557,6 +559,14 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		sendButton.disabled = busy || !canSendReply;
 		editButton.disabled = busy || !canEditReply;
 		cancelButton.disabled = busy || !canCancelReply;
+		const canRegenerateDraft =
+			owner && currentChat && !!pending && (task?.status === "pending" || task?.status === "editing");
+		regenerateButton.hidden = !canRegenerateDraft;
+		regenerateButton.disabled = busy || !canRegenerateDraft;
+		const canRegenerateWaiting =
+			owner && currentChat && task?.status === "waiting" && (task.detail?.code ?? null) === "reply_cancelled_waiting";
+		regenerateWaitingButton.hidden = !canRegenerateWaiting;
+		regenerateWaitingButton.disabled = busy || !canRegenerateWaiting;
 		editHint.textContent = `${strings.saveEditNote} ${countText(editText.value)}`;
 		saveEditButton.disabled = busy || !editing || !editText.value.trim() || isOverLimit(editText.value);
 		editText.disabled = busy;
@@ -667,6 +677,8 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 		[editButton, "edit"],
 		[cancelButton, "cancel"],
 		[cancelThinking, "cancel"],
+		[regenerateButton, "regenerate"],
+		[regenerateWaitingButton, "regenerate"],
 		[pauseButton, "pause"],
 		[resumeButton, "resume"],
 		[takeoverButton, "take-over"],
