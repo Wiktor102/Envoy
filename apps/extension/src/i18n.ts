@@ -309,7 +309,7 @@ const pl: ExtensionStrings = {
 	replyControls: "Sterowanie odpowiedzią",
 	sendNow: "Wyślij teraz",
 	edit: "Edytuj",
-	cancelReply: "Anuluj odpowiedź",
+	cancelReply: "Anuluj",
 	cancel: "Anuluj",
 	reconnect: "Połącz ponownie",
 	answerEnvoy: "Odpowiedz Envoy",
