@@ -234,9 +234,26 @@
 				role="group"
 				hidden
 			>
-				<button type="button" id="envoy-send-now" class="primary" data-i18n="sendNow">Send now</button>
-				<button type="button" id="envoy-edit" data-i18n="edit">Edit</button>
-				<button type="button" id="envoy-cancel" data-i18n="cancelReply">Cancel reply</button>
+				<button type="button" id="envoy-send-now" class="primary">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+						<line x1="22" y1="2" x2="11" y2="13" />
+						<polygon points="22 2 15 22 11 13 2 9 22 2" />
+					</svg>
+					<span data-i18n="sendNow">Send now</span>
+				</button>
+				<button type="button" id="envoy-edit">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+						<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+					</svg>
+					<span data-i18n="edit">Edit</span>
+				</button>
+				<button type="button" id="envoy-cancel">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+						<line x1="18" y1="6" x2="6" y2="18" />
+						<line x1="6" y1="6" x2="18" y2="18" />
+					</svg>
+					<span data-i18n="cancelReply">Cancel reply</span>
+				</button>
 			</div>
 		</div>
 		<p id="envoy-agent-state" class="agent-state" role="status" hidden></p>

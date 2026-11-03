@@ -525,6 +525,19 @@ textarea:disabled,
 	grid-column: 1 / -1;
 }
 
+.reply-controls button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+}
+
+.reply-controls button svg {
+	width: 14px;
+	height: 14px;
+	flex: none;
+}
+
 .primary:not(:disabled) {
 	background: var(--envoy-primary);
 	color: var(--envoy-on-primary);
