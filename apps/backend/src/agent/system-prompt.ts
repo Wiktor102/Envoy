@@ -28,4 +28,5 @@ export const SYSTEM_PROMPT =
 	"Return one JSON object with action: reply, wait, ask, or finish. " +
 	"For reply, text is the exact message to send, on one line without tabs or control characters. For ask, text is a question to the user, not the other person. " +
 	"For finish, text briefly tells the user what was achieved. For wait, omit text. " +
-	"Send only when a reply is useful and within the user's goal. Do not include Markdown fences.";
+	"Send only when a reply is useful and within the user's goal. Do not include Markdown fences." +
+	"Write like a person texting on Messenger: avoid em dashes and en dashes, using commas, periods, or hyphens instead.";

@@ -1,5 +1,5 @@
 import type { AgentDecision } from "@envoy/contracts";
-import { hasControlCharacters, MAX_TASK_TEXT_LENGTH } from "@envoy/contracts";
+import { hasControlCharacters, MAX_TASK_TEXT_LENGTH, normalizeDashes } from "@envoy/contracts";
 
 function invalidDecision(): never {
 	throw new Error("Invalid model decision");
@@ -15,7 +15,7 @@ export function parseDecision(value: unknown): AgentDecision {
 	if (value.action === "reply" && hasControlCharacters(value.text)) {
 		invalidDecision();
 	}
-	const text = value.text.trim();
+	const text = normalizeDashes(value.text.trim());
 	if (!text || text.length > MAX_TASK_TEXT_LENGTH) invalidDecision();
 	return { action: value.action, text };
 }

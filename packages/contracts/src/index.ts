@@ -140,6 +140,13 @@ export function hasControlCharacters(text: string): boolean {
 	return /[\u0000-\u001f\u007f\u2028\u2029]/u.test(text);
 }
 
+// Model output reads human on Messenger without em/en dashes, which real
+// people texting there almost never type. Replace each dash with a hyphen,
+// leaving surrounding spacing untouched: "word — word" becomes "word - word".
+export function normalizeDashes(text: string): string {
+	return text.replace(/[—–]/g, "-");
+}
+
 export interface SendReplyCommand {
 	commandId: string;
 	chatId: string;
