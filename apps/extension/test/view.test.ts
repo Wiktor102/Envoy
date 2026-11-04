@@ -276,6 +276,15 @@ test("settings popover holds the reply settings and the developer switch", async
 	assert.equal(ui.element("settings-popover").hidden, true);
 });
 
+test("settings popover sits outside the scrolling panel so chat scroll cannot clip it", (t) => {
+	const ui = setup(t);
+	const popover = ui.element("settings-popover");
+	const panel = ui.element("panel");
+	const toolbar = ui.query(".toolbar");
+	assert.equal(panel.contains(popover), false);
+	assert.equal(toolbar.contains(popover), true);
+});
+
 test("developer switch remembers both choices across remounts and stays outside tab navigation", async (t) => {
 	const storage = preferenceStorage();
 	const ui = setup(t, storage);
