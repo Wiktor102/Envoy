@@ -2,7 +2,7 @@
 
 # Envoy
 
-Envoy is an experimental Messenger agent built for the Meta Global AI Developer Hackathon. Give it a goal and limits for one private conversation. It reads the messages loaded in a dedicated Messenger tab, asks Meta Model API what to do, and can propose a reply. By default it sends after a short countdown unless you step in.
+Envoy is an experimental Messenger agent built for the Meta Global AI Developer Hackathon. Give it a goal and limits for conversations in private chat and groups. It reads the messages loaded in a dedicated Messenger tab, asks Meta Muse Spark 1.3 (`muse-spark-1.3`, through Meta Model API) what to do, and can propose a reply. By default it sends after a short countdown unless you step in.
 
 Messenger's DOM is not a stable API. Envoy deliberately stops when it cannot identify the chat, sender, newest messages, or composer confidently. Its panel and Messenger label matching cover English and Polish only, and selectors may need adjusting for a particular account or UI version.
 
@@ -50,22 +50,3 @@ The extension sends the chosen chat's loaded context and your instructions to th
 Tasks exist only in backend memory, so restarting the backend deletes them and any pending send. Ended tasks are deleted after one hour unless a send needs verification; **Delete task** removes one sooner.
 
 The backend listens on `127.0.0.1:3001`. The extension hardcodes that address, so keep the default `HOST` and `PORT`. It rejects ordinary web page origins, but local programs and installed extensions are not authenticated, so do not expose it to a network.
-
-## Checks
-
-```sh
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm format:check
-```
-
-Tests use synthetic Messenger DOM fixtures and a fake agent, so they do not replace a live integration test. `pnpm health` checks the running development backend and `pnpm health:prod` the production one.
-
-## Workspace layout
-
-| Workspace            | Contents                                                                                      |
-| -------------------- | --------------------------------------------------------------------------------------------- |
-| `packages/contracts` | Browser-neutral task, conversation, and send contracts                                        |
-| `apps/backend`       | Meta Model API adapter, in-memory task service, connector boundary, and tRPC WebSocket server |
-| `apps/extension`     | Messenger DOM reader and sender, background transport, and injected sidebar controls          |
