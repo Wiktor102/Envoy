@@ -1687,3 +1687,37 @@ test("remounts, partial history, and already-edited messages never invent edits"
 	assert.equal(correctionsIn(service.sync("owner", captioned).task), 0);
 	assert.equal(editedReasons(), 0);
 });
+
+test("answering after cancel triggers one fresh evaluation without a new message", async () => {
+	const { agent, service } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	assert.equal(service.control("owner", task.id, "cancel").status, "waiting");
+	service.sync("owner", snapshot());
+	assert.equal(agent.calls.length, 1);
+	const answered = service.control("owner", task.id, "answer-agent", "Ask about sport instead.");
+	assert.equal(answered.status, "thinking");
+	assert.equal(agent.calls.length, 2);
+	assert.equal(agent.calls[1]!.reason, "instructions_updated");
+	agent.calls[1]!.resolve({ action: "wait" });
+	await Promise.resolve();
+	assert.equal(service.sync("owner", snapshot()).task?.status, "waiting");
+	assert.equal(agent.calls.length, 2);
+});
+
+test("updating instructions after cancel triggers one fresh evaluation without a new message", async () => {
+	const { agent, service } = setup();
+	const task = service.start("owner", "Arrange a meeting", snapshot());
+	await resolveReply(agent);
+	assert.equal(service.control("owner", task.id, "cancel").status, "waiting");
+	service.sync("owner", snapshot());
+	assert.equal(agent.calls.length, 1);
+	const updated = service.control("owner", task.id, "update-goal", "Ask about lunch instead.");
+	assert.equal(updated.status, "thinking");
+	assert.equal(agent.calls.length, 2);
+	assert.equal(agent.calls[1]!.reason, "instructions_updated");
+	agent.calls[1]!.resolve({ action: "wait" });
+	await Promise.resolve();
+	assert.equal(service.sync("owner", snapshot()).task?.status, "waiting");
+	assert.equal(agent.calls.length, 2);
+});

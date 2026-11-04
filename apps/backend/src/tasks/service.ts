@@ -394,6 +394,11 @@ export class TaskService {
 					break;
 				}
 				this.processedRevisions.clear();
+				const current = this.connector.readConversation();
+				if (current && current.chatId === task.chatId) {
+					this.suppressedRevisions.delete(current.revision);
+					this.suppressedContexts.delete(textContext(current));
+				}
 				this.evaluationReason = "instructions_updated";
 				if (task.status === "paused") break;
 				task.status = "waiting";
