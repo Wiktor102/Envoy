@@ -209,7 +209,18 @@
 		<ol id="envoy-agent-messages" aria-label="Conversation with Envoy" data-i18n-aria-label="conversationWithEnvoy"></ol>
 		<div id="envoy-pending" class="pending-reply" hidden>
 			<div class="pending-header">
-				<h3 data-i18n="proposedReply">Proposed reply</h3>
+				<h3>
+					<img
+						class="pending-logo"
+						data-envoy-logo="pending"
+						src=""
+						alt=""
+						aria-hidden="true"
+						width="16"
+						height="16"
+					/>
+					<span data-i18n="proposedReply">Proposed reply</span>
+				</h3>
 				<button type="button" id="envoy-regenerate" class="ghost-btn" hidden>
 					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 						<path d="M21 12a9 9 0 1 1-2.64-6.36" />

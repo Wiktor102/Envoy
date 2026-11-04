@@ -861,3 +861,29 @@ summary .hint {
 #envoy-health-status:empty {
 	display: none;
 }
+
+/* Envoy brand mark. Sizes match each slot; the art is a fixed 128px inline PNG. */
+.pending-header h3 {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.pending-logo {
+	width: 16px;
+	height: 16px;
+	flex: none;
+}
+
+#envoy-agent-messages .agent-sender {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.agent-avatar {
+	width: 14px;
+	height: 14px;
+	flex: none;
+	border-radius: 3px;
+}

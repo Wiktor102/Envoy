@@ -1,3 +1,5 @@
+<img src="assets/envoy-logo.png" alt="Envoy logo" width="128" height="128" />
+
 # Envoy
 
 Envoy is an experimental Messenger agent built for the Meta Global AI Developer Hackathon. Give it a goal and limits for one private text conversation. It reads the messages loaded in a dedicated Messenger tab, asks Meta Model API what to do, and can propose a reply. The backend owns the task and a default 10-second countdown. You can edit, regenerate, or cancel a reply, pause the task, or take over.
