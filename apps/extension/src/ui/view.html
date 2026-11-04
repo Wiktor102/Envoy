@@ -1,9 +1,15 @@
 <div class="toolbar">
 	<div class="tabs" role="tablist" aria-label="Chats sidebar" data-i18n-aria-label="tabsLabel">
 		<button type="button" role="tab" id="chats-tab" aria-selected="true" data-i18n="chatsTab">Chats</button>
-		<button type="button" role="tab" id="envoy-tab" aria-selected="false" aria-controls="envoy-panel">
-			<img class="tab-logo" data-envoy-logo="tab" src="" alt="" aria-hidden="true" width="16" height="16" />
-			<span data-i18n="envoyTab">Envoy</span>
+		<button
+			type="button"
+			role="tab"
+			id="envoy-tab"
+			aria-selected="false"
+			aria-controls="envoy-panel"
+			data-i18n="envoyTab"
+		>
+			Envoy
 		</button>
 	</div>
 	<button
@@ -87,7 +93,6 @@
 </div>
 <div id="envoy-panel" role="tabpanel" aria-labelledby="envoy-tab" tabindex="0" hidden>
 	<header id="envoy-header">
-		<img class="header-logo" data-envoy-logo="header" src="" alt="" aria-hidden="true" width="24" height="24" />
 		<div class="header-main">
 			<button
 				type="button"
@@ -209,20 +214,9 @@
 	</section>
 	<section id="envoy-thread" aria-label="Conversation with Envoy" data-i18n-aria-label="conversationWithEnvoy" hidden>
 		<p id="envoy-task-notice" class="hint" role="status" hidden></p>
-		<div class="agent-empty-wrap">
-			<img
-				class="agent-empty-logo"
-				data-envoy-logo="agent-empty"
-				src=""
-				alt=""
-				aria-hidden="true"
-				width="32"
-				height="32"
-			/>
-			<p id="envoy-agent-empty" class="hint" data-i18n="agentEmpty">
-				Envoy's questions and your answers will appear here.
-			</p>
-		</div>
+		<p id="envoy-agent-empty" class="hint" data-i18n="agentEmpty">
+			Envoy's questions and your answers will appear here.
+		</p>
 		<ol id="envoy-agent-messages" aria-label="Conversation with Envoy" data-i18n-aria-label="conversationWithEnvoy"></ol>
 		<div id="envoy-pending" class="pending-reply" hidden>
 			<div class="pending-header">

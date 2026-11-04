@@ -863,24 +863,6 @@ summary .hint {
 }
 
 /* Envoy brand mark. Sizes match each slot; the art is a fixed 128px inline PNG. */
-.tabs button {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-}
-
-.tab-logo {
-	width: 16px;
-	height: 16px;
-	flex: none;
-}
-
-.header-logo {
-	width: 24px;
-	height: 24px;
-	flex: none;
-}
-
 .instructions-heading {
 	display: flex;
 	align-items: center;
@@ -896,24 +878,6 @@ summary .hint {
 	width: 20px;
 	height: 20px;
 	flex: none;
-}
-
-.agent-empty-wrap {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 4px;
-	margin: 8px 0;
-	text-align: center;
-}
-
-.agent-empty-wrap .hint {
-	margin: 0;
-}
-
-.agent-empty-logo {
-	width: 32px;
-	height: 32px;
 }
 
 .pending-header h3 {
