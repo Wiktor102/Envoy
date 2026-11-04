@@ -1,5 +1,6 @@
 import type { AgentChatMessage } from "@envoy/contracts";
 import type { ExtensionStrings } from "../i18n";
+import { ENVOY_LOGO_DATA_URI } from "./logo";
 import { makeSender, makeText } from "./view-format";
 
 export function createAgentChat(list: HTMLOListElement) {
@@ -42,7 +43,19 @@ export function createAgentChat(list: HTMLOListElement) {
 					item.append(details);
 				} else {
 					if (message.role !== "event") {
-						item.append(makeSender(message.role === "agent" ? strings.agentName : strings.you));
+						const sender = makeSender(message.role === "agent" ? strings.agentName : strings.you);
+						if (message.role === "agent") {
+							sender.classList.add("agent-sender");
+							const avatar = document.createElement("img");
+							avatar.className = "agent-avatar";
+							avatar.src = ENVOY_LOGO_DATA_URI;
+							avatar.alt = "";
+							avatar.setAttribute("aria-hidden", "true");
+							avatar.width = 14;
+							avatar.height = 14;
+							sender.prepend(avatar);
+						}
+						item.append(sender);
 					}
 					const text = makeText();
 					text.textContent = message.text;

@@ -3,6 +3,7 @@ import type { ControllerState, EnvoyController } from "../controller";
 import { detectLocale, format, getStrings, observeLocaleChange } from "../i18n";
 import { createAgentChat } from "./agent-chat";
 import { createConversationPreview } from "./conversation-preview";
+import { ENVOY_LOGO_DATA_URI } from "./logo";
 import { createSettingsPanel } from "./settings-panel";
 import { renderTaskControls } from "./task-controls";
 import { isolateTextInput } from "./text-input";
@@ -34,6 +35,10 @@ export function createEnvoyView(onSelectionChange: () => void, controller: Envoy
 	style.textContent = styles;
 	const container = document.createElement("div");
 	container.innerHTML = markup;
+	// Brand mark is inlined so the shadow DOM needs no extension resource URL.
+	for (const logo of container.querySelectorAll<HTMLImageElement>("img[data-envoy-logo]")) {
+		logo.src = ENVOY_LOGO_DATA_URI;
+	}
 	shadow.append(style, container);
 
 	let strings = getStrings(detectLocale());
