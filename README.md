@@ -2,7 +2,7 @@
 
 # Envoy
 
-Envoy is an experimental Messenger agent built for the Meta Global AI Developer Hackathon. Give it a goal and limits for conversations in private chat and groups. It reads the messages loaded in a dedicated Messenger tab, asks Meta Muse Spark 1.3 (`muse-spark-1.3`, through Meta Model API) what to do, and can propose a reply. By default it sends after a short countdown unless you step in.
+Envoy is an experimental Messenger agent built for the Meta Global AI Developer Hackathon. Give it a goal and limits for conversations in private chats and groups. It reads the messages loaded in a Messenger tab, asks Meta Muse Spark 1.3 ( through Meta Model API ) what to do, and can propose a reply. By default it sends after a short countdown unless you step in.
 
 Messenger's DOM is not a stable API. Envoy deliberately stops when it cannot identify the chat, sender, newest messages, or composer confidently. Its panel and Messenger label matching cover English and Polish only, and selectors may need adjusting for a particular account or UI version.
 
